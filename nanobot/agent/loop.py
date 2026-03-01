@@ -188,14 +188,27 @@ class AgentLoop:
         while iteration < self.max_iterations:
             iteration += 1
 
-            response = await self.provider.chat(
-                messages=messages,
-                tools=self.tools.get_definitions(),
-                model=self.model,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-                reasoning_effort=self.reasoning_effort,
-            )
+            try:
+                response = await self.provider.chat(
+                    messages=messages,
+                    tools=self.tools.get_definitions(),
+                    model=self.model,
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens,
+                    reasoning_effort=self.reasoning_effort,
+                )
+            except Exception as e:
+                import traceback
+                logger.error("Exception in provider.chat: {}", str(e))
+                logger.error("Traceback:\n{}", traceback.format_exc())
+                # Return error response
+                response = type('obj', (object,), {
+                    'content': f"Error: {str(e)}",
+                    'finish_reason': 'error',
+                    'has_tool_calls': False,
+                    'tool_calls': []
+                })()
+
 
             if response.has_tool_calls:
                 if on_progress:

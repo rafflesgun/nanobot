@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import random
 import re
 
 from loguru import logger
 from telegram import BotCommand, ReplyParameters, Update
+try:
+    from telegram import ReactionTypeEmoji
+    HAS_REACTION_TYPE = True
+except ImportError:
+    HAS_REACTION_TYPE = False
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
@@ -14,6 +20,15 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import TelegramConfig
+
+
+# ACK reaction emojis pool
+TELEGRAM_ACK_REACTIONS = ["⚡️", "👌", "👀", "🔥", "👍"]
+
+
+def _random_ack_reaction() -> str:
+    """Return a random emoji from the ACK reactions pool."""
+    return random.choice(TELEGRAM_ACK_REACTIONS)
 
 
 def _markdown_to_telegram_html(text: str) -> str:
@@ -341,6 +356,9 @@ class TelegramChannel(BaseChannel):
         # Store chat_id for replies
         self._chat_ids[sender_id] = chat_id
 
+        # Add ACK reaction to acknowledge message receipt
+        await self._add_ack_reaction(chat_id, message.message_id)
+
         # Build content from text and/or media
         content_parts = []
         media_paths = []
@@ -462,6 +480,33 @@ class TelegramChannel(BaseChannel):
             )
         finally:
             self._media_group_tasks.pop(key, None)
+
+    async def _add_ack_reaction(self, chat_id: int, message_id: int) -> None:
+        """Add a random emoji reaction to acknowledge message receipt (non-blocking)."""
+        if not self._app:
+            return
+
+        try:
+            emoji = _random_ack_reaction()
+            if HAS_REACTION_TYPE:
+                await self._app.bot.set_message_reaction(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    reaction=[ReactionTypeEmoji(emoji)],
+                    is_big=False
+                )
+            else:
+                # Fallback for older versions
+                await self._app.bot.set_message_reaction(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    reaction=[{"type": "emoji", "emoji": emoji}],
+                    is_big=False
+                )
+            logger.debug("Added ACK reaction {} to message {}", emoji, message_id)
+        except Exception as e:
+            # Reactions might not be supported in all chats, so just log at debug level
+            logger.debug("Failed to add ACK reaction to message {}: {}", message_id, e)
 
     def _start_typing(self, chat_id: str) -> None:
         """Start sending 'typing...' indicator for a chat."""
