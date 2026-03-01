@@ -201,13 +201,13 @@ class AgentLoop:
                 import traceback
                 logger.error("Exception in provider.chat: {}", str(e))
                 logger.error("Traceback:\n{}", traceback.format_exc())
-                # Return error response
-                response = type('obj', (object,), {
-                    'content': f"Error: {str(e)}",
-                    'finish_reason': 'error',
-                    'has_tool_calls': False,
-                    'tool_calls': []
-                })()
+                # Return error response using LLMResponse
+                from nanobot.providers.base import LLMResponse
+                response = LLMResponse(
+                    content=f"Error: {str(e)}",
+                    finish_reason='error',
+                    tool_calls=[]
+                )
 
 
             if response.has_tool_calls:
