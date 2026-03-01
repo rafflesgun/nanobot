@@ -31,11 +31,31 @@ class CustomProvider(LLMProvider):
         if tools:
             kwargs.update(tools=tools, tool_choice="auto")
         try:
-            return self._parse(await self._client.chat.completions.create(**kwargs))
+            response = await self._client.chat.completions.create(**kwargs)
+            print(f"=== CustomProvider Response ===")
+            print(f"Response Type: {type(response)}")
+            print(f"Response: {response}")
+            if hasattr(response, "__dict__"):
+                print(f"Response Dict: {response.__dict__}")
+            return self._parse(response)
         except Exception as e:
+            import traceback
+            print(f"=== CustomProvider Exception ===")
+            print(f"Exception: {e}")
+            print(f"Traceback:\n{traceback.format_exc()}")
             return LLMResponse(content=f"Error: {e}", finish_reason="error")
 
     def _parse(self, response: Any) -> LLMResponse:
+        # Validate response structure
+        if not response:
+            return LLMResponse(content="Error: Empty response from API", finish_reason="error")
+        
+        if not hasattr(response, 'choices') or not response.choices:
+            error_msg = f"Error: Invalid API response structure. Response: {response}"
+            if hasattr(response, 'error'):
+                error_msg = f"Error: {response.error}"
+            return LLMResponse(content=error_msg, finish_reason="error")
+        
         choice = response.choices[0]
         msg = choice.message
         tool_calls = [
