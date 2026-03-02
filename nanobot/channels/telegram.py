@@ -143,6 +143,7 @@ class TelegramChannel(BaseChannel):
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
+        self._thinking_messages: dict[str, int] = {}  # chat_id -> thinking message_id for editing
         self._media_group_buffers: dict[str, dict] = {}
         self._media_group_tasks: dict[str, asyncio.Task] = {}
 
@@ -247,6 +248,15 @@ class TelegramChannel(BaseChannel):
         except ValueError:
             logger.error("Invalid chat_id: {}", msg.chat_id)
             return
+
+        # Check if there's a thinking message to delete
+        thinking_msg_id = self._thinking_messages.pop(msg.chat_id, None)
+        if thinking_msg_id:
+            try:
+                await self._app.bot.delete_message(chat_id=chat_id, message_id=thinking_msg_id)
+                logger.debug("Deleted thinking message {}", thinking_msg_id)
+            except Exception as e:
+                logger.debug("Failed to delete thinking message: {}", e)
 
         reply_params = None
         if self.config.reply_to_message:
@@ -387,6 +397,9 @@ class TelegramChannel(BaseChannel):
 
         # Add ACK reaction to acknowledge message receipt
         await self._add_ack_reaction(chat_id, message.message_id)
+        
+        # Send thinking message for private chats only
+        await self._send_thinking_message(chat_id, is_group)
 
         # Build content from text and/or media
         content_parts = []
@@ -536,6 +549,22 @@ class TelegramChannel(BaseChannel):
         except Exception as e:
             # Reactions might not be supported in all chats, so just log at debug level
             logger.debug("Failed to add ACK reaction to message {}: {}", message_id, e)
+
+    async def _send_thinking_message(self, chat_id: int, is_group: bool) -> None:
+        """Send a 'Thinking...' placeholder message in private chats only."""
+        if not self._app or is_group:
+            return
+        
+        try:
+            str_chat_id = str(chat_id)
+            thinking_msg = await self._app.bot.send_message(
+                chat_id=chat_id,
+                text="💭 Thinking..."
+            )
+            self._thinking_messages[str_chat_id] = thinking_msg.message_id
+            logger.debug("Sent thinking message {} to chat {}", thinking_msg.message_id, chat_id)
+        except Exception as e:
+            logger.debug("Failed to send thinking message: {}", e)
 
     def _start_typing(self, chat_id: str) -> None:
         """Start sending 'typing...' indicator for a chat."""
