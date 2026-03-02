@@ -31,7 +31,7 @@ class TelegramConfig(Base):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs or usernames
     proxy: str | None = None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
     reply_to_message: bool = False  # If true, bot replies quote the original message
-    mention_only_in_groups: bool = False  # If true, bot only responds when mentioned in group chats
+    group_policy: Literal["open", "mention"] = "open"  # "open" = respond to all, "mention" = only when mentioned/replied
 
 
 class FeishuConfig(Base):

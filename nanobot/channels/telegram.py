@@ -364,8 +364,8 @@ class TelegramChannel(BaseChannel):
         sender_id = self._sender_id(user)
         is_group = message.chat.type != "private"
 
-        # Check if mention_only_in_groups is enabled and this is a group chat
-        if self.config.mention_only_in_groups and is_group:
+        # Check group_policy for group chats
+        if self.config.group_policy == "mention" and is_group:
             # Check if bot is mentioned in the message
             bot_mentioned = False
             
@@ -389,7 +389,7 @@ class TelegramChannel(BaseChannel):
             
             # If bot is not mentioned, ignore the message
             if not bot_mentioned:
-                logger.debug("Ignoring group message - bot not mentioned")
+                logger.debug("Ignoring group message - bot not mentioned (group_policy=mention)")
                 return
 
         # Store chat_id for replies
