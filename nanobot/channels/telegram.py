@@ -352,6 +352,35 @@ class TelegramChannel(BaseChannel):
         user = update.effective_user
         chat_id = message.chat_id
         sender_id = self._sender_id(user)
+        is_group = message.chat.type != "private"
+
+        # Check if mention_only_in_groups is enabled and this is a group chat
+        if self.config.mention_only_in_groups and is_group:
+            # Check if bot is mentioned in the message
+            bot_mentioned = False
+            
+            # Check for @username mentions
+            if message.entities:
+                for entity in message.entities:
+                    if entity.type == "mention" and message.text:
+                        mention_text = message.text[entity.offset:entity.offset + entity.length]
+                        if self._app and mention_text == f"@{(await self._app.bot.get_me()).username}":
+                            bot_mentioned = True
+                            break
+                    elif entity.type == "text_mention" and entity.user:
+                        if self._app and entity.user.id == (await self._app.bot.get_me()).id:
+                            bot_mentioned = True
+                            break
+            
+            # Check if message is a reply to bot's message
+            if message.reply_to_message and self._app:
+                if message.reply_to_message.from_user.id == (await self._app.bot.get_me()).id:
+                    bot_mentioned = True
+            
+            # If bot is not mentioned, ignore the message
+            if not bot_mentioned:
+                logger.debug("Ignoring group message - bot not mentioned")
+                return
 
         # Store chat_id for replies
         self._chat_ids[sender_id] = chat_id
@@ -462,7 +491,7 @@ class TelegramChannel(BaseChannel):
                 "user_id": user.id,
                 "username": user.username,
                 "first_name": user.first_name,
-                "is_group": message.chat.type != "private"
+                "is_group": is_group
             }
         )
 
