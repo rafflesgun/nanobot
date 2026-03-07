@@ -359,6 +359,7 @@ def gateway(
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
         enabled = set(channels.enabled_channels)
         # Prefer the most recently updated non-internal session on an enabled channel.
+        # Skip group chats and topic sub-sessions so heartbeat only goes to DMs.
         for item in session_manager.list_sessions():
             key = item.get("key") or ""
             if ":" not in key:
@@ -366,6 +367,16 @@ def gateway(
             channel, chat_id = key.split(":", 1)
             if channel in {"cli", "system"}:
                 continue
+            # Skip topic sub-sessions (e.g. "telegram:-100789:42")
+            if ":" in chat_id:
+                continue
+            # Skip Telegram group chats (negative chat IDs)
+            if channel == "telegram":
+                try:
+                    if int(chat_id) < 0:
+                        continue
+                except ValueError:
+                    pass
             if channel in enabled and chat_id:
                 return channel, chat_id
         # Fallback keeps prior behavior but remains explicit.
