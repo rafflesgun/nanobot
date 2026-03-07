@@ -42,6 +42,7 @@ class ChannelManager:
                     self.config.channels.telegram,
                     self.bus,
                     groq_api_key=self.config.providers.groq.api_key,
+                    workspace_path=str(self.config.workspace_path),
                 )
                 logger.info("Telegram channel enabled")
             except ImportError as e:

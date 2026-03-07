@@ -110,6 +110,7 @@ class AgentLoop:
         self._consolidation_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._processing_lock = asyncio.Lock()
+        self._model_overrides: dict[str, str] = {}  # session_key -> model override
         self._register_default_tools()
 
     def _register_default_tools(self) -> None:
@@ -181,12 +182,14 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        model_override: str | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
         messages = initial_messages
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        effective_model = model_override or self.model
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -195,7 +198,7 @@ class AgentLoop:
                 response = await self.provider.chat(
                     messages=messages,
                     tools=self.tools.get_definitions(),
-                    model=self.model,
+                    model=effective_model,
                     temperature=self.temperature,
                     max_tokens=self.max_tokens,
                     reasoning_effort=self.reasoning_effort,
@@ -404,7 +407,13 @@ class AgentLoop:
                                   content="New session started.")
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/help — Show available commands")
+                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/model — Show or switch the current LLM model\n/help — Show available commands")
+
+        # /model command — show or switch model for this session
+        # Match /model, /model <args>, and /model@botname <args>
+        cmd_base = cmd.split("@")[0].split()[0] if cmd.startswith("/") else ""
+        if cmd_base == "/model":
+            return self._handle_model_command(msg, key)
 
         unconsolidated = len(session.messages) - session.last_consolidated
         if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
@@ -447,6 +456,7 @@ class AgentLoop:
 
         final_content, _, all_msgs = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
+            model_override=self._model_overrides.get(key),
         )
 
         if final_content is None:
@@ -463,6 +473,48 @@ class AgentLoop:
         return OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=final_content,
             metadata=msg.metadata or {},
+        )
+
+    def _handle_model_command(self, msg: InboundMessage, session_key: str) -> OutboundMessage:
+        """Handle /model command — show current model or switch to a new one."""
+        raw = msg.content.strip()
+        # Strip @bot_username suffix (e.g. /model@mybot)
+        parts = raw.split(None, 1)
+        model_arg = parts[1].strip() if len(parts) > 1 else ""
+
+        if not model_arg:
+            # Show current model
+            effective = self._model_overrides.get(session_key, self.model)
+            is_override = session_key in self._model_overrides
+            status = (
+                f"🤖 Current model: `{effective}`"
+                + ("\n_(session override — use `/model reset` to revert to default)_" if is_override else "")
+                + f"\n\nSwitch model with `/model <model-id>`."
+            )
+            return OutboundMessage(
+                channel=msg.channel, chat_id=msg.chat_id, content=status,
+            )
+
+        # /model reset — revert to default
+        if model_arg.lower() == "reset":
+            removed = self._model_overrides.pop(session_key, None)
+            if removed:
+                return OutboundMessage(
+                    channel=msg.channel, chat_id=msg.chat_id,
+                    content=f"🔄 Model reset to default: `{self.model}`",
+                )
+            return OutboundMessage(
+                channel=msg.channel, chat_id=msg.chat_id,
+                content=f"Already using the default model: `{self.model}`",
+            )
+
+        # /model <model-id> — switch model
+        new_model = model_arg.strip("`")
+        self._model_overrides[session_key] = new_model
+        logger.info("Model switched to '{}' for session {}", new_model, session_key)
+        return OutboundMessage(
+            channel=msg.channel, chat_id=msg.chat_id,
+            content=f"✅ Model switched to `{new_model}` for this session.\nUse `/model reset` to revert to default.",
         )
 
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:

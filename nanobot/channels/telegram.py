@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import random
 import re
 import time
 import unicodedata
 
 from loguru import logger
 from telegram import BotCommand, ReplyParameters, Update
+try:
+    from telegram import ReactionTypeEmoji
+    HAS_REACTION_TYPE = True
+except ImportError:
+    HAS_REACTION_TYPE = False
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
@@ -19,6 +25,15 @@ from nanobot.config.schema import TelegramConfig
 from nanobot.utils.helpers import split_message
 
 TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
+
+
+# ACK reaction emojis pool
+TELEGRAM_ACK_REACTIONS = ["⚡️", "👌", "👀", "🔥", "👍"]
+
+
+def _random_ack_reaction() -> str:
+    """Return a random emoji from the ACK reactions pool."""
+    return random.choice(TELEGRAM_ACK_REACTIONS)
 
 
 def _strip_md(s: str) -> str:
@@ -160,6 +175,7 @@ class TelegramChannel(BaseChannel):
         BotCommand("start", "Start the bot"),
         BotCommand("new", "Start a new conversation"),
         BotCommand("stop", "Stop the current task"),
+        BotCommand("model", "Show or switch the LLM model"),
         BotCommand("help", "Show available commands"),
     ]
 
@@ -168,13 +184,15 @@ class TelegramChannel(BaseChannel):
         config: TelegramConfig,
         bus: MessageBus,
         groq_api_key: str = "",
+        workspace_path: str | None = None,
     ):
         super().__init__(config, bus)
         self.config: TelegramConfig = config
         self.groq_api_key = groq_api_key
+        self._workspace_path = workspace_path
         self._app: Application | None = None
-        self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
-        self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
+        self._typing_tasks: dict[str, asyncio.Task] = {}  # composite_key -> typing loop task
+        self._thinking_messages: dict[str, int] = {}  # composite_key -> thinking message_id
         self._media_group_buffers: dict[str, dict] = {}
         self._media_group_tasks: dict[str, asyncio.Task] = {}
 
@@ -202,6 +220,7 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(CommandHandler("start", self._on_start))
         self._app.add_handler(CommandHandler("new", self._forward_command))
         self._app.add_handler(CommandHandler("stop", self._forward_command))
+        self._app.add_handler(CommandHandler("model", self._forward_command))
         self._app.add_handler(CommandHandler("help", self._on_help))
 
         # Add message handler for text, photos, voice, documents
@@ -271,21 +290,43 @@ class TelegramChannel(BaseChannel):
             return "audio"
         return "document"
 
+    @staticmethod
+    def _composite_key(chat_id: str, thread_id: int | None = None) -> str:
+        """Build a composite key for typing/thinking state dicts."""
+        return f"{chat_id}:{thread_id}" if thread_id else chat_id
+
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Telegram."""
         if not self._app:
             logger.warning("Telegram bot not running")
             return
 
+        thread_id = msg.metadata.get("message_thread_id")
+        comp_key = self._composite_key(msg.chat_id, thread_id)
+
         # Only stop typing indicator for final responses
         if not msg.metadata.get("_progress", False):
-            self._stop_typing(msg.chat_id)
+            self._stop_typing(comp_key)
 
         try:
             chat_id = int(msg.chat_id)
         except ValueError:
             logger.error("Invalid chat_id: {}", msg.chat_id)
             return
+
+        # Build optional kwargs for message_thread_id (topic support)
+        thread_kwargs: dict = {}
+        if thread_id:
+            thread_kwargs["message_thread_id"] = thread_id
+
+        # Check if there's a thinking message to delete
+        thinking_msg_id = self._thinking_messages.pop(comp_key, None)
+        if thinking_msg_id:
+            try:
+                await self._app.bot.delete_message(chat_id=chat_id, message_id=thinking_msg_id)
+                logger.debug("Deleted thinking message {}", thinking_msg_id)
+            except Exception as e:
+                logger.debug("Failed to delete thinking message: {}", e)
 
         reply_params = None
         if self.config.reply_to_message:
@@ -310,7 +351,8 @@ class TelegramChannel(BaseChannel):
                     await sender(
                         chat_id=chat_id,
                         **{param: f},
-                        reply_parameters=reply_params
+                        reply_parameters=reply_params,
+                        **thread_kwargs,
                     )
             except Exception as e:
                 filename = media_path.rsplit("/", 1)[-1]
@@ -318,7 +360,8 @@ class TelegramChannel(BaseChannel):
                 await self._app.bot.send_message(
                     chat_id=chat_id,
                     text=f"[Failed to send: {filename}]",
-                    reply_parameters=reply_params
+                    reply_parameters=reply_params,
+                    **thread_kwargs,
                 )
 
         # Send text content
@@ -328,44 +371,52 @@ class TelegramChannel(BaseChannel):
             for chunk in split_message(msg.content, TELEGRAM_MAX_MESSAGE_LEN):
                 # Final response: simulate streaming via draft, then persist
                 if not is_progress:
-                    await self._send_with_streaming(chat_id, chunk, reply_params)
+                    await self._send_with_streaming(chat_id, chunk, reply_params, thread_kwargs)
                 else:
-                    await self._send_text(chat_id, chunk, reply_params)
+                    await self._send_text(chat_id, chunk, reply_params, thread_kwargs)
 
-    async def _send_text(self, chat_id: int, text: str, reply_params=None) -> None:
+    async def _send_text(self, chat_id: int, text: str, reply_params=None, thread_kwargs: dict | None = None) -> None:
         """Send a plain text message with HTML fallback."""
+        if thread_kwargs is None:
+            thread_kwargs = {}
         try:
             html = _markdown_to_telegram_html(text)
             await self._app.bot.send_message(
                 chat_id=chat_id, text=html, parse_mode="HTML",
                 reply_parameters=reply_params,
+                **thread_kwargs,
             )
         except Exception as e:
             logger.warning("HTML parse failed, falling back to plain text: {}", e)
             try:
                 await self._app.bot.send_message(
                     chat_id=chat_id, text=text, reply_parameters=reply_params,
+                    **thread_kwargs,
                 )
             except Exception as e2:
                 logger.error("Error sending Telegram message: {}", e2)
 
-    async def _send_with_streaming(self, chat_id: int, text: str, reply_params=None) -> None:
+    async def _send_with_streaming(self, chat_id: int, text: str, reply_params=None, thread_kwargs: dict | None = None) -> None:
         """Simulate streaming via send_message_draft, then persist with send_message."""
+        if thread_kwargs is None:
+            thread_kwargs = {}
         draft_id = int(time.time() * 1000) % (2**31)
         try:
             step = max(len(text) // 8, 40)
             for i in range(step, len(text), step):
                 await self._app.bot.send_message_draft(
                     chat_id=chat_id, draft_id=draft_id, text=text[:i],
+                    **thread_kwargs,
                 )
                 await asyncio.sleep(0.04)
             await self._app.bot.send_message_draft(
                 chat_id=chat_id, draft_id=draft_id, text=text,
+                **thread_kwargs,
             )
             await asyncio.sleep(0.15)
         except Exception:
             pass
-        await self._send_text(chat_id, text, reply_params)
+        await self._send_text(chat_id, text, reply_params, thread_kwargs)
 
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
@@ -387,6 +438,7 @@ class TelegramChannel(BaseChannel):
             "🐈 nanobot commands:\n"
             "/new — Start a new conversation\n"
             "/stop — Stop the current task\n"
+            "/model — Show or switch the LLM model\n"
             "/help — Show available commands"
         )
 
@@ -400,10 +452,19 @@ class TelegramChannel(BaseChannel):
         """Forward slash commands to the bus for unified handling in AgentLoop."""
         if not update.message or not update.effective_user:
             return
+        metadata: dict = {}
+        thread_id = getattr(update.message, "message_thread_id", None)
+        if thread_id:
+            metadata["message_thread_id"] = thread_id
+        str_chat_id = str(update.message.chat_id)
+        # Scope session per topic to isolate conversation context
+        session_key = f"telegram:{str_chat_id}:{thread_id}" if thread_id else None
         await self._handle_message(
             sender_id=self._sender_id(update.effective_user),
-            chat_id=str(update.message.chat_id),
+            chat_id=str_chat_id,
             content=update.message.text,
+            metadata=metadata,
+            session_key=session_key,
         )
 
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -415,9 +476,62 @@ class TelegramChannel(BaseChannel):
         user = update.effective_user
         chat_id = message.chat_id
         sender_id = self._sender_id(user)
+        is_group = message.chat.type != "private"
 
-        # Store chat_id for replies
-        self._chat_ids[sender_id] = chat_id
+        # Check group_policy for group chats
+        if self.config.group_policy == "mention" and is_group:
+            # Check if bot is mentioned in the message (support text and captions)
+            bot_mentioned = False
+
+            # Fetch bot info once
+            bot_info = None
+            if self._app:
+                bot_info = await self._app.bot.get_me()
+
+            # Helper to inspect entities against a source text
+            def _check_entities(entities, source_text):
+                nonlocal bot_mentioned, bot_info
+                if not entities or not source_text:
+                    return
+                for entity in entities:
+                    if getattr(entity, "type", None) == "mention":
+                        try:
+                            mention_text = source_text[entity.offset:entity.offset + entity.length]
+                        except Exception:
+                            continue
+                        if bot_info and mention_text == f"@{bot_info.username}":
+                            bot_mentioned = True
+                            return
+                    elif getattr(entity, "type", None) == "text_mention" and getattr(entity, "user", None):
+                        if bot_info and entity.user.id == bot_info.id:
+                            bot_mentioned = True
+                            return
+
+            # Check entities in message.text
+            _check_entities(getattr(message, "entities", None), getattr(message, "text", None))
+
+            # Also check entities in caption (for media messages where mention may be in caption)
+            if not bot_mentioned:
+                _check_entities(getattr(message, "caption_entities", None), getattr(message, "caption", None))
+
+            # Check if message is a reply to bot's message
+            if not bot_mentioned and message.reply_to_message and bot_info:
+                if getattr(message.reply_to_message.from_user, "id", None) == bot_info.id:
+                    bot_mentioned = True
+
+            # If bot is not mentioned, ignore the message
+            if not bot_mentioned:
+                logger.debug("Ignoring group message - bot not mentioned (group_policy=mention)")
+                return
+
+        # Capture topic thread_id for topic-aware routing
+        thread_id = getattr(message, "message_thread_id", None)
+
+        # Add ACK reaction to acknowledge message receipt
+        await self._add_ack_reaction(chat_id, message.message_id)
+
+        # Send thinking message for private chats only
+        await self._send_thinking_message(chat_id, is_group, thread_id)
 
         # Build content from text and/or media
         content_parts = []
@@ -452,9 +566,12 @@ class TelegramChannel(BaseChannel):
                 file = await self._app.bot.get_file(media_file.file_id)
                 ext = self._get_extension(media_type, getattr(media_file, 'mime_type', None))
 
-                # Save to workspace/media/
+                # Save to workspace/media/ (inside workspace when restrict_to_workspace is enabled)
                 from pathlib import Path
-                media_dir = Path.home() / ".nanobot" / "media"
+                if self._workspace_path:
+                    media_dir = Path(self._workspace_path) / "media"
+                else:
+                    media_dir = Path.home() / ".nanobot" / "media"
                 media_dir.mkdir(parents=True, exist_ok=True)
 
                 file_path = media_dir / f"{media_file.file_id[:16]}{ext}"
@@ -485,6 +602,18 @@ class TelegramChannel(BaseChannel):
         logger.debug("Telegram message from {}: {}...", sender_id, content[:50])
 
         str_chat_id = str(chat_id)
+        comp_key = self._composite_key(str_chat_id, thread_id)
+
+        # Build metadata including thread_id for topic support
+        msg_metadata: dict = {
+            "message_id": message.message_id,
+            "user_id": user.id,
+            "username": user.username,
+            "first_name": user.first_name,
+            "is_group": is_group,
+        }
+        if thread_id:
+            msg_metadata["message_thread_id"] = thread_id
 
         # Telegram media groups: buffer briefly, forward as one aggregated turn.
         if media_group_id := getattr(message, "media_group_id", None):
@@ -493,13 +622,9 @@ class TelegramChannel(BaseChannel):
                 self._media_group_buffers[key] = {
                     "sender_id": sender_id, "chat_id": str_chat_id,
                     "contents": [], "media": [],
-                    "metadata": {
-                        "message_id": message.message_id, "user_id": user.id,
-                        "username": user.username, "first_name": user.first_name,
-                        "is_group": message.chat.type != "private",
-                    },
+                    "metadata": msg_metadata,
                 }
-                self._start_typing(str_chat_id)
+                self._start_typing(comp_key, thread_id)
             buf = self._media_group_buffers[key]
             if content and content != "[empty message]":
                 buf["contents"].append(content)
@@ -509,7 +634,10 @@ class TelegramChannel(BaseChannel):
             return
 
         # Start typing indicator before processing
-        self._start_typing(str_chat_id)
+        self._start_typing(comp_key, thread_id)
+
+        # Scope session per topic to isolate conversation context
+        session_key = f"telegram:{str_chat_id}:{thread_id}" if thread_id else None
 
         # Forward to the message bus
         await self._handle_message(
@@ -517,13 +645,8 @@ class TelegramChannel(BaseChannel):
             chat_id=str_chat_id,
             content=content,
             media=media_paths,
-            metadata={
-                "message_id": message.message_id,
-                "user_id": user.id,
-                "username": user.username,
-                "first_name": user.first_name,
-                "is_group": message.chat.type != "private"
-            }
+            metadata=msg_metadata,
+            session_key=session_key,
         )
 
     async def _flush_media_group(self, key: str) -> None:
@@ -541,28 +664,83 @@ class TelegramChannel(BaseChannel):
         finally:
             self._media_group_tasks.pop(key, None)
 
-    def _start_typing(self, chat_id: str) -> None:
-        """Start sending 'typing...' indicator for a chat."""
-        # Cancel any existing typing task for this chat
-        self._stop_typing(chat_id)
-        self._typing_tasks[chat_id] = asyncio.create_task(self._typing_loop(chat_id))
+    async def _add_ack_reaction(self, chat_id: int, message_id: int) -> None:
+        """Add a random emoji reaction to acknowledge message receipt (non-blocking)."""
+        if not self._app:
+            return
 
-    def _stop_typing(self, chat_id: str) -> None:
-        """Stop the typing indicator for a chat."""
-        task = self._typing_tasks.pop(chat_id, None)
+        try:
+            emoji = _random_ack_reaction()
+            if HAS_REACTION_TYPE:
+                await self._app.bot.set_message_reaction(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    reaction=[ReactionTypeEmoji(emoji)],
+                    is_big=False
+                )
+            else:
+                # Fallback for older versions
+                await self._app.bot.set_message_reaction(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    reaction=[{"type": "emoji", "emoji": emoji}],
+                    is_big=False
+                )
+            logger.debug("Added ACK reaction {} to message {}", emoji, message_id)
+        except Exception as e:
+            # Reactions might not be supported in all chats, so just log at debug level
+            logger.debug("Failed to add ACK reaction to message {}: {}", message_id, e)
+
+    async def _send_thinking_message(
+        self, chat_id: int, is_group: bool, thread_id: int | None = None,
+    ) -> None:
+        """Send a 'Thinking...' placeholder message in private chats only."""
+        if not self._app or is_group:
+            return
+
+        try:
+            comp_key = self._composite_key(str(chat_id), thread_id)
+            thread_kwargs: dict = {}
+            if thread_id:
+                thread_kwargs["message_thread_id"] = thread_id
+            thinking_msg = await self._app.bot.send_message(
+                chat_id=chat_id,
+                text="💭 Thinking...",
+                **thread_kwargs,
+            )
+            self._thinking_messages[comp_key] = thinking_msg.message_id
+            logger.debug("Sent thinking message {} to chat {}", thinking_msg.message_id, chat_id)
+        except Exception as e:
+            logger.debug("Failed to send thinking message: {}", e)
+
+    def _start_typing(self, comp_key: str, thread_id: int | None = None) -> None:
+        """Start sending 'typing...' indicator for a chat (optionally in a topic)."""
+        self._stop_typing(comp_key)
+        self._typing_tasks[comp_key] = asyncio.create_task(
+            self._typing_loop(comp_key, thread_id)
+        )
+
+    def _stop_typing(self, comp_key: str) -> None:
+        """Stop the typing indicator for a chat/topic."""
+        task = self._typing_tasks.pop(comp_key, None)
         if task and not task.done():
             task.cancel()
 
-    async def _typing_loop(self, chat_id: str) -> None:
+    async def _typing_loop(self, comp_key: str, thread_id: int | None = None) -> None:
         """Repeatedly send 'typing' action until cancelled."""
+        # Extract the numeric chat_id from the composite key
+        raw_chat_id = comp_key.split(":", 1)[0]
         try:
             while self._app:
-                await self._app.bot.send_chat_action(chat_id=int(chat_id), action="typing")
+                kwargs: dict = {"chat_id": int(raw_chat_id), "action": "typing"}
+                if thread_id:
+                    kwargs["message_thread_id"] = thread_id
+                await self._app.bot.send_chat_action(**kwargs)
                 await asyncio.sleep(4)
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            logger.debug("Typing indicator stopped for {}: {}", chat_id, e)
+            logger.debug("Typing indicator stopped for {}: {}", comp_key, e)
 
     async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Log polling / handler errors instead of silently swallowing them."""
