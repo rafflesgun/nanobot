@@ -168,6 +168,46 @@ class AgentLoop:
         return re.sub(r"<think>[\s\S]*?</think>", "", text).strip() or None
 
     @staticmethod
+    def _fix_missing_newlines(text: str | None) -> str | None:
+        """Heuristically insert missing newlines.
+
+        Some models (e.g. minimax-m2.5) occasionally return structured content
+        with no newline characters — bullet lists, numbered items, and bold
+        headings all run together on a single line.  This method detects
+        common patterns and inserts ``\\n`` where they were clearly intended.
+
+        The method is intentionally conservative: it only acts when the text
+        already contains very few newlines relative to its length, so
+        well-formatted responses pass through unchanged.
+        """
+        if not text:
+            return text
+
+        # If the text already has a reasonable newline density, leave it alone.
+        # Heuristic: at least 1 newline per 300 chars means it's fine.
+        if text.count("\n") >= max(1, len(text) // 300):
+            return text
+
+        # ── Bullet / list item runs ────────────────────────────────────
+        # "some text - item" → "some text\n- item"  (but not "well-known")
+        # Only match " - " preceded by a sentence-end or at least 2 words.
+        text = re.sub(r"(?<=[.!?:;])\s+(?=- )", "\n", text)
+        # Catch "text - Capitalised item" which is very likely a list.
+        text = re.sub(r" (?=- [A-Z\u0400-\u04FF\u4e00-\u9fff])", "\n", text)
+
+        # ── Numbered items ─────────────────────────────────────────────
+        # "text 1. First" → "text\n1. First"  /  "text 1) First" → …
+        text = re.sub(r"(?<=[.!?:;])\s+(?=\d{1,3}[.)]\s)", "\n", text)
+
+        # ── Bold-header patterns (**Header**: …) ──────────────────────
+        text = re.sub(r"(?<=[.!?])\s+(?=\*\*)", "\n", text)
+
+        # ── Markdown headers (# Title) ────────────────────────────────
+        text = re.sub(r"(?<=[.!?])\s+(?=#{1,6}\s)", "\n", text)
+
+        return text
+
+    @staticmethod
     def _tool_hint(tool_calls: list) -> str:
         """Format tool calls as concise hint, e.g. 'web_search("query")'."""
         def _fmt(tc):
@@ -219,6 +259,7 @@ class AgentLoop:
             if response.has_tool_calls:
                 if on_progress:
                     thought = self._strip_think(response.content)
+                    thought = self._fix_missing_newlines(thought)
                     if thought:
                         await on_progress(thought)
                     await on_progress(self._tool_hint(response.tool_calls), tool_hint=True)
@@ -250,6 +291,7 @@ class AgentLoop:
                     )
             else:
                 clean = self._strip_think(response.content)
+                clean = self._fix_missing_newlines(clean)
                 # Don't persist error responses to session history — they can
                 # poison the context and cause permanent 400 loops (#1303).
                 if response.finish_reason == "error":

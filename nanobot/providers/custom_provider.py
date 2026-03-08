@@ -6,6 +6,7 @@ import uuid
 from typing import Any
 
 import json_repair
+from loguru import logger
 from openai import AsyncOpenAI
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
@@ -26,9 +27,22 @@ class CustomProvider(LLMProvider):
     async def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
                    model: str | None = None, max_tokens: int = 4096, temperature: float = 0.7,
                    reasoning_effort: str | None = None) -> LLMResponse:
+        sanitized = self._sanitize_empty_content(messages)
+        # Flatten list-format content to plain strings for OpenAI-compatible endpoints
+        # that don't support multimodal content blocks.
+        for msg in sanitized:
+            content = msg.get("content")
+            if isinstance(content, list):
+                parts = []
+                for item in content:
+                    if isinstance(item, dict):
+                        parts.append(item.get("text", ""))
+                    elif isinstance(item, str):
+                        parts.append(item)
+                msg["content"] = "\n".join(p for p in parts if p) or None
         kwargs: dict[str, Any] = {
             "model": model or self.default_model,
-            "messages": self._sanitize_empty_content(messages),
+            "messages": sanitized,
             "max_tokens": max(1, max_tokens),
             "temperature": temperature,
         }
@@ -38,17 +52,11 @@ class CustomProvider(LLMProvider):
             kwargs.update(tools=tools, tool_choice="auto")
         try:
             response = await self._client.chat.completions.create(**kwargs)
-            print(f"=== CustomProvider Response ===")
-            print(f"Response Type: {type(response)}")
-            print(f"Response: {response}")
-            if hasattr(response, "__dict__"):
-                print(f"Response Dict: {response.__dict__}")
             return self._parse(response)
         except Exception as e:
             import traceback
-            print(f"=== CustomProvider Exception ===")
-            print(f"Exception: {e}")
-            print(f"Traceback:\n{traceback.format_exc()}")
+            logger.error("CustomProvider exception: {}", str(e))
+            logger.debug("Traceback:\n{}", traceback.format_exc())
             return LLMResponse(content=f"Error: {e}", finish_reason="error")
 
     def _parse(self, response: Any) -> LLMResponse:

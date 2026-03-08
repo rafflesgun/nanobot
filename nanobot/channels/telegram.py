@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import random
 import re
-import time
 import unicodedata
 
 from loguru import logger
@@ -136,6 +135,10 @@ def _markdown_to_telegram_html(text: str) -> str:
     # 7. Bold **text** or __text__
     text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
     text = re.sub(r'__(.+?)__', r'<b>\1</b>', text)
+
+    # 7b. Bold *text* (single asterisk) — after ** is consumed
+    # Matches *word* and *multi word* but not "* bullet" (asterisk + space at start)
+    text = re.sub(r'\*(\S(?:[^*]*\S)?)\*(?!\*)', r'<b>\1</b>', text)
 
     # 8. Italic _text_ (avoid matching inside words like some_var_name)
     text = re.sub(r'(?<![a-zA-Z0-9])_([^_]+)_(?![a-zA-Z0-9])', r'<i>\1</i>', text)
@@ -369,54 +372,26 @@ class TelegramChannel(BaseChannel):
             is_progress = msg.metadata.get("_progress", False)
 
             for chunk in split_message(msg.content, TELEGRAM_MAX_MESSAGE_LEN):
-                # Final response: simulate streaming via draft, then persist
-                if not is_progress:
-                    await self._send_with_streaming(chat_id, chunk, reply_params, thread_kwargs)
-                else:
-                    await self._send_text(chat_id, chunk, reply_params, thread_kwargs)
-
-    async def _send_text(self, chat_id: int, text: str, reply_params=None, thread_kwargs: dict | None = None) -> None:
-        """Send a plain text message with HTML fallback."""
-        if thread_kwargs is None:
-            thread_kwargs = {}
-        try:
-            html = _markdown_to_telegram_html(text)
-            await self._app.bot.send_message(
-                chat_id=chat_id, text=html, parse_mode="HTML",
-                reply_parameters=reply_params,
-                **thread_kwargs,
-            )
-        except Exception as e:
-            logger.warning("HTML parse failed, falling back to plain text: {}", e)
-            try:
-                await self._app.bot.send_message(
-                    chat_id=chat_id, text=text, reply_parameters=reply_params,
-                    **thread_kwargs,
-                )
-            except Exception as e2:
-                logger.error("Error sending Telegram message: {}", e2)
-
-    async def _send_with_streaming(self, chat_id: int, text: str, reply_params=None, thread_kwargs: dict | None = None) -> None:
-        """Simulate streaming via send_message_draft, then persist with send_message."""
-        if thread_kwargs is None:
-            thread_kwargs = {}
-        draft_id = int(time.time() * 1000) % (2**31)
-        try:
-            step = max(len(text) // 8, 40)
-            for i in range(step, len(text), step):
-                await self._app.bot.send_message_draft(
-                    chat_id=chat_id, draft_id=draft_id, text=text[:i],
-                    **thread_kwargs,
-                )
-                await asyncio.sleep(0.04)
-            await self._app.bot.send_message_draft(
-                chat_id=chat_id, draft_id=draft_id, text=text,
-                **thread_kwargs,
-            )
-            await asyncio.sleep(0.15)
-        except Exception:
-            pass
-        await self._send_text(chat_id, text, reply_params, thread_kwargs)
+                try:
+                    html = _markdown_to_telegram_html(chunk)
+                    await self._app.bot.send_message(
+                        chat_id=chat_id,
+                        text=html,
+                        parse_mode="HTML",
+                        reply_parameters=reply_params,
+                        **thread_kwargs,
+                    )
+                except Exception as e:
+                    logger.warning("HTML parse failed, falling back to plain text: {}", e)
+                    try:
+                        await self._app.bot.send_message(
+                            chat_id=chat_id,
+                            text=chunk,
+                            reply_parameters=reply_params,
+                            **thread_kwargs,
+                        )
+                    except Exception as e2:
+                        logger.error("Error sending Telegram message: {}", e2)
 
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
