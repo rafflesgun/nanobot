@@ -219,18 +219,27 @@ class TelegramChannel(BaseChannel):
         self._app = builder.build()
         self._app.add_error_handler(self._on_error)
 
-        # Add command handlers
-        self._app.add_handler(CommandHandler("start", self._on_start))
-        self._app.add_handler(CommandHandler("new", self._forward_command))
-        self._app.add_handler(CommandHandler("stop", self._forward_command))
-        self._app.add_handler(CommandHandler("model", self._forward_command))
-        self._app.add_handler(CommandHandler("help", self._on_help))
+        # Command handlers — private chats only.
+        # In group chats, commands must be sent as "@BotName /command" (plain text
+        # mention), which flows through _on_message where the mention check and
+        # @-prefix stripping are applied.  This avoids ambiguity with the
+        # /command@BotName Telegram syntax and prevents other bots from picking up
+        # commands not meant for them.
+        private_only = filters.ChatType.PRIVATE
+        self._app.add_handler(CommandHandler("start", self._on_start, filters=private_only))
+        self._app.add_handler(CommandHandler("new", self._forward_command, filters=private_only))
+        self._app.add_handler(CommandHandler("stop", self._forward_command, filters=private_only))
+        self._app.add_handler(CommandHandler("model", self._forward_command, filters=private_only))
+        self._app.add_handler(CommandHandler("help", self._on_help, filters=private_only))
 
-        # Add message handler for text, photos, voice, documents
+        # Add message handler for text, photos, voice, documents.
+        # In groups, commands typed as "@BotName /cmd" are plain TEXT (not COMMAND
+        # entities from Telegram's perspective when prefixed by a mention), so we
+        # include all TEXT here.  The ~filters.COMMAND exclusion only applies in
+        # private chats where CommandHandlers above take precedence.
         self._app.add_handler(
             MessageHandler(
-                (filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL)
-                & ~filters.COMMAND,
+                (filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL),
                 self._on_message
             )
         )
@@ -424,7 +433,7 @@ class TelegramChannel(BaseChannel):
         return f"{sid}|{user.username}" if user.username else sid
 
     async def _forward_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Forward slash commands to the bus for unified handling in AgentLoop."""
+        """Forward slash commands (private chats only) to the bus for handling in AgentLoop."""
         if not update.message or not update.effective_user:
             return
         metadata: dict = {}

@@ -326,12 +326,27 @@ class AgentLoop:
             except asyncio.TimeoutError:
                 continue
 
-            if msg.content.strip().lower() == "/stop":
+            if self._extract_cmd(msg.content) == "/stop":
                 await self._handle_stop(msg)
             else:
                 task = asyncio.create_task(self._dispatch(msg))
                 self._active_tasks.setdefault(msg.session_key, []).append(task)
                 task.add_done_callback(lambda t, k=msg.session_key: self._active_tasks.get(k, []) and self._active_tasks[k].remove(t) if t in self._active_tasks.get(k, []) else None)
+
+@staticmethod
+    def _extract_cmd(content: str) -> str:
+        """Return the leading slash-command from content, stripping any @mention prefix.
+
+        Handles group formats like "@BotName /stop" as well as plain "/stop".
+        Returns an empty string if no slash command is found.
+        """
+        text = content.strip()
+        if text.startswith("@"):
+            text = re.sub(r'^@\S+\s*', '', text)
+        text = text.strip().lower()
+        # Return only the command token (first word), without any @suffix or args
+        token = text.split()[0] if text else ""
+        return token.split("@")[0] if token.startswith("/") else ""
 
     async def _handle_stop(self, msg: InboundMessage) -> None:
         """Cancel all active tasks and subagents for the session."""
@@ -347,6 +362,7 @@ class AgentLoop:
         content = f"⏹ Stopped {total} task(s)." if total else "No active task to stop."
         await self.bus.publish_outbound(OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=content,
+            metadata=msg.metadata or {},
         ))
 
     async def _dispatch(self, msg: InboundMessage) -> None:
@@ -418,7 +434,14 @@ class AgentLoop:
         session = self.sessions.get_or_create(key)
 
         # Slash commands
-        cmd = msg.content.strip().lower()
+        # Strip a leading @mention (e.g. "@BotName /model gpt-4" → "/model gpt-4")
+        # so group mentions like "@BotName /model" are handled correctly.
+        raw_content = msg.content.strip()
+        if raw_content.startswith("@"):
+            raw_content = re.sub(r'^@\S+\s*', '', raw_content)
+        raw_content = raw_content.strip()
+        cmd = self._extract_cmd(msg.content)  # bare command token, e.g. "/model"
+        _meta = msg.metadata or {}
         if cmd == "/new":
             lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
             self._consolidating.add(session.key)
@@ -432,12 +455,14 @@ class AgentLoop:
                             return OutboundMessage(
                                 channel=msg.channel, chat_id=msg.chat_id,
                                 content="Memory archival failed, session not cleared. Please try again.",
+                                metadata=_meta,
                             )
             except Exception:
                 logger.exception("/new archival failed for {}", session.key)
                 return OutboundMessage(
                     channel=msg.channel, chat_id=msg.chat_id,
                     content="Memory archival failed, session not cleared. Please try again.",
+                    metadata=_meta,
                 )
             finally:
                 self._consolidating.discard(session.key)
@@ -446,16 +471,15 @@ class AgentLoop:
             self.sessions.save(session)
             self.sessions.invalidate(session.key)
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="New session started.")
+                                  content="New session started.", metadata=_meta)
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/model — Show or switch the current LLM model\n/help — Show available commands")
+                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/model — Show or switch the current LLM model\n/help — Show available commands",
+                                  metadata=_meta)
 
         # /model command — show or switch model for this session
-        # Match /model, /model <args>, and /model@botname <args>
-        cmd_base = cmd.split("@")[0].split()[0] if cmd.startswith("/") else ""
-        if cmd_base == "/model":
-            return self._handle_model_command(msg, key)
+        if cmd == "/model":
+            return self._handle_model_command(msg, key, raw_content)
 
         unconsolidated = len(session.messages) - session.last_consolidated
         if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
@@ -517,12 +541,14 @@ class AgentLoop:
             metadata=msg.metadata or {},
         )
 
-    def _handle_model_command(self, msg: InboundMessage, session_key: str) -> OutboundMessage:
+    def _handle_model_command(self, msg: InboundMessage, session_key: str, raw_content: str | None = None) -> OutboundMessage:
         """Handle /model command — show current model or switch to a new one."""
-        raw = msg.content.strip()
+        # Use pre-stripped content (leading @mention already removed) if provided
+        raw = (raw_content or msg.content).strip()
         # Strip @bot_username suffix (e.g. /model@mybot)
         parts = raw.split(None, 1)
         model_arg = parts[1].strip() if len(parts) > 1 else ""
+        _meta = msg.metadata or {}
 
         if not model_arg:
             # Show current model
@@ -535,6 +561,7 @@ class AgentLoop:
             )
             return OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content=status,
+                metadata=_meta,
             )
 
         # /model reset — revert to default
@@ -544,10 +571,12 @@ class AgentLoop:
                 return OutboundMessage(
                     channel=msg.channel, chat_id=msg.chat_id,
                     content=f"🔄 Model reset to default: `{self.model}`",
+                    metadata=_meta,
                 )
             return OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id,
                 content=f"Already using the default model: `{self.model}`",
+                metadata=_meta,
             )
 
         # /model <model-id> — switch model
@@ -557,6 +586,7 @@ class AgentLoop:
         return OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id,
             content=f"✅ Model switched to `{new_model}` for this session.\nUse `/model reset` to revert to default.",
+            metadata=_meta,
         )
 
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
