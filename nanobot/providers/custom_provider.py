@@ -27,7 +27,10 @@ class CustomProvider(LLMProvider):
     async def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
                    model: str | None = None, max_tokens: int = 4096, temperature: float = 0.7,
                    reasoning_effort: str | None = None) -> LLMResponse:
-        sanitized = self._sanitize_empty_content(messages)
+        _ALLOWED = frozenset({"role", "content", "tool_calls", "tool_call_id", "name"})
+        sanitized = self._sanitize_request_messages(
+            self._sanitize_empty_content(messages), _ALLOWED
+        )
         # Flatten list-format content to plain strings for OpenAI-compatible endpoints
         # that don't support multimodal content blocks.
         for msg in sanitized:
