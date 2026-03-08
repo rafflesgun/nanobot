@@ -333,7 +333,7 @@ class AgentLoop:
                 self._active_tasks.setdefault(msg.session_key, []).append(task)
                 task.add_done_callback(lambda t, k=msg.session_key: self._active_tasks.get(k, []) and self._active_tasks[k].remove(t) if t in self._active_tasks.get(k, []) else None)
 
-@staticmethod
+    @staticmethod
     def _extract_cmd(content: str) -> str:
         """Return the leading slash-command from content, stripping any @mention prefix.
 
@@ -610,6 +610,8 @@ class AgentLoop:
                 if isinstance(content, list):
                     filtered = []
                     for c in content:
+                        if not isinstance(c, dict):
+                            continue
                         if c.get("type") == "text" and isinstance(c.get("text"), str) and c["text"].startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
                             continue  # Strip runtime context from multimodal messages
                         if (c.get("type") == "image_url"
@@ -619,7 +621,14 @@ class AgentLoop:
                             filtered.append(c)
                     if not filtered:
                         continue
-                    entry["content"] = filtered
+                    # If all remaining items are plain text blocks, flatten to a
+                    # string so history never contains list-format user messages.
+                    # List-content in history causes 400 errors on providers that
+                    # expect content to be a dict/string, not a list.
+                    if all(isinstance(c, dict) and c.get("type") == "text" for c in filtered):
+                        entry["content"] = "\n".join(c.get("text", "") for c in filtered)
+                    else:
+                        entry["content"] = filtered
             entry.setdefault("timestamp", datetime.now().isoformat())
             session.messages.append(entry)
         session.updated_at = datetime.now()
