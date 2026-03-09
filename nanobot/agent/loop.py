@@ -153,12 +153,23 @@ class AgentLoop:
         finally:
             self._mcp_connecting = False
 
-    def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
+    def _set_tool_context(
+        self,
+        channel: str,
+        chat_id: str,
+        message_id: str | None = None,
+        thread_id: int | None = None,
+    ) -> None:
         """Update context for all tools that need routing info."""
         for name in ("message", "spawn", "cron"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
-                    tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
+                    if name == "message":
+                        tool.set_context(channel, chat_id, *([message_id] if message_id else []))
+                    elif name == "cron":
+                        tool.set_context(channel, chat_id, thread_id)
+                    else:
+                        tool.set_context(channel, chat_id)
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
@@ -499,7 +510,11 @@ class AgentLoop:
             _task = asyncio.create_task(_consolidate_and_unlock())
             self._consolidation_tasks.add(_task)
 
-        self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
+        self._set_tool_context(
+            msg.channel, msg.chat_id,
+            msg.metadata.get("message_id"),
+            msg.metadata.get("message_thread_id"),
+        )
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()

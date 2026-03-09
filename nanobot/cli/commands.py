@@ -361,10 +361,14 @@ def gateway(
 
         if job.payload.deliver and job.payload.to and response:
             from nanobot.bus.events import OutboundMessage
+            delivery_meta: dict = {}
+            if job.payload.thread_id:
+                delivery_meta["message_thread_id"] = job.payload.thread_id
             await bus.publish_outbound(OutboundMessage(
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to,
-                content=response
+                content=response,
+                metadata=delivery_meta,
             ))
         return response
     cron.on_job = on_cron_job
