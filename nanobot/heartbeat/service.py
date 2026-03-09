@@ -154,11 +154,16 @@ class HeartbeatService:
                 return
 
             logger.info("Heartbeat: tasks found, executing...")
+            logger.info("Heartbeat: active tasks — {}", tasks[:300] if tasks else "(no detail)")
             if self.on_execute:
                 response = await self.on_execute(tasks)
+                preview = (response[:120] + "...") if response and len(response) > 120 else (response or "(empty)")
+                logger.info("Heartbeat: execution result — {}", preview)
                 if response and self.on_notify:
                     logger.info("Heartbeat: completed, delivering response")
                     await self.on_notify(response)
+                elif not response:
+                    logger.info("Heartbeat: execution produced no response, skipping delivery")
         except Exception:
             logger.exception("Heartbeat execution failed")
 

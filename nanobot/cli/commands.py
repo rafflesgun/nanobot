@@ -276,6 +276,8 @@ def gateway(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
 ):
     """Start the nanobot gateway."""
+    from loguru import logger
+
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.manager import ChannelManager
@@ -401,6 +403,11 @@ def gateway(
     async def on_heartbeat_execute(tasks: str) -> str:
         """Phase 2: execute heartbeat tasks through the full agent loop."""
         channel, chat_id = _pick_heartbeat_target()
+        heartbeat_session = session_manager.get_or_create("heartbeat")
+        logger.info(
+            "Heartbeat: executing via channel={} chat_id={} session_msgs={}",
+            channel, chat_id, len(heartbeat_session.messages),
+        )
 
         async def _silent(*_args, **_kwargs):
             pass
@@ -418,7 +425,10 @@ def gateway(
         from nanobot.bus.events import OutboundMessage
         channel, chat_id = _pick_heartbeat_target()
         if channel == "cli":
+            logger.info("Heartbeat: no external channel available, skipping delivery")
             return  # No external channel available to deliver to
+        preview = (response[:120] + "...") if len(response) > 120 else response
+        logger.info("Heartbeat: delivering to {}:{} — {}", channel, chat_id, preview)
         await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
 
     hb_cfg = config.gateway.heartbeat
