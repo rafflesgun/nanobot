@@ -55,7 +55,18 @@ class Session:
 
         out: list[dict[str, Any]] = []
         for m in sliced:
-            entry: dict[str, Any] = {"role": m["role"], "content": m.get("content", "")}
+            content = m.get("content", "")
+            # Normalise list-format content saved by older versions of _save_turn.
+            # Providers that don't support multimodal blocks (e.g. CustomProvider)
+            # receive a 400 error when content is a list, so flatten to a plain
+            # string here so all stored history is safe regardless of age.
+            if isinstance(content, list):
+                parts = [
+                    c.get("text", "") if isinstance(c, dict) else str(c)
+                    for c in content
+                ]
+                content = "\n".join(p for p in parts if p) or ""
+            entry: dict[str, Any] = {"role": m["role"], "content": content}
             for k in ("tool_calls", "tool_call_id", "name"):
                 if k in m:
                     entry[k] = m[k]

@@ -19,7 +19,13 @@ class MCPToolWrapper(Tool):
         self._original_name = tool_def.name
         self._name = f"mcp_{server_name}_{tool_def.name}"
         self._description = tool_def.description or tool_def.name
-        self._parameters = tool_def.inputSchema or {"type": "object", "properties": {}}
+        schema = tool_def.inputSchema
+        # Some MCP servers return inputSchema as a list — that is invalid for the
+        # OpenAI tools API which expects a JSON Schema object.  Fall back to an
+        # empty object schema so the tool can still be registered safely.
+        if not isinstance(schema, dict):
+            schema = {"type": "object", "properties": {}}
+        self._parameters = schema or {"type": "object", "properties": {}}
         self._tool_timeout = tool_timeout
 
     @property
