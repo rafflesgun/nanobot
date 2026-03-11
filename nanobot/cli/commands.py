@@ -350,6 +350,7 @@ def gateway(
                 session_key=f"cron:{job.id}",
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to or "direct",
+                thread_id=job.payload.thread_id,
             )
         finally:
             if isinstance(cron_tool, CronTool) and cron_token is not None:

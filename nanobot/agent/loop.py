@@ -165,7 +165,7 @@ class AgentLoop:
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
                     if name == "message":
-                        tool.set_context(channel, chat_id, *([message_id] if message_id else []))
+                        tool.set_context(channel, chat_id, message_id, thread_id)
                     elif name == "cron":
                         tool.set_context(channel, chat_id, thread_id)
                     else:
@@ -661,10 +661,14 @@ class AgentLoop:
         session_key: str = "cli:direct",
         channel: str = "cli",
         chat_id: str = "direct",
+        thread_id: int | None = None,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
     ) -> str:
         """Process a message directly (for CLI or cron usage)."""
         await self._connect_mcp()
-        msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
+        meta: dict = {}
+        if thread_id:
+            meta["message_thread_id"] = thread_id
+        msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content, metadata=meta)
         response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
         return response.content if response else ""
