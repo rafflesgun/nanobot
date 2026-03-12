@@ -81,9 +81,8 @@ class SlackChannel(BaseChannel):
             slack_meta = msg.metadata.get("slack", {}) if msg.metadata else {}
             thread_ts = slack_meta.get("thread_ts")
             channel_type = slack_meta.get("channel_type")
-            # Only reply in thread for channel/group messages; DMs don't use threads
-            use_thread = thread_ts and channel_type != "im"
-            thread_ts_param = thread_ts if use_thread else None
+            # Slack DMs don't use threads; channel/group replies may keep thread_ts.
+            thread_ts_param = thread_ts if thread_ts and channel_type != "im" else None
 
             if msg.content:
                 await self._web_client.chat_postMessage(
@@ -277,4 +276,3 @@ class SlackChannel(BaseChannel):
             if parts:
                 rows.append(" · ".join(parts))
         return "\n".join(rows)
-
