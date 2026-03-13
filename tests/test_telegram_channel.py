@@ -236,7 +236,7 @@ async def test_group_policy_mention_ignores_unmentioned_group_message() -> None:
         handled.append(kwargs)
 
     channel._handle_message = capture_handle
-    channel._start_typing = lambda _chat_id: None
+    channel._start_typing = lambda comp_key, thread_id=None: None
 
     await channel._on_message(_make_telegram_update(text="hello everyone"), None)
 
@@ -258,7 +258,7 @@ async def test_group_policy_mention_accepts_text_mention_and_caches_bot_identity
         handled.append(kwargs)
 
     channel._handle_message = capture_handle
-    channel._start_typing = lambda _chat_id: None
+    channel._start_typing = lambda comp_key, thread_id=None: None
 
     mention = SimpleNamespace(type="mention", offset=0, length=13)
     await channel._on_message(_make_telegram_update(text="@nanobot_test hi", entities=[mention]), None)
@@ -282,7 +282,7 @@ async def test_group_policy_mention_accepts_caption_mention() -> None:
         handled.append(kwargs)
 
     channel._handle_message = capture_handle
-    channel._start_typing = lambda _chat_id: None
+    channel._start_typing = lambda comp_key, thread_id=None: None
 
     mention = SimpleNamespace(type="mention", offset=0, length=13)
     await channel._on_message(
@@ -308,7 +308,7 @@ async def test_group_policy_mention_accepts_reply_to_bot() -> None:
         handled.append(kwargs)
 
     channel._handle_message = capture_handle
-    channel._start_typing = lambda _chat_id: None
+    channel._start_typing = lambda comp_key, thread_id=None: None
 
     reply = SimpleNamespace(from_user=SimpleNamespace(id=999))
     await channel._on_message(_make_telegram_update(text="reply", reply_to_message=reply), None)
@@ -330,7 +330,7 @@ async def test_group_policy_open_accepts_plain_group_message() -> None:
         handled.append(kwargs)
 
     channel._handle_message = capture_handle
-    channel._start_typing = lambda _chat_id: None
+    channel._start_typing = lambda comp_key, thread_id=None: None
 
     await channel._on_message(_make_telegram_update(text="hello group"), None)
 

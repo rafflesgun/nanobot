@@ -13,11 +13,11 @@ understand intended behavior quickly.
 | Telegram Topic support in groups             | ✅     | channels/telegram.py, cron/*, agent/tools/cron.py | tests/test_cron_topic_delivery.py            | session_key includes `:topic:{thread_id}`   |
 | Telegram groups → mention-only mode          | ✅     | channels/telegram.py                               | manual + group_policy test                   | `group_policy = "mention"` (default)        |
 | Group commands via @mention                  | ✅     | channels/telegram.py → _on_message                 | manual                                       | `@BotName /command` → text message path     |
-| /model command – per-session model override  | ✅     | agent/loop.py                                      | manual                                       | stored in `_model_overrides[session_key]`   |
-| "Thinking…" placeholder (PM only)            | ✅     | channels/telegram.py → _send_thinking_message      | manual                                       | skipped when `is_group == True`             |
-| Typing indicator & ACK reaction              | ✅     | channels/telegram.py                               | manual                                       | typing per chat+thread, reaction per msg    |
+| /model command – per-session model override  | ✅     | agent/loop.py                                      | tests/test_model_switch.py                   | stored in `_model_overrides[session_key]`   |
+| "Thinking…" placeholder (PM only)            | ✅     | channels/telegram.py → _send_thinking_message      | tests/test_thinking_message.py               | skipped when `is_group == True`             |
+| Typing indicator & ACK reaction              | ✅     | channels/telegram.py                               | tests/test_typing_ack.py                     | typing per chat+thread, reaction per msg    |
 | Heartbeat results → DM / private only        | ✅     | heartbeat/service.py                               | test_heartbeat_service.py + manual           | skips negative IDs and topic sub-sessions   |
-| Media downloads → workspace/media/           | ✅     | channels/telegram.py                               | manual                                       | falls back to `~/.nanobot/media`            |
+| Media downloads → workspace/media/           | ✅     | channels/telegram.py                               | tests/test_media_download.py                 | falls back to `~/.nanobot/media`            |
 
 ## Detailed Descriptions & Merge Guidance
 

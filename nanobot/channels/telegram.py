@@ -204,18 +204,28 @@ class TelegramChannel(BaseChannel):
 
     def is_allowed(self, sender_id: str) -> bool:
         """Preserve Telegram's legacy id|username allowlist matching."""
-        if super().is_allowed(sender_id):
-            return True
+        # Do NOT call super().is_allowed() — it is too permissive for legacy format
+        # if super().is_allowed(sender_id):
+        #     return True
 
         allow_list = getattr(self.config, "allow_from", [])
-        if not allow_list or "*" in allow_list:
+        if not allow_list:
             return False
+        if "*" in allow_list:
+            return True
 
         sender_str = str(sender_id)
-        if sender_str.count("|") != 1:
+        
+        # Check if the entire sender string matches any entry in allow_from
+        if sender_str in allow_list:
+            return True
+            
+        # Check legacy format: id|username
+        parts = sender_str.split("|")
+        if len(parts) != 2:  # Legacy format is strictly id|username
             return False
 
-        sid, username = sender_str.split("|", 1)
+        sid, username = parts
         if not sid.isdigit() or not username:
             return False
 
@@ -352,8 +362,16 @@ class TelegramChannel(BaseChannel):
 
         # Build optional kwargs for message_thread_id (topic support)
         thread_kwargs: dict = {}
-        if thread_id:
+        if thread_id is not None:
             thread_kwargs["message_thread_id"] = thread_id
+
+        # Infer topic from cached reply-to message_id if not already set
+        if "message_id" in msg.metadata and "message_thread_id" not in thread_kwargs:
+            cached_thread_id = self._message_threads.get(
+                (msg.chat_id, msg.metadata["message_id"])
+            )
+            if cached_thread_id is not None:
+                thread_kwargs["message_thread_id"] = cached_thread_id
 
         # Check if there's a thinking message to delete
         thinking_msg_id = self._thinking_messages.pop(comp_key, None)
@@ -599,9 +617,9 @@ class TelegramChannel(BaseChannel):
 
         # Text content
         if message.text:
-            content_parts.append(message.text)
+            content_parts.append(str(message.text))
         if message.caption:
-            content_parts.append(message.caption)
+            content_parts.append(str(message.caption))
 
         # Handle media files
         media_file = None
@@ -635,9 +653,10 @@ class TelegramChannel(BaseChannel):
                 media_dir.mkdir(parents=True, exist_ok=True)
 
                 file_path = media_dir / f"{media_file.file_id[:16]}{ext}"
-                await file.download_to_drive(str(file_path))
+                file_path_str = str(file_path)
+                await file.download_to_drive(file_path_str)
 
-                media_paths.append(str(file_path))
+                media_paths.append(file_path_str)
 
                 # Handle voice transcription
                 if media_type == "voice" or media_type == "audio":
@@ -648,9 +667,9 @@ class TelegramChannel(BaseChannel):
                         logger.info("Transcribed {}: {}...", media_type, transcription[:50])
                         content_parts.append(f"[transcription: {transcription}]")
                     else:
-                        content_parts.append(f"[{media_type}: {file_path}]")
+                        content_parts.append(f"[{media_type}: {file_path_str}]")
                 else:
-                    content_parts.append(f"[{media_type}: {file_path}]")
+                    content_parts.append(f"[{media_type}: {file_path_str}]")
 
                 logger.debug("Downloaded {} to {}", media_type, file_path)
             except Exception as e:
@@ -751,6 +770,7 @@ class TelegramChannel(BaseChannel):
             return
 
         try:
+            # Use composite key for both chat_id and thread_id
             comp_key = self._composite_key(str(chat_id), thread_id)
             thread_kwargs: dict = {}
             if thread_id:
@@ -798,8 +818,13 @@ class TelegramChannel(BaseChannel):
         """Log polling / handler errors instead of silently swallowing them."""
         logger.error("Telegram error: {}", context.error)
 
-    def _get_extension(self, media_type: str, mime_type: str | None) -> str:
-        """Get file extension based on media type."""
+    def _get_extension(
+        self,
+        media_type: str,
+        mime_type: str | None,
+        filename: str | None = None,
+    ) -> str:
+        """Get file extension based on media type and optional filename."""
         if mime_type:
             ext_map = {
                 "image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif",
@@ -807,6 +832,15 @@ class TelegramChannel(BaseChannel):
             }
             if mime_type in ext_map:
                 return ext_map[mime_type]
+
+        if filename:
+            from pathlib import Path
+            p = Path(filename)
+            if p.suffixes:
+                # Return full compound extension if present (e.g. .tar.gz)
+                return ''.join(p.suffixes).lower()
+            if p.suffix:
+                return p.suffix.lower()
 
         type_map = {"image": ".jpg", "voice": ".ogg", "audio": ".mp3", "file": ""}
         return type_map.get(media_type, "")

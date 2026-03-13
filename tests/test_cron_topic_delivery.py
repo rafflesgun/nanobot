@@ -27,7 +27,6 @@ def _make_loop(tmp_path: Path, cron_service: CronService | None = None) -> Agent
         provider=provider,
         workspace=tmp_path,
         model="test-model",
-        memory_window=10,
         cron_service=cron_service,
     )
 
@@ -209,7 +208,7 @@ class TestAgentLoopCronContext:
 
         svc = CronService(tmp_path / "cron" / "jobs.json")
         loop = _make_loop(tmp_path, cron_service=svc)
-        loop.provider.chat = AsyncMock(
+        loop.provider.chat_with_retry = AsyncMock(
             return_value=LLMResponse(content="ok", tool_calls=[])
         )
         loop.tools.get_definitions = MagicMock(return_value=[])
