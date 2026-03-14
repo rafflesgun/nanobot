@@ -15,10 +15,11 @@ understand intended behavior quickly.
 | Group commands via @mention                  | ✅     | channels/telegram.py → _on_message                 | manual                                       | `@BotName /command` → text message path     |
 | /model command – per-session model override  | ✅     | agent/loop.py                                      | tests/test_model_switch.py                   | stored in `_model_overrides[session_key]`   |
 | "Thinking…" placeholder (PM only)            | ✅     | channels/telegram.py → _send_thinking_message      | tests/test_thinking_message.py               | skipped when `is_group == True`             |
-| Typing indicator & ACK reaction              | ✅     | channels/telegram.py                               | tests/test_typing_ack.py                     | typing per chat+thread, reaction per msg    |
+| Typing indicator & ACK reaction              | ✅     | channels/telegram.py                               | tests/test_typing极ack.py                     | typing per chat+thread, reaction per msg    |
 | Heartbeat results → DM / private only        | ✅     | heartbeat/service.py                               | test_heartbeat_service.py + manual           | skips negative IDs and topic sub-sessions   |
-| Media downloads → workspace/media/           | ✅     | channels/telegram.py                               | tests/test_media_download.py                 | falls back to `~/.nanobot/media`            |
+| Media downloads → workspace/media/           | ✅    极 channels/telegram.py                               | tests/test_media_download.py                 | falls back to `~/.nanobot/media`            |
 | **TTS voice notes (Edge + OpenAI + Riva)**   | ✅     | providers/tts.py, tts/manager.py, channels/telegram.py | tests/test_tts.py (new)              | `tts.enabled = false` (default)             |
+| **/trace command - AI thinking visibility**  | ✅     | channels/telegram.py                               | tests/test_trace_command_additional.py       | `_trace_enabled[chat_id] = false` (default) |
 
 ## Detailed Descriptions & Merge Guidance
 

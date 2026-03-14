@@ -99,6 +99,7 @@
   - [Configuration](#configuration)
   - [Commands (Telegram only)](#commands-telegram-only)
   - [Known limitations](#known-limitations)
+  - [/trace – Developer Mode (show intermediate thinking)](#trace--developer-mode-show-intermediate-thinking)
 - [🧩 Multiple Instances](#-multiple-instances)
   - [Quick Start](#quick-start)
   - [Path Resolution](#path-resolution)
@@ -1137,8 +1138,24 @@ All `/tts` changes apply only to the current chat (overrides global/channel conf
 Enjoy listening to nanobot!
 
 
+### /trace – Developer Mode (show intermediate thinking)
 
+```text
+/trace on      → show all intermediate thoughts and tool calls (prefixed 💭 or 🤖)
+/trace off     → hide them again (default)
+/trace status  → check current setting
+```
 
+**When enabled**, you will see:
+
+- 💭 Thinking steps  
+- 🤖 Tool calls (e.g. `web_search("current weather")`)
+
+**When disabled** (default), only the final answer appears in Telegram.
+
+Useful for debugging long tool chains or understanding how the agent reasons.
+
+**Note**: Only available in **private chats** (DMs) and group chats where the bot is mentioned.
 ## 🧩 Multiple Instances
 
 Run multiple nanobot instances simultaneously with separate configs and runtime data. Use `--config` as the main entrypoint, and optionally use `--workspace` to override the workspace for a specific run.

@@ -214,6 +214,11 @@ class TelegramChannel(BaseChannel):
         # Per-chat TTS overrides (for /tts command)
         self._chat_tts_overrides: dict[str, dict] = {}
 
+        # Per-chat trace toggle (runtime-only, resets on restart).
+        # When True, intermediate thinking/tool-hint progress messages are
+        # forwarded to the chat prefixed with "🤖 ".  Default is False (suppress).
+        self._trace_enabled: dict[str, bool] = {}
+
     def is_allowed(self, sender_id: str) -> bool:
         """Preserve Telegram's legacy id|username allowlist matching."""
         # Do NOT call super().is_allowed() — it is too permissive for legacy format
@@ -276,11 +281,12 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(CommandHandler("model", self._forward_command, filters=private_only))
         self._app.add_handler(CommandHandler("help", self._on_help, filters=private_only))
         self._app.add_handler(CommandHandler("tts", self._on_tts_command, filters=private_only))
+        self._app.add_handler(CommandHandler("trace", self._on_trace_command, filters=private_only))
 
-        # Add message handler for text, photos, voice, documents.
+        # Add message handler for text, photos极voice, documents.
         # In groups, commands typed as "@BotName /cmd" are plain TEXT (not COMMAND
         # entities from Telegram's perspective when prefixed by a mention), so we
-        # include all TEXT here.  The ~filters.COMMAND exclusion only applies in
+        # include all TEXT here.  The ~filters.COMMAND exclusion only applies
         # private chats where CommandHandlers above take precedence.
         self._app.add_handler(
             MessageHandler(
@@ -363,8 +369,10 @@ class TelegramChannel(BaseChannel):
         thread_id = msg.metadata.get("message_thread_id")
         comp_key = self._composite_key(msg.chat_id, thread_id)
 
+        is_progress = msg.metadata.get("_progress", False)
+
         # Only stop typing indicator for final responses
-        if not msg.metadata.get("_progress", False):
+        if not is_progress:
             self._stop_typing(comp_key)
 
         try:
@@ -372,6 +380,65 @@ class TelegramChannel(BaseChannel):
         except ValueError:
             logger.error("Invalid chat_id: {}", msg.chat_id)
             return
+
+        # ── Progress messages (thinking / tool hints) ──────────────────
+        # These are intermediate AI thoughts and tool-call hints produced
+        # while the agent is still working.  They should NOT be sent to
+        # the Telegram channel — the user only sees the "Typing…" indicator
+        # and the "💭 Thinking…" draft message (DM only).
+        # When trace is enabled per chat, they are sent prefixed with 🤖 or 💭.
+        if is_progress:
+            is_tool_hint = msg.metadata.get("_tool_hint", False)
+            label = "tool_hint" if is_tool_hint else "thinking"
+            preview = (msg.content or "")[:120].replace("\n", " ")
+            logger.info("[progress:{}] chat={} → {}", label, msg.chat_id, preview)
+
+            trace_on = self._trace_enabled.get(str(chat_id), False)
+            if not trace_on:
+                return  # suppressed - only logged
+
+            # Trace enabled → send to chat with prefix
+            prefix = "🤖 " if is_tool_hint else "💭 "
+            trace_content = prefix + (msg.content or "").strip()
+
+            # Prepare sending parameters (reuse existing thread/reply logic)
+            thread_kwargs: dict = {}
+            if thread_id is not None:
+                thread_kwargs["message_thread_id"] = thread_id
+
+            reply_params = None
+            if self.config.reply_to_message:
+                reply_to_message_id = msg.metadata.get("message_id")
+                if reply_to_message_id:
+                    reply_params = ReplyParameters(
+                        message_id=reply_to_message_id,
+                        allow_sending_without_reply=True
+                    )
+
+            # Send (split if too long)
+            for chunk in split_message(trace_content, TELEGRAM_MAX_MESSAGE_LEN):
+                try:
+                    html = _markdown_to_telegram_html(chunk)
+                    await self._app.bot.send_message(
+                        chat_id=chat_id,
+                        text=html,
+                        parse_mode="HTML",
+                        reply_parameters=reply_params,
+                        **thread_kwargs,
+                    )
+                except Exception as e:
+                    logger.warning("Failed to send trace message: {}", e)
+                    try:
+                        await self._app.bot.send_message(
+                            chat_id=chat_id,
+                            text=chunk,
+                            reply_parameters=reply_params,
+                            **thread_kwargs,
+                        )
+                    except Exception as e2:
+                        logger.error("Error sending trace message: {}", e2)
+
+            return  # progress message handled
 
         # Build optional kwargs for message_thread_id (topic support)
         thread_kwargs: dict = {}
@@ -431,55 +498,53 @@ class TelegramChannel(BaseChannel):
                     **thread_kwargs,
                 )
 
-       # TTS voice note (if enabled and we have text content)
-       voice_note_sent = False
-       
-       # Check if TTS is enabled (considering chat-specific overrides)
-       chat_id_str = str(chat_id)
-       chat_override = self._chat_tts_overrides.get(chat_id_str, {})
-       tts_enabled = chat_override.get("enabled", self.tts_manager.config.enabled)
-       
-       if tts_enabled and msg.content and msg.content.strip() and not msg.metadata.get("_progress", False):
-           try:
-               logger.debug("Attempting TTS generation for message")
-               
-               # Apply chat-specific overrides for TTS generation
-               tts_config = self.config.tts.model_copy()
-               if "voice" in chat_override:
-                   tts_config.voice = chat_override["voice"]
-               if "provider" in chat_override:
-                   tts_config.provider = chat_override["provider"]
-               
-               # Create temporary TTS manager with overridden config
-               from nanobot.tts.manager import TTSManager
-               openai_api_key = self.bus.config.providers.openai.api_key if hasattr(self.bus.config, 'providers') and hasattr(self.bus.config.providers, 'openai') else ""
-               temp_tts_manager = TTSManager(tts_config, openai_api_key)
-               
-               ogg_bytes = await temp_tts_manager.generate_voice_note(msg.content)
-               
-               if ogg_bytes:
-                   duration = await get_audio_duration(ogg_bytes, "ogg")
-                   voice_file = BytesIO(ogg_bytes)
-                   voice_file.name = "voice_note.ogg"
-                   
-                   await self._app.bot.send_voice(
-                       chat_id=chat_id,
-                       voice=voice_file,
-                       duration=int(duration),
-                       reply_parameters=reply_params,
-                       **thread_kwargs,
-                   )
-                   voice_note_sent = True
-                   logger.info(f"TTS voice note sent ({duration:.1f}s)")
-               else:
-                   logger.warning("TTS returned no audio → skipping voice note")
-           except Exception as e:
-               logger.exception("TTS generation or sending failed → falling back to text only")
+        # TTS voice note (if enabled and we have text content)
+        voice_note_sent = False
 
-       # Send text content
+        # Check if TTS is enabled (considering chat-specific overrides)
+        chat_id_str = str(chat_id)
+        chat_override = self._chat_tts_overrides.get(chat_id_str, {})
+        tts_enabled = chat_override.get("enabled", self.tts_manager.config.enabled)
+
+        if tts_enabled and msg.content and msg.content.strip():
+            try:
+                logger.debug("Attempting TTS generation for message")
+
+                # Apply chat-specific overrides for TTS generation
+                tts_config = self.config.tts.model_copy()
+                if "voice" in chat_override:
+                    tts_config.voice = chat_override["voice"]
+                if "provider" in chat_override:
+                    tts_config.provider = chat_override["provider"]
+
+                # Create temporary TTS manager with overridden config
+                from nanobot.tts.manager import TTSManager
+                openai_api_key = self.bus.config.providers.openai.api_key if hasattr(self.bus.config, 'providers') and hasattr(self.bus.config.providers, 'openai') else ""
+                temp_tts_manager = TTSManager(tts_config, openai_api_key)
+
+                ogg_bytes = await temp_tts_manager.generate_voice_note(msg.content)
+
+                if ogg_bytes:
+                    duration = await get_audio_duration(ogg_bytes, "ogg")
+                    voice_file = BytesIO(ogg_bytes)
+                    voice_file.name = "voice_note.ogg"
+
+                    await self._app.bot.send_voice(
+                        chat_id=chat_id,
+                        voice=voice_file,
+                        duration=int(duration),
+                        reply_parameters=reply_params,
+                        **thread_kwargs,
+                    )
+                    voice_note_sent = True
+                    logger.info(f"TTS voice note sent ({duration:.1f}s)")
+                else:
+                    logger.warning("TTS returned no audio → skipping voice note")
+            except Exception as e:
+                logger.exception("TTS generation or sending failed → falling back to text only")
+
+        # Send text content
         if msg.content and msg.content != "[empty message]":
-            is_progress = msg.metadata.get("_progress", False)
-
             for chunk in split_message(msg.content, TELEGRAM_MAX_MESSAGE_LEN):
                 try:
                     html = _markdown_to_telegram_html(chunk)
@@ -616,6 +681,46 @@ class TelegramChannel(BaseChannel):
                 "/tts voice [name] — Change voice\n"
                 "/tts provider [edge/openai] — Change provider\n"
                 "/tts status — Show current settings"
+            )
+
+    async def _on_trace_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /trace on|off|status command."""
+        if not update.message or not update.effective_user:
+            return
+
+        chat_id_str = str(update.effective_message.chat_id)
+        user_id = str(update.effective_user.id)
+        
+        # Check if user is allowed
+        if not self.is_allowed(self._sender_id(update.effective_user)):
+            await update.message.reply_text("❌ You are not authorized to use this bot.")
+            return
+
+        # Parse command arguments
+        args = context.args if context.args else []
+        
+        if not args:
+            status = "on" if self._trace_enabled.get(chat_id_str, False) else "off"
+            await update.message.reply_text(f"🔍 Trace mode: {status}\n\nUsage:\n/trace on — Show intermediate thoughts\n/trace off — Hide intermediate thoughts\n/trace status — Show current status")
+            return
+
+        command = args[0].lower()
+        
+        if command == "on":
+            self._trace_enabled[chat_id_str] = True
+            await update.message.reply_text("🔍 Trace mode **enabled** for this chat.\nIntermediate thoughts will now appear prefixed with 🤖")
+        elif command == "off":
+            self._trace_enabled[chat_id_str] = False
+            await update.message.reply_text("🔍 Trace mode **disabled** for this chat.\nIntermediate thoughts will be hidden (only shown in logs).")
+        elif command == "status":
+            status = "on" if self._trace_enabled.get(chat_id_str, False) else "off"
+            await update.message.reply_text(f"🔍 Trace mode is currently **{status}** for this chat.")
+        else:
+            await update.message.reply_text(
+                "❓ Unknown command. Usage:\n"
+                "/trace on — Show intermediate thoughts\n"
+                "/trace off — Hide intermediate thoughts\n"
+                "/trace status — Show current status"
             )
 
     @staticmethod
