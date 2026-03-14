@@ -11,9 +11,8 @@ from nanobot.providers.tts import BaseTTSProvider, EdgeTTSProvider, OpenAITTSPro
 class TTSManager:
     """Manager for TTS operations with multiple providers."""
     
-    def __init__(self, config: TTSConfig, openai_api_key: str = ""):
+    def __init__(self, config: TTSConfig):
         self.config = config
-        self.openai_api_key = openai_api_key
         self._provider: Optional[BaseTTSProvider] = None
     
     def _get_provider(self) -> Optional[BaseTTSProvider]:
@@ -41,12 +40,11 @@ class TTSManager:
             if self.config.provider == "edge":
                 self._provider = EdgeTTSProvider(provider_config)
             elif self.config.provider == "openai":
-                if not self.openai_api_key:
-                    logger.warning("OpenAI TTS requested but no API key provided")
-                    return None
-                self._provider = OpenAITTSProvider(provider_config, self.openai_api_key)
+                # API key is now read inside OpenAITTSProvider from config
+                self._provider = OpenAITTSProvider(provider_config)
             elif self.config.provider == "riva":
-                self._provider = RivaTTSProvider(provider_config, self.openai_api_key)
+                # API key is now read inside RivaTTSProvider from config
+                self._provider = RivaTTSProvider(provider_config)
             else:
                 logger.error(f"Unknown TTS provider: {self.config.provider}")
                 return None

@@ -207,9 +207,8 @@ class TelegramChannel(BaseChannel):
         self._bot_username: str | None = None
         
         # TTS manager initialization
-        openai_api_key = self.bus.config.providers.openai.api_key if hasattr(self.bus.config, 'providers') and hasattr(self.bus.config.providers, 'openai') else ""
         from nanobot.tts.manager import TTSManager
-        self.tts_manager = TTSManager(config.tts, openai_api_key=openai_api_key)
+        self.tts_manager = TTSManager(config.tts)
         
         # Per-chat TTS overrides (for /tts command)
         self._chat_tts_overrides: dict[str, dict] = {}
@@ -519,8 +518,7 @@ class TelegramChannel(BaseChannel):
 
                 # Create temporary TTS manager with overridden config
                 from nanobot.tts.manager import TTSManager
-                openai_api_key = self.bus.config.providers.openai.api_key if hasattr(self.bus.config, 'providers') and hasattr(self.bus.config.providers, 'openai') else ""
-                temp_tts_manager = TTSManager(tts_config, openai_api_key)
+                temp_tts_manager = TTSManager(tts_config)
 
                 ogg_bytes = await temp_tts_manager.generate_voice_note(msg.content)
 

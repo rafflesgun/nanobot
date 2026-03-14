@@ -133,19 +133,26 @@ class EdgeTTSProvider(BaseTTSProvider):
 class OpenAITTSProvider(BaseTTSProvider):
     """OpenAI TTS provider using OpenAI API."""
     
-    def __init__(self, config: TTSConfig, api_key: str):
+    def __init__(self, config: TTSConfig):
         super().__init__(config)
-        self.api_key = api_key
         self._openai = None
     
     async def generate_audio(self, text: str) -> Optional[bytes]:
         """Generate audio using OpenAI TTS API."""
         if not text.strip():
             return None
+        
+        # Get API key from config, fallback to environment variable
+        import os
+        api_key = self.config.openai_api_key or os.getenv("OPENAI_API_KEY")
+        
+        if not api_key:
+            print("OpenAI TTS: No API key provided in config or environment")
+            return None
             
         try:
             # Configure OpenAI client
-            client = self.openai.AsyncOpenAI(api_key=self.api_key)
+            client = self.openai.AsyncOpenAI(api_key=api_key)
             
             # Call OpenAI TTS API
             response = await client.audio.speech.create(
@@ -183,9 +190,8 @@ class OpenAITTSProvider(BaseTTSProvider):
 class RivaTTSProvider(BaseTTSProvider):
     """NVIDIA Riva TTS provider using Riva client library."""
     
-    def __init__(self, config: TTSConfig, api_key: str = ""):
+    def __init__(self, config: TTSConfig):
         super().__init__(config)
-        self.api_key = api_key
         self._riva_client = None
     
     async def generate_audio(self, text: str) -> Optional[bytes]:
@@ -201,16 +207,20 @@ class RivaTTSProvider(BaseTTSProvider):
                 raise ImportError("nvidia-riva-client package is required for RivaTTSProvider. Install with: pip install nvidia-riva-client")
         
         try:
+            # Get API key from config, fallback to environment
+            import os
+            api_key = self.config.riva_api_key or os.getenv("NVIDIA_API_KEY") or ""
+
             # Create Riva client with authentication
-            if self.api_key:
+            if api_key:
                 # For cloud-based NVCF Riva services
                 auth = self._riva_client.Auth(
                     ssl_cert=self.config.riva_ssl_cert if self.config.riva_ssl_cert else None,
                     use_ssl=self.config.riva_use_ssl,
                     metadata=[
                         ("function-id", self.config.riva_function_id or ""),
-                        ("authorization", f"Bearer {self.api_key}")
-                    ] if self.config.riva_function_id else [("authorization", f"Bearer {self.api_key}")]
+                        ("authorization", f"Bearer {api_key}")
+                    ] if self.config.riva_function_id else [("authorization", f"Bearer {api_key}")]
                 )
             else:
                 # For local Riva server

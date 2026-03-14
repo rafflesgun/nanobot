@@ -39,15 +39,14 @@ async def test_openai_tts_provider_initialization(tts_config):
     with patch('importlib.import_module') as mock_import:
         mock_openai = Mock()
         mock_import.return_value = mock_openai
-        provider = OpenAITTSProvider(tts_config, api_key="test-key")
+        provider = OpenAITTSProvider(tts_config)
         assert provider.config == tts_config
-        assert provider.api_key == "test-key"
 
 
 @pytest.mark.asyncio
 async def test_tts_manager_initialization(tts_config):
     """Test TTSManager initialization."""
-    manager = TTSManager(tts_config, openai_api_key="test-key")
+    manager = TTSManager(tts_config)
     assert manager.config == tts_config
     assert manager.openai_api_key == "test-key"
 

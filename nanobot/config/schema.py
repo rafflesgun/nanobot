@@ -27,15 +27,26 @@ class TTSConfig(Base):
     """TTS configuration for all channels."""
     
     enabled: bool = False
-    provider: str = "edge"  # "edge" or "openai"
+    provider: str = "edge"  # "edge", "openai", "riva"
     voice: str = "en-US-AriaNeural"
     rate: str = "+0%"
     pitch: str = "+0%"
     volume: str = "+0%"
-    # OpenAI specific settings
+    
+    # ── Per-provider credentials (independent of LLM keys) ──
+    openai_api_key: str | None = None
+    riva_api_key: str | None = None           # mainly for NVIDIA Cloud Functions
+    
+    # OpenAI-specific parameters
     openai_model: str = "tts-1"
     openai_quality: str = "low"
     openai_speed: float = 1.0
+    
+    # NVIDIA Riva / NVCF specific
+    riva_server_url: str = "localhost:50051"
+    riva_use_ssl: bool = False
+    riva_ssl_cert: str | None = None
+    riva_function_id: str | None = None       # NVCF function ID when using cloud
 
 
 class TelegramConfig(Base):
