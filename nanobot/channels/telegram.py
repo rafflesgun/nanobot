@@ -17,10 +17,14 @@ except ImportError:
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
+from io import BytesIO
+
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import TelegramConfig
+from nanobot.tts.manager import TTSManager
+from nanobot.utils.audio import convert_to_ogg_opus, get_audio_duration
 from nanobot.utils.helpers import split_message
 
 TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
@@ -201,6 +205,14 @@ class TelegramChannel(BaseChannel):
         self._message_threads: dict[tuple[str, int], int] = {}
         self._bot_user_id: int | None = None
         self._bot_username: str | None = None
+        
+        # TTS manager initialization
+        openai_api_key = self.bus.config.providers.openai.api_key if hasattr(self.bus.config, 'providers') and hasattr(self.bus.config.providers, 'openai') else ""
+        from nanobot.tts.manager import TTSManager
+        self.tts_manager = TTSManager(config.tts, openai_api_key=openai_api_key)
+        
+        # Per-chat TTS overrides (for /tts command)
+        self._chat_tts_overrides: dict[str, dict] = {}
 
     def is_allowed(self, sender_id: str) -> bool:
         """Preserve Telegram's legacy id|username allowlist matching."""
@@ -263,6 +275,7 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(CommandHandler("stop", self._forward_command, filters=private_only))
         self._app.add_handler(CommandHandler("model", self._forward_command, filters=private_only))
         self._app.add_handler(CommandHandler("help", self._on_help, filters=private_only))
+        self._app.add_handler(CommandHandler("tts", self._on_tts_command, filters=private_only))
 
         # Add message handler for text, photos, voice, documents.
         # In groups, commands typed as "@BotName /cmd" are plain TEXT (not COMMAND
@@ -418,7 +431,52 @@ class TelegramChannel(BaseChannel):
                     **thread_kwargs,
                 )
 
-        # Send text content
+       # TTS voice note (if enabled and we have text content)
+       voice_note_sent = False
+       
+       # Check if TTS is enabled (considering chat-specific overrides)
+       chat_id_str = str(chat_id)
+       chat_override = self._chat_tts_overrides.get(chat_id_str, {})
+       tts_enabled = chat_override.get("enabled", self.tts_manager.config.enabled)
+       
+       if tts_enabled and msg.content and msg.content.strip() and not msg.metadata.get("_progress", False):
+           try:
+               logger.debug("Attempting TTS generation for message")
+               
+               # Apply chat-specific overrides for TTS generation
+               tts_config = self.config.tts.model_copy()
+               if "voice" in chat_override:
+                   tts_config.voice = chat_override["voice"]
+               if "provider" in chat_override:
+                   tts_config.provider = chat_override["provider"]
+               
+               # Create temporary TTS manager with overridden config
+               from nanobot.tts.manager import TTSManager
+               openai_api_key = self.bus.config.providers.openai.api_key if hasattr(self.bus.config, 'providers') and hasattr(self.bus.config.providers, 'openai') else ""
+               temp_tts_manager = TTSManager(tts_config, openai_api_key)
+               
+               ogg_bytes = await temp_tts_manager.generate_voice_note(msg.content)
+               
+               if ogg_bytes:
+                   duration = await get_audio_duration(ogg_bytes, "ogg")
+                   voice_file = BytesIO(ogg_bytes)
+                   voice_file.name = "voice_note.ogg"
+                   
+                   await self._app.bot.send_voice(
+                       chat_id=chat_id,
+                       voice=voice_file,
+                       duration=int(duration),
+                       reply_parameters=reply_params,
+                       **thread_kwargs,
+                   )
+                   voice_note_sent = True
+                   logger.info(f"TTS voice note sent ({duration:.1f}s)")
+               else:
+                   logger.warning("TTS returned no audio → skipping voice note")
+           except Exception as e:
+               logger.exception("TTS generation or sending failed → falling back to text only")
+
+       # Send text content
         if msg.content and msg.content != "[empty message]":
             is_progress = msg.metadata.get("_progress", False)
 
@@ -465,8 +523,100 @@ class TelegramChannel(BaseChannel):
             "/new — Start a new conversation\n"
             "/stop — Stop the current task\n"
             "/model — Show or switch the LLM model\n"
+            "/tts — Control TTS settings (on/off, voice, provider)\n"
             "/help — Show available commands"
         )
+
+    async def _on_tts_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /tts command for controlling TTS settings."""
+        if not update.message or not update.effective_user:
+            return
+
+        chat_id = str(update.effective_message.chat_id)
+        user_id = str(update.effective_user.id)
+        
+        # Check if user is allowed
+        if not self.is_allowed(self._sender_id(update.effective_user)):
+            await update.message.reply_text("❌ You are not authorized to use this bot.")
+            return
+
+        # Parse command arguments
+        args = context.args if context.args else []
+        
+        if not args:
+            # Show current TTS status
+            chat_override = self._chat_tts_overrides.get(chat_id, {})
+            current_config = chat_override if chat_override else self.config.tts
+            status_msg = (
+                f"🔊 TTS Settings:\n"
+                f"Enabled: {'✅' if current_config.enabled else '❌'}\n"
+                f"Provider: {current_config.provider}\n"
+                f"Voice: {current_config.voice}\n\n"
+                f"Usage:\n"
+                f"/tts on — Enable TTS\n"
+                f"/tts off — Disable TTS\n"
+                f"/tts voice [name] — Change voice\n"
+                f"/tts provider [edge/openai] — Change provider\n"
+                f"/tts status — Show current settings"
+            )
+            await update.message.reply_text(status_msg)
+            return
+
+        command = args[0].lower()
+        
+        if command == "on":
+            # Enable TTS for this chat
+            if chat_id not in self._chat_tts_overrides:
+                self._chat_tts_overrides[chat_id] = {}
+            self._chat_tts_overrides[chat_id]["enabled"] = True
+            await update.message.reply_text("🔊 TTS enabled for this chat.")
+            
+        elif command == "off":
+            # Disable TTS for this chat
+            if chat_id not in self._chat_tts_overrides:
+                self._chat_tts_overrides[chat_id] = {}
+            self._chat_tts_overrides[chat_id]["enabled"] = False
+            await update.message.reply_text("🔇 TTS disabled for this chat.")
+            
+        elif command == "status":
+            # Show current status (same as no args)
+            chat_override = self._chat_tts_overrides.get(chat_id, {})
+            current_config = chat_override if chat_override else self.config.tts
+            status_msg = (
+                f"🔊 TTS Settings:\n"
+                f"Enabled: {'✅' if current_config.enabled else '❌'}\n"
+                f"Provider: {current_config.provider}\n"
+                f"Voice: {current_config.voice}"
+            )
+            await update.message.reply_text(status_msg)
+            
+        elif command == "voice" and len(args) > 1:
+            # Change voice
+            new_voice = args[1]
+            if chat_id not in self._chat_tts_overrides:
+                self._chat_tts_overrides[chat_id] = {}
+            self._chat_tts_overrides[chat_id]["voice"] = new_voice
+            await update.message.reply_text(f" голос Changed voice to: {new_voice}")
+            
+        elif command == "provider" and len(args) > 1:
+            # Change provider
+            new_provider = args[1].lower()
+            if new_provider in ["edge", "openai"]:
+                if chat_id not in self._chat_tts_overrides:
+                    self._chat_tts_overrides[chat_id] = {}
+                self._chat_tts_overrides[chat_id]["provider"] = new_provider
+                await update.message.reply_text(f"🔄 TTS provider changed to: {new_provider}")
+            else:
+                await update.message.reply_text("❌ Invalid provider. Use 'edge' or 'openai'.")
+        else:
+            await update.message.reply_text(
+                "❓ Unknown command. Usage:\n"
+                "/tts on — Enable TTS\n"
+                "/tts off — Disable TTS\n"
+                "/tts voice [name] — Change voice\n"
+                "/tts provider [edge/openai] — Change provider\n"
+                "/tts status — Show current settings"
+            )
 
     @staticmethod
     def _sender_id(user) -> str:

@@ -1,0 +1,129 @@
+"""TTS Manager for handling text-to-speech generation."""
+
+from typing import Optional
+from loguru import logger
+
+from nanobot.config.schema import TTSConfig
+from nanobot.providers.tts import BaseTTSProvider, EdgeTTSProvider, OpenAITTSProvider, RivaTTSProvider, TTSConfig as ProviderTTSConfig
+
+
+
+class TTSManager:
+    """Manager for TTS operations with multiple providers."""
+    
+    def __init__(self, config: TTSConfig, openai_api_key: str = ""):
+        self.config = config
+        self.openai_api_key = openai_api_key
+        self._provider: Optional[BaseTTSProvider] = None
+    
+    def _get_provider(self) -> Optional[BaseTTSProvider]:
+        """Get the configured TTS provider."""
+        if self._provider is not None:
+            return self._provider
+        
+        # Convert schema TTSConfig to provider TTSConfig
+        provider_config = ProviderTTSConfig(
+            enabled=self.config.enabled,
+            provider=self.config.provider,
+            voice=self.config.voice,
+            rate=self.config.rate,
+            pitch=self.config.pitch,
+            volume=self.config.volume,
+            openai_model=self.config.openai_model,
+            openai_quality=self.config.openai_quality,
+            openai_speed=self.config.openai_speed,
+            riva_server_url=self.config.riva_server_url,
+            riva_use_ssl=self.config.riva_use_ssl,
+            riva_ssl_cert=self.config.riva_ssl_cert,
+        )
+        
+        try:
+            if self.config.provider == "edge":
+                self._provider = EdgeTTSProvider(provider_config)
+            elif self.config.provider == "openai":
+                if not self.openai_api_key:
+                    logger.warning("OpenAI TTS requested but no API key provided")
+                    return None
+                self._provider = OpenAITTSProvider(provider_config, self.openai_api_key)
+            elif self.config.provider == "riva":
+                self._provider = RivaTTSProvider(provider_config, self.openai_api_key)
+            else:
+                logger.error(f"Unknown TTS provider: {self.config.provider}")
+                return None
+        except ImportError as e:
+            logger.error(f"Failed to initialize TTS provider {self.config.provider}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Error initializing TTS provider: {e}")
+            return None
+        
+        return self._provider
+    
+    async def generate_voice_note(self, text: str) -> Optional[bytes]:
+        """
+        Generate voice note audio in OGG/Opus format for Telegram.
+        
+        Args:
+            text: Text to convert to speech
+            
+        Returns:
+            OGG/Opus audio bytes or None if generation fails
+        """
+        if not self.config.enabled:
+            return None
+            
+        provider = self._get_provider()
+        if not provider:
+            return None
+        
+        try:
+            # Lazy import audio utilities only when actually generating voice
+            from nanobot.utils.audio import convert_to_ogg_opus, get_audio_duration
+
+            # Generate audio using the provider
+            logger.info(f"Generating TTS audio with {self.config.provider} provider, voice: {self.config.voice}")
+            audio_bytes = await provider.generate_audio(text)
+            
+            if not audio_bytes:
+                logger.warning("TTS provider returned no audio data")
+                return None
+            
+            # Convert to OGG/Opus format for Telegram
+            if self.config.provider == "edge":
+                # Edge TTS returns MP3
+                ogg_bytes = await convert_to_ogg_opus(audio_bytes, input_format="mp3")
+            elif self.config.provider == "openai":
+                # OpenAI TTS returns MP3 by default
+                ogg_bytes = await convert_to_ogg_opus(audio_bytes, input_format="mp3")
+            elif self.config.provider == "riva":
+                # Riva TTS returns WAV
+                ogg_bytes = await convert_to_ogg_opus(audio_bytes, input_format="wav")
+            else:
+                logger.error(f"Unknown provider format for {self.config.provider}")
+                return None
+            
+            if not ogg_bytes:
+                logger.warning("Audio conversion to OGG/Opus failed")
+                return None
+            
+            # Log duration for monitoring
+            duration = await get_audio_duration(ogg_bytes, input_format="ogg")
+            logger.info(f"TTS generated successfully: {duration:.1f}s")
+            
+            return ogg_bytes
+            
+        except Exception as e:
+            logger.error(f"TTS generation failed: {e}")
+            return None
+    
+    async def get_supported_voices(self) -> dict:
+        """Get supported voices from the current provider."""
+        provider = self._get_provider()
+        if not provider:
+            return {"voices": []}
+        
+        try:
+            return await provider.get_supported_voices()
+        except Exception as e:
+            logger.error(f"Failed to get supported voices: {e}")
+            return {"voices": []}

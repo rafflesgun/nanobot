@@ -23,6 +23,21 @@ class WhatsAppConfig(Base):
     allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers
 
 
+class TTSConfig(Base):
+    """TTS configuration for all channels."""
+    
+    enabled: bool = False
+    provider: str = "edge"  # "edge" or "openai"
+    voice: str = "en-US-AriaNeural"
+    rate: str = "+0%"
+    pitch: str = "+0%"
+    volume: str = "+0%"
+    # OpenAI specific settings
+    openai_model: str = "tts-1"
+    openai_quality: str = "low"
+    openai_speed: float = 1.0
+
+
 class TelegramConfig(Base):
     """Telegram channel configuration."""
 
@@ -34,6 +49,7 @@ class TelegramConfig(Base):
     )
     reply_to_message: bool = False  # If true, bot replies quote the original message
     group_policy: Literal["open", "mention"] = "mention"  # "mention" responds when @mentioned or replied to, "open" responds to all
+    tts: TTSConfig = Field(default_factory=TTSConfig)
 
 
 class FeishuConfig(Base):

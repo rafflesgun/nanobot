@@ -80,22 +80,41 @@
 
 ## Table of Contents
 
-- [News](#-news)
-- [Key Features](#key-features-of-nanobot)
-- [Architecture](#️-architecture)
-- [Features](#-features)
-- [Install](#-install)
-- [Quick Start](#-quick-start)
-- [Chat Apps](#-chat-apps)
-- [Agent Social Network](#-agent-social-network)
-- [Configuration](#️-configuration)
-- [Multiple Instances](#-multiple-instances)
-- [CLI Reference](#-cli-reference)
-- [Docker](#-docker)
-- [Linux Service](#-linux-service)
-- [Project Structure](#-project-structure)
-- [Contribute & Roadmap](#-contribute--roadmap)
-- [Star History](#-star-history)
+- [📢 News](#-news)
+- [Key Features of nanobot:](#key-features-of-nanobot)
+- [🏗️ Architecture](#️-architecture)
+- [Table of Contents](#table-of-contents)
+- [✨ Features](#-features)
+- [📦 Install](#-install)
+  - [Update to latest version](#update-to-latest-version)
+- [🚀 Quick Start](#-quick-start)
+- [💬 Chat Apps](#-chat-apps)
+- [🌐 Agent Social Network](#-agent-social-network)
+- [⚙️ Configuration](#️-configuration)
+  - [Providers](#providers)
+  - [MCP (Model Context Protocol)](#mcp-model-context-protocol)
+  - [Security](#security)
+- [🎤 Text-to-Speech (TTS) Support – Telegram Voice Notes](#-text-to-speech-tts-support--telegram-voice-notes)
+  - [Supported providers](#supported-providers)
+  - [Configuration](#configuration)
+  - [Commands (Telegram only)](#commands-telegram-only)
+  - [Known limitations](#known-limitations)
+- [🧩 Multiple Instances](#-multiple-instances)
+  - [Quick Start](#quick-start)
+  - [Path Resolution](#path-resolution)
+  - [How It Works](#how-it-works)
+  - [Minimal Setup](#minimal-setup)
+  - [Common Use Cases](#common-use-cases)
+  - [Notes](#notes)
+- [💻 CLI Reference](#-cli-reference)
+- [🐳 Docker](#-docker)
+  - [Docker Compose](#docker-compose)
+  - [Docker](#docker)
+- [🐧 Linux Service](#-linux-service)
+- [📁 Project Structure](#-project-structure)
+- [🤝 Contribute \& Roadmap](#-contribute--roadmap)
+  - [Contributors](#contributors)
+- [⭐ Star History](#-star-history)
 
 ## ✨ Features
 
@@ -1025,6 +1044,101 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 | `channels.*.allowFrom` | `[]` (deny all) | Whitelist of user IDs. Empty denies all; use `["*"]` to allow everyone. |
 
 
+
+
+## 🎤 Text-to-Speech (TTS) Support – Telegram Voice Notes
+
+nanobot can read its replies aloud using **neural-quality TTS** and send them as **voice notes** (alongside the usual text message).
+
+### Supported providers
+
+| Provider | Cost     | Quality     | Voice count | Latency | Notes |
+|----------|----------|-------------|-------------|---------|-------|
+| edge     | Free     | Very good   | ~400        | low     | Microsoft Edge TTS voices (no key needed) |
+| openai   | Paid     | Excellent   | 6           | very low| OpenAI TTS API (tts-1 / tts-1-hd models) |
+| riva     | Variable | Excellent   | 100+        | low     | NVIDIA Riva TTS (local or cloud-hosted) |
+
+### Configuration
+
+```yaml
+channels:
+  telegram:
+    # ... other telegram settings ...
+    tts:
+      enabled: true                     # default: false
+      provider: edge                    # or "openai"
+      voice: en-US-AriaNeural           # default voice (Edge)
+      rate: "+0%"                       # speed adjustment: e.g. "+20%", "-10%"
+      pitch: "+0Hz"
+      volume: "+0dB"
+      openai_model: tts-1               # only for openai provider
+      openai_quality: low               # low / high (only tts-1-hd supports high)
+      openai_speed: 1.0                 # 0.25–4.0 (only OpenAI)
+```
+
+OpenAI provider requires `NANOBOT_PROVIDERS_OPENAI_API_KEY` environment variable (or set in config).
+
+For NVIDIA Riva, you can use either a local self-hosted server or the cloud-hosted NVIDIA Cloud Functions (NVCF) service:
+
+**Local Riva server:**
+```yaml
+channels:
+  telegram:
+    tts:
+      enabled: true
+      provider: riva
+      voice: "English-US.Female-1"
+      riva_server_url: "localhost:50051"  # Your local Riva server
+      riva_use_ssl: false
+      # No API key needed for local servers
+```
+
+**NVIDIA Cloud Functions (NVCF) Riva:**
+```yaml
+channels:
+  telegram:
+    tts:
+      enabled: true
+      provider: riva
+      voice: "Magpie-Multilingual.EN-US.Aria"
+      riva_server_url: "grpc.nvcf.nvidia.com:443"
+      riva_use_ssl: true
+      riva_function_id: "877104f7-e885-42b9-8de8-f6e4c6303969"  # Required for NVCF
+      # API key is taken from the openai_api_key field in main config
+```
+
+For NVCF Riva, set your NVIDIA API key in the main config:
+```json
+{
+  "openai_api_key": "nvapi-your-api-key-here"
+}
+```
+
+### Commands (Telegram only)
+
+```text
+/tts status          → show current TTS settings
+/tts on              → enable TTS for this chat
+/tts off             → disable TTS for this chat
+/tts voice en-GB-SoniaNeural  → change voice (Edge) or alloy/echo/... (OpenAI)
+/tts provider openai → switch to OpenAI TTS
+/tts provider edge   → switch back to free Edge TTS
+```
+
+All `/tts` changes apply only to the current chat (overrides global/channel config).
+
+### Known limitations
+
+- Maximum voice note duration ~5–6 min (Telegram soft limit)
+- Very short replies (< 10–15 chars) usually skipped
+- Edge TTS sometimes produces longer silence at beginning/end
+- OpenAI TTS has only 6 voices but superior naturalness
+
+Enjoy listening to nanobot!
+
+
+
+
 ## 🧩 Multiple Instances
 
 Run multiple nanobot instances simultaneously with separate configs and runtime data. Use `--config` as the main entrypoint, and optionally use `--workspace` to override the workspace for a specific run.
@@ -1314,7 +1428,6 @@ PRs welcome! The codebase is intentionally small and readable. 🤗
   <em> Thanks for visiting ✨ nanobot!</em><br><br>
   <img src="https://visitor-badge.laobi.icu/badge?page_id=HKUDS.nanobot&style=for-the-badge&color=00d4ff" alt="Views">
 </p>
-
 
 <p align="center">
   <sub>nanobot is for educational, research, and technical exchange purposes only</sub>
