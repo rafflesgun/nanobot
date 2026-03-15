@@ -24,7 +24,7 @@ def mock_paths():
     with patch("nanobot.config.loader.get_config_path") as mock_cp, \
          patch("nanobot.config.loader.save_config") as mock_sc, \
          patch("nanobot.config.loader.load_config") as mock_lc, \
-         patch("nanobot.cli.commands.get_workspace_path") as mock_ws:
+         patch("nanobot.utils.helpers.get_workspace_path") as mock_ws:
 
         base_dir = Path("./test_onboard_data")
         if base_dir.exists():
@@ -236,36 +236,31 @@ def test_agent_config_sets_active_path(monkeypatch, tmp_path: Path) -> None:
     config_file.write_text("{}")
 
     config = Config()
-    seen: dict[str, Path] = {}
 
-    monkeypatch.setattr(
-        "nanobot.config.loader.set_config_path",
-        lambda path: seen.__setitem__("config_path", path),
-    )
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
-    monkeypatch.setattr("nanobot.config.paths.get_cron_dir", lambda: config_file.parent / "cron")
-    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
-    monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
-    monkeypatch.setattr("nanobot.cron.service.CronService", lambda _store: object())
+    with patch("nanobot.config.loader.load_config") as mock_load_config:
+        monkeypatch.setattr("nanobot.config.paths.get_cron_dir", lambda: config_file.parent / "cron")
+        monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+        monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
+        monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
+        monkeypatch.setattr("nanobot.cron.service.CronService", lambda _store: object())
 
-    class _FakeAgentLoop:
-        def __init__(self, *args, **kwargs) -> None:
-            pass
+        class _FakeAgentLoop:
+            def __init__(self, *args, **kwargs) -> None:
+                pass
 
-        async def process_direct(self, *_args, **_kwargs) -> str:
-            return "ok"
+            async def process_direct(self, *_args, **_kwargs) -> str:
+                return "ok"
 
-        async def close_mcp(self) -> None:
-            return None
+            async def close_mcp(self) -> None:
+                return None
 
-    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
-    monkeypatch.setattr("nanobot.cli.commands._print_agent_response", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
+        monkeypatch.setattr("nanobot.cli.commands._print_agent_response", lambda *_args, **_kwargs: None)
 
-    result = runner.invoke(app, ["agent", "-m", "hello", "-c", str(config_file)])
+        result = runner.invoke(app, ["agent", "-m", "hello", "-c", str(config_file)])
 
-    assert result.exit_code == 0
-    assert seen["config_path"] == config_file.resolve()
+        assert result.exit_code == 0
+        assert mock_load_config.call_args.args == (config_file.resolve(),)
 
 
 def test_agent_overrides_workspace_path(mock_agent_runtime):
@@ -313,27 +308,22 @@ def test_gateway_uses_workspace_from_config_by_default(monkeypatch, tmp_path: Pa
 
     config = Config()
     config.agents.defaults.workspace = str(tmp_path / "config-workspace")
-    seen: dict[str, Path] = {}
+    workspace_path = Path(config.agents.defaults.workspace)
 
-    monkeypatch.setattr(
-        "nanobot.config.loader.set_config_path",
-        lambda path: seen.__setitem__("config_path", path),
-    )
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
-    monkeypatch.setattr(
-        "nanobot.cli.commands.sync_workspace_templates",
-        lambda path: seen.__setitem__("workspace", path),
-    )
-    monkeypatch.setattr(
-        "nanobot.cli.commands._make_provider",
-        lambda _config: (_ for _ in ()).throw(_StopGateway("stop")),
-    )
+    with patch("nanobot.config.loader.load_config") as mock_load_config:
+        mock_load_config.return_value = config
+        with patch("nanobot.cli.commands.sync_workspace_templates") as mock_sync_templates:
+            monkeypatch.setattr(
+                "nanobot.cli.commands._make_provider",
+                lambda _config: (_ for _ in ()).throw(_StopGateway("stop")),
+            )
 
-    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+            result = runner.invoke(app, ["gateway", "--config", str(config_file)])
 
-    assert isinstance(result.exception, _StopGateway)
-    assert seen["config_path"] == config_file.resolve()
-    assert seen["workspace"] == Path(config.agents.defaults.workspace)
+            assert isinstance(result.exception, _StopGateway)
+            assert mock_load_config.call_args.args == (config_file.resolve(),)
+            assert mock_sync_templates.called
+            assert mock_sync_templates.call_args.args[0] == workspace_path
 
 
 def test_gateway_workspace_option_overrides_config(monkeypatch, tmp_path: Path) -> None:
@@ -416,7 +406,7 @@ def test_gateway_uses_config_directory_for_cron_store(monkeypatch, tmp_path: Pat
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
 
     assert isinstance(result.exception, _StopGateway)
-    assert seen["cron_store"] == config_file.parent / "cron" / "jobs.json"
+    assert seen["cron_store"] == Path(config.agents.defaults.workspace) / "cron" / "jobs.json"
 
 
 def test_gateway_uses_configured_port_when_cli_flag_is_missing(monkeypatch, tmp_path: Path) -> None:

@@ -27,7 +27,7 @@ def load_config(config_path: Path | None = None) -> Config:
     Returns:
         Loaded configuration object.
     """
-    path = config_path or get_config_path()
+    path = config_path or _config_path_override or get_config_path()
 
     if path.exists():
         try:
@@ -67,3 +67,14 @@ def _migrate_config(data: dict) -> dict:
     if "restrictToWorkspace" in exec_cfg and "restrictToWorkspace" not in tools:
         tools["restrictToWorkspace"] = exec_cfg.pop("restrictToWorkspace")
     return data
+
+
+_config_path_override: Path | None = None
+
+def set_config_path(path: Path | str | None) -> None:
+    """Allow tests to override config location"""
+    global _config_path_override
+    if path is None:
+        _config_path_override = None
+    else:
+        _config_path_override = Path(path)

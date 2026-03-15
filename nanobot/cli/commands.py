@@ -1,11 +1,19 @@
 """CLI commands for nanobot."""
 
+import warnings
 import asyncio
 import os
 import select
 import signal
 import sys
 from pathlib import Path
+
+# Suppress pydub SyntaxWarnings about invalid escape sequences
+warnings.filterwarnings(
+    "ignore",
+    category=SyntaxWarning,
+    module="pydub.utils",
+)
 
 # Force UTF-8 encoding for Windows console
 if sys.platform == "win32":

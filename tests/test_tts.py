@@ -48,7 +48,6 @@ async def test_tts_manager_initialization(tts_config):
     """Test TTSManager initialization."""
     manager = TTSManager(tts_config)
     assert manager.config == tts_config
-    assert manager.openai_api_key == "test-key"
 
 
 @pytest.mark.asyncio
@@ -58,7 +57,7 @@ async def test_tts_manager_get_provider_edge(tts_config):
     with patch('importlib.import_module') as mock_import:
         mock_edge_tts = Mock()
         mock_import.return_value = mock_edge_tts
-        manager = TTSManager(tts_config, openai_api_key="")
+        manager = TTSManager(tts_config)
         provider = manager._get_provider()
         assert isinstance(provider, EdgeTTSProvider)
 
@@ -162,7 +161,7 @@ async def test_tts_manager_provider_change(tts_config):
         
         # Test with OpenAI provider
         openai_config = TTSConfig(enabled=True, provider="openai", voice="alloy")
-        manager = TTSManager(openai_config, openai_api_key="test-key")
+        manager = TTSManager(openai_config)
         provider = manager._get_provider()
         assert isinstance(provider, OpenAITTSProvider)
         assert provider.config.provider == "openai"
@@ -206,7 +205,7 @@ async def test_tts_manager_get_provider_riva():
             riva_use_ssl=False
         )
         
-        manager = TTSManager(config, openai_api_key="")
+        manager = TTSManager(config)
         provider = manager._get_provider()
         from nanobot.providers.tts import RivaTTSProvider
         assert isinstance(provider, RivaTTSProvider)

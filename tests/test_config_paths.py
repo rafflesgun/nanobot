@@ -9,8 +9,9 @@ from nanobot.config.paths import (
     get_logs_dir,
     get_media_dir,
     get_runtime_subdir,
-    get_workspace_path,
 )
+
+from nanobot.utils.helpers import get_workspace_path
 
 
 def test_runtime_dirs_follow_config_path(monkeypatch, tmp_path: Path) -> None:
