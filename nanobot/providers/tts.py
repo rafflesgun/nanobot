@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any
 import asyncio
 from dataclasses import dataclass
+from loguru import logger
 
 @dataclass
 class TTSConfig:
@@ -23,6 +24,8 @@ class TTSConfig:
     riva_ssl_cert: str = ""  # SSL certificate path for Riva
     riva_use_ssl: bool = False  # Whether to use SSL for Riva
     riva_function_id: str = ""  # Function ID for NVCF Riva services
+    riva_api_key: Optional[str] = None  # API key for NVIDIA Cloud Functions
+    openai_api_key: Optional[str] = None  # API key for OpenAI TTS
 
 class BaseTTSProvider(ABC):
     """Abstract base class for TTS providers."""
@@ -61,12 +64,17 @@ class EdgeTTSProvider(BaseTTSProvider):
                 raise ImportError("edge-tts package is required for EdgeTTSProvider. Install with: pip install edge-tts")
 
         try:
+            # edge-tts requires volume in % format e.g. "+0%", not "+0dB"
+            volume = self.config.volume
+            if volume.endswith("dB"):
+                volume = "+0%"
+
             communicate = self._edge_tts.Communicate(
                 text,
                 self.config.voice,
                 rate=self.config.rate,
                 pitch=self.config.pitch,
-                volume=self.config.volume
+                volume=volume
             )
             
             audio_chunks = []
@@ -80,7 +88,7 @@ class EdgeTTSProvider(BaseTTSProvider):
             audio_data = b"".join(audio_chunks)
             return audio_data
         except Exception as e:
-            print(f"Error generating audio with Edge TTS: {e}")
+            logger.error(f"Error generating audio with Edge TTS: {e}", exc_info=True)
             return None
             
         try:
@@ -165,7 +173,7 @@ class OpenAITTSProvider(BaseTTSProvider):
             # Return audio bytes
             return response.content
         except Exception as e:
-            print(f"Error generating audio with OpenAI TTS: {e}")
+            logger.error(f"Error generating audio with OpenAI TTS: {e}", exc_info=True)
             return None
     
     async def get_supported_voices(self) -> Dict[str, Any]:
@@ -211,23 +219,22 @@ class RivaTTSProvider(BaseTTSProvider):
             import os
             api_key = self.config.riva_api_key or os.getenv("NVIDIA_API_KEY") or ""
 
-            # Create Riva client with authentication
+            # Build Auth — metadata must be set as attribute, not constructor kwarg
             if api_key:
-                # For cloud-based NVCF Riva services
-                auth = self._riva_client.Auth(
-                    ssl_cert=self.config.riva_ssl_cert if self.config.riva_ssl_cert else None,
-                    use_ssl=self.config.riva_use_ssl,
-                    metadata=[
-                        ("function-id", self.config.riva_function_id or ""),
-                        ("authorization", f"Bearer {api_key}")
-                    ] if self.config.riva_function_id else [("authorization", f"Bearer {api_key}")]
-                )
-            else:
-                # For local Riva server
                 auth = self._riva_client.Auth(
                     uri=self.config.riva_server_url,
+                    use_ssl=True,
                     ssl_cert=self.config.riva_ssl_cert if self.config.riva_ssl_cert else None,
-                    use_ssl=self.config.riva_use_ssl
+                )
+                metadata = [("authorization", f"Bearer {api_key}")]
+                if self.config.riva_function_id:
+                    metadata.insert(0, ("function-id", self.config.riva_function_id))
+                auth.metadata = metadata
+            else:
+                auth = self._riva_client.Auth(
+                    uri=self.config.riva_server_url,
+                    use_ssl=self.config.riva_use_ssl,
+                    ssl_cert=self.config.riva_ssl_cert if self.config.riva_ssl_cert else None,
                 )
             
             # Create TTS service
@@ -261,7 +268,7 @@ class RivaTTSProvider(BaseTTSProvider):
             return wav_buffer.getvalue()
             
         except Exception as e:
-            print(f"Error generating audio with NVIDIA Riva TTS: {e}")
+            logger.error(f"Error generating audio with NVIDIA Riva TTS: {e}", exc_info=True)
             return None
     
     def _get_language_code_from_voice(self) -> str:
@@ -283,32 +290,44 @@ class RivaTTSProvider(BaseTTSProvider):
                     self._riva_client = riva.client
                 except ImportError:
                     return {"voices": []}
-            
-            # Try to connect to Riva server to get available voices
-            auth = self._riva_client.Auth(
-                ssl_cert=self.config.riva_ssl_cert if self.config.riva_ssl_cert else None,
-                use_ssl=self.config.riva_use_ssl
-            )
-            
+
+            import os
+            api_key = self.config.riva_api_key or os.getenv("NVIDIA_API_KEY") or ""
+
+            # Build auth — metadata must be set as attribute, not constructor kwarg
+            if api_key:
+                auth = self._riva_client.Auth(
+                    uri=self.config.riva_server_url,
+                    use_ssl=True,
+                    ssl_cert=self.config.riva_ssl_cert if self.config.riva_ssl_cert else None,
+                )
+                metadata = [("authorization", f"Bearer {api_key}")]
+                if self.config.riva_function_id:
+                    metadata.insert(0, ("function-id", self.config.riva_function_id))
+                auth.metadata = metadata
+            else:
+                auth = self._riva_client.Auth(
+                    uri=self.config.riva_server_url,
+                    use_ssl=self.config.riva_use_ssl,
+                    ssl_cert=self.config.riva_ssl_cert if self.config.riva_ssl_cert else None,
+                )
             tts_service = self._riva_client.SpeechSynthesisService(auth)
-            
-            # Get available voices
+
             voices_response = tts_service.list_voices()
-            
+
             voices = []
             for voice in voices_response.voices:
                 voices.append({
                     "name": voice.name,
                     "locale": voice.language_code,
-                    "gender": voice.ssml_gender.name if hasattr(voice, 'ssml_gender') else "Unknown",
-                    "sample_rate": voice.natural_sample_rate_hz
+                    "gender": voice.ssml_gender.name if hasattr(voice, "ssml_gender") else "Unknown",
+                    "sample_rate": getattr(voice, "natural_sample_rate_hz", 22050),
                 })
-            
+
             return {"voices": voices}
-            
+
         except Exception as e:
-            print(f"Error getting voices from NVIDIA Riva TTS: {e}")
-            # Return some common Riva voices as fallback
+            logger.warning(f"Could not fetch Riva voices from server ({e}), using fallback list")
             return {
                 "voices": [
                     {"name": "English-US-Female-1", "locale": "en-US", "gender": "Female", "sample_rate": 22050},

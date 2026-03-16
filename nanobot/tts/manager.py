@@ -31,9 +31,12 @@ class TTSManager:
             openai_model=self.config.openai_model,
             openai_quality=self.config.openai_quality,
             openai_speed=self.config.openai_speed,
+            openai_api_key=self.config.openai_api_key,
             riva_server_url=self.config.riva_server_url,
             riva_use_ssl=self.config.riva_use_ssl,
             riva_ssl_cert=self.config.riva_ssl_cert,
+            riva_function_id=self.config.riva_function_id or "",
+            riva_api_key=self.config.riva_api_key,
         )
         
         try:
@@ -114,14 +117,39 @@ class TTSManager:
             logger.error(f"TTS generation failed: {e}")
             return None
     
-    async def get_supported_voices(self) -> dict:
-        """Get supported voices from the current provider."""
-        provider = self._get_provider()
-        if not provider:
+    async def get_supported_voices(self, provider: str | None = None) -> dict:
+        """Get supported voices from the current or specified provider."""
+        if provider and provider != self.config.provider:
+            # Build a temporary provider instance for the requested provider
+            from nanobot.providers.tts import EdgeTTSProvider, RivaTTSProvider, OpenAITTSProvider, TTSConfig as ProviderTTSConfig
+            tmp_config = ProviderTTSConfig(
+                provider=provider,
+                voice=self.config.voice,
+                riva_server_url=self.config.riva_server_url,
+                riva_use_ssl=self.config.riva_use_ssl,
+                riva_ssl_cert=self.config.riva_ssl_cert or "",
+                riva_function_id=self.config.riva_function_id or "",
+                riva_api_key=self.config.riva_api_key,
+            )
+            try:
+                if provider == "edge":
+                    tmp_provider = EdgeTTSProvider(tmp_config)
+                elif provider == "riva":
+                    tmp_provider = RivaTTSProvider(tmp_config)
+                elif provider == "openai":
+                    tmp_provider = OpenAITTSProvider(tmp_config)
+                else:
+                    return {"voices": []}
+                return await tmp_provider.get_supported_voices()
+            except Exception as e:
+                logger.error(f"Failed to get voices for provider {provider}: {e}")
+                return {"voices": []}
+
+        p = self._get_provider()
+        if not p:
             return {"voices": []}
-        
         try:
-            return await provider.get_supported_voices()
+            return await p.get_supported_voices()
         except Exception as e:
             logger.error(f"Failed to get supported voices: {e}")
             return {"voices": []}

@@ -78,8 +78,8 @@ async def test_trace_message_splits_long_content():
     # Enable trace for this chat
     channel._trace_enabled["123456"] = True
     
-    # Create a very long message (over 4000 chars)
-    long_content = "Step " + "x" * 3900 + " completed."  # Well over 4000 chars
+    # Create a very long message (over 4000 chars after prefix is prepended)
+    long_content = "Step " + "x" * 4100 + " completed."  # Well over 4000 chars after "💭 " prefix
     
     # Setup mock app and bot
     channel._app = MagicMock()
@@ -98,10 +98,9 @@ async def test_trace_message_splits_long_content():
     
     # Verify send_message was called multiple times for split content
     assert channel._app.bot.send_message.call_count > 1
-    # Check that each call starts with the appropriate prefix
-    for call in channel._app.bot.send_message.call_args_list:
-        text = call[1]["text"]
-        assert text.startswith("💭 ") or text.startswith("🤖 ")
+    # Only the first chunk carries the prefix; subsequent chunks are continuations
+    first_call_text = channel._app.bot.send_message.call_args_list[0][1]["text"]
+    assert first_call_text.startswith("💭 ") or first_call_text.startswith("🤖 ")
 
 
 @pytest.mark.asyncio

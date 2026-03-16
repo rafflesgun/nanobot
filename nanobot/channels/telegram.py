@@ -183,6 +183,8 @@ class TelegramChannel(BaseChannel):
         BotCommand("new", "Start a new conversation"),
         BotCommand("stop", "Stop the current task"),
         BotCommand("model", "Show or switch the LLM model"),
+        BotCommand("tts", "Control TTS settings (on/off, voices, voice, provider)"),
+        BotCommand("trace", "Toggle agent trace output (on/off/status)"),
         BotCommand("help", "Show available commands"),
     ]
 
@@ -587,6 +589,7 @@ class TelegramChannel(BaseChannel):
             "/stop — Stop the current task\n"
             "/model — Show or switch the LLM model\n"
             "/tts — Control TTS settings (on/off, voice, provider)\n"
+            "/trace — Toggle agent trace output (on/off/status)\n"
             "/help — Show available commands"
         )
 
@@ -606,23 +609,30 @@ class TelegramChannel(BaseChannel):
         # Parse command arguments
         args = context.args if context.args else []
         
-        if not args:
-            # Show current TTS status
-            chat_override = self._chat_tts_overrides.get(chat_id, {})
-            current_config = chat_override if chat_override else self.config.tts
-            status_msg = (
+        def _tts_status_msg(chat_id: str, extra: str = "") -> str:
+            override = self._chat_tts_overrides.get(chat_id, {})
+            enabled = override.get("enabled", self.tts_manager.config.enabled)
+            provider = override.get("provider", self.tts_manager.config.provider)
+            voice = override.get("voice", self.tts_manager.config.voice)
+            return (
                 f"🔊 TTS Settings:\n"
-                f"Enabled: {'✅' if current_config.enabled else '❌'}\n"
-                f"Provider: {current_config.provider}\n"
-                f"Voice: {current_config.voice}\n\n"
-                f"Usage:\n"
-                f"/tts on — Enable TTS\n"
-                f"/tts off — Disable TTS\n"
-                f"/tts voice [name] — Change voice\n"
-                f"/tts provider [edge/openai] — Change provider\n"
-                f"/tts status — Show current settings"
+                f"Enabled: {'✅' if enabled else '❌'}\n"
+                f"Provider: {provider}\n"
+                f"Voice: {voice}"
+                + (f"\n\n{extra}" if extra else "")
             )
-            await update.message.reply_text(status_msg)
+
+        if not args:
+            await update.message.reply_text(_tts_status_msg(
+                chat_id,
+                "Usage:\n"
+                "/tts on — Enable TTS\n"
+                "/tts off — Disable TTS\n"
+                "/tts voices [locale] — List available voices\n"
+                "/tts voice [name] — Change voice\n"
+                "/tts provider [edge/openai/riva] — Change provider\n"
+                "/tts status — Show current settings"
+            ))
             return
 
         command = args[0].lower()
@@ -642,42 +652,92 @@ class TelegramChannel(BaseChannel):
             await update.message.reply_text("🔇 TTS disabled for this chat.")
             
         elif command == "status":
-            # Show current status (same as no args)
-            chat_override = self._chat_tts_overrides.get(chat_id, {})
-            current_config = chat_override if chat_override else self.config.tts
-            status_msg = (
-                f"🔊 TTS Settings:\n"
-                f"Enabled: {'✅' if current_config.enabled else '❌'}\n"
-                f"Provider: {current_config.provider}\n"
-                f"Voice: {current_config.voice}"
-            )
-            await update.message.reply_text(status_msg)
+            await update.message.reply_text(_tts_status_msg(chat_id))
             
+        elif command == "voices":
+            # List available voices for current provider, with optional locale filter
+            # Usage: /tts voices [locale_filter]  e.g. /tts voices en-US
+            override = self._chat_tts_overrides.get(chat_id, {})
+            provider_name = override.get("provider", self.tts_manager.config.provider)
+            current_voice = override.get("voice", self.tts_manager.config.voice)
+            locale_filter = args[1].lower() if len(args) > 1 else None
+
+            await update.message.reply_text(f"⏳ Fetching voices for {provider_name}...")
+
+            try:
+                result = await self.tts_manager.get_supported_voices(provider_name)
+                voices = result.get("voices", [])
+
+                if not voices:
+                    await update.message.reply_text("❌ No voices available or provider unreachable.")
+                    return
+
+                if provider_name == "edge":
+                    # Edge has hundreds of voices — filter by locale
+                    if locale_filter:
+                        voices = [v for v in voices if locale_filter in v.get("locale", "").lower()]
+                    else:
+                        # Default: match locale of current voice (e.g. "en-US" from "en-US-AriaNeural")
+                        parts = current_voice.split("-")
+                        default_locale = f"{parts[0]}-{parts[1]}".lower() if len(parts) >= 2 else "en-us"
+                        voices = [v for v in voices if default_locale in v.get("locale", "").lower()]
+
+                    if not voices:
+                        await update.message.reply_text(
+                            f"No voices found for that locale.\n"
+                            f"Try: /tts voices en-US  or  /tts voices zh-CN"
+                        )
+                        return
+
+                    lines = [f"🎙️ Voices ({voices[0].get('locale', '')} — use /tts voice [name]):"]
+                    for v in voices[:20]:  # cap at 20 to avoid flood
+                        marker = " ✅" if v["name"] == current_voice else ""
+                        gender = v.get("gender", "")
+                        icon = "👩" if "Female" in gender else "👨" if "Male" in gender else "🎤"
+                        lines.append(f"{icon} {v['name']}{marker}")
+                    if len(voices) > 20:
+                        lines.append(f"… and {len(voices) - 20} more. Narrow with /tts voices en-US")
+                else:
+                    # Riva / OpenAI — small list, show all
+                    lines = [f"🎙️ Available voices (use /tts voice [name]):"]
+                    for v in voices:
+                        marker = " ✅" if v["name"] == current_voice else ""
+                        gender = v.get("gender", "")
+                        icon = "👩" if "Female" in gender else "👨" if "Male" in gender else "🎤"
+                        lines.append(f"{icon} {v['name']}{marker}")
+
+                await update.message.reply_text("\n".join(lines))
+
+            except Exception as e:
+                logger.error("Failed to list voices: {}", e)
+                await update.message.reply_text("❌ Failed to fetch voices.")
+
         elif command == "voice" and len(args) > 1:
             # Change voice
             new_voice = args[1]
             if chat_id not in self._chat_tts_overrides:
                 self._chat_tts_overrides[chat_id] = {}
             self._chat_tts_overrides[chat_id]["voice"] = new_voice
-            await update.message.reply_text(f" голос Changed voice to: {new_voice}")
+            await update.message.reply_text(f"🎙️ Voice changed to: {new_voice}")
             
         elif command == "provider" and len(args) > 1:
             # Change provider
             new_provider = args[1].lower()
-            if new_provider in ["edge", "openai"]:
+            if new_provider in ["edge", "openai", "riva"]:
                 if chat_id not in self._chat_tts_overrides:
                     self._chat_tts_overrides[chat_id] = {}
                 self._chat_tts_overrides[chat_id]["provider"] = new_provider
                 await update.message.reply_text(f"🔄 TTS provider changed to: {new_provider}")
             else:
-                await update.message.reply_text("❌ Invalid provider. Use 'edge' or 'openai'.")
+                await update.message.reply_text("❌ Invalid provider. Use 'edge', 'openai', or 'riva'.")
         else:
             await update.message.reply_text(
                 "❓ Unknown command. Usage:\n"
                 "/tts on — Enable TTS\n"
                 "/tts off — Disable TTS\n"
+                "/tts voices [locale] — List available voices\n"
                 "/tts voice [name] — Change voice\n"
-                "/tts provider [edge/openai] — Change provider\n"
+                "/tts provider [edge/openai/riva] — Change provider\n"
                 "/tts status — Show current settings"
             )
 

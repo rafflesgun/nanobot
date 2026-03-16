@@ -13,11 +13,11 @@ understand intended behavior quickly.
 | Telegram Topic support in groups             | ✅     | channels/telegram.py, cron/*, agent/tools/cron.py | tests/test_cron_topic_delivery.py            | session_key includes `:topic:{thread_id}`   |
 | Telegram groups → mention-only mode          | ✅     | channels/telegram.py                               | manual + group_policy test                   | `group_policy = "mention"` (default)        |
 | Group commands via @mention                  | ✅     | channels/telegram.py → _on_message                 | manual                                       | `@BotName /command` → text message path     |
-| /model command – per-session model override  | ✅     | agent/loop.py                                      | tests/test_model_switch.py                   | stored in `_model_overrides[session_key]`   |
+| /model command – per-session model override  | ✅     | agent/loop.py                                      | tests/test_model_switch.py                   | stored in `_model_overrides[session_key]`; reset with `/model reset`   |
 | "Thinking…" placeholder (PM only)            | ✅     | channels/telegram.py → _send_thinking_message      | tests/test_thinking_message.py               | skipped when `is_group == True`             |
-| Typing indicator & ACK reaction              | ✅     | channels/telegram.py                               | tests/test_typing极ack.py                     | typing per chat+thread, reaction per msg    |
+| Typing indicator & ACK reaction              | ✅     | channels/telegram.py                               | tests/test_typing_ack.py                     | typing per chat+thread, reaction per msg    |
 | Heartbeat results → DM / private only        | ✅     | heartbeat/service.py                               | test_heartbeat_service.py + manual           | skips negative IDs and topic sub-sessions   |
-| Media downloads → workspace/media/           | ✅    极 channels/telegram.py                               | tests/test_media_download.py                 | falls back to `~/.nanobot/media`            |
+| Media downloads → workspace/media/           | ✅     | channels/telegram.py                               | tests/test_media_download.py                 | falls back to `~/.nanobot/media`            |
 | **TTS voice notes (Edge + OpenAI + Riva)**   | ✅     | providers/tts.py, tts/manager.py, channels/telegram.py | tests/test_tts.py (new)              | `tts.enabled = false` (default)             |
 | **/trace command - AI thinking visibility**  | ✅     | channels/telegram.py                               | tests/test_trace_command_additional.py       | `_trace_enabled[chat_id] = false` (default) |
 
@@ -50,7 +50,7 @@ pytest tests/test_cron_topic_delivery.py -v
 - `group_policy = "mention"` → ignore unless @mentioned, text_mentioned or replied-to
 - Clean helpers: _is_group_message_for_bot, _has_mention_entity, _ensure_bot_identity
 
-**Files**
+**Files to protect during conflicts**
 - channels/telegram.py → _is_group_message_for_bot, _has_mention_entity
 - config/schema.py → TelegramConfig.group_policy
 
@@ -63,20 +63,22 @@ Default should stay `"mention"`.
 **Core behavior**
 - `/model` → show current
 - `/model gpt-4o` → set for this session
-- `/model default` → revert
+- `/model reset` → revert to default (also accepts `/model default` as alias)
 - Stored in `AgentLoop._model_overrides[session_key]`
 
 **Files**
 - agent/loop.py → _model_overrides, _handle_model_command, _run_agent_loop
 
 **Resolution priority**
-Keep `_model_overrides` dict + `effective_model = model_override or self.model`
+Keep `_model_overrides` dict + `effective_model = model_override or self.model`.
+Reset keyword is `reset` (not `default`).
 
 ### 4–8. Other smaller features (summary)
 
 - Thinking draft message → PM only (`if is_group: return`)
 - Typing + ACK reaction → per composite key (chat+thread)
-- Heartbeat → DM only (skip negative IDs & topic sessions)
+- Heartbeat DM-only logic lives in `_pick_heartbeat_target()` inside `nanobot/cli/commands.py` (not `heartbeat/service.py`)
+- Skips topic sub-sessions and negative Telegram chat IDs
 - Media → `workspace/media/` when workspace configured
 
 ### 9. TTS voice notes (Edge + OpenAI + NVIDIA Riva)
@@ -106,7 +108,7 @@ pytest tests/test_tts.py -v
 ## Smoke / Validation Commands (after merge/conflict fix)
 
 ```bash
-# Basic model switch
+# Basic model switch (reset with /model reset, not /model default)
 nanobot agent --message "/model gpt-4o-mini"
 
 # Cron topic delivery (if cron service running)
@@ -127,4 +129,4 @@ pytest tests/test_tts.py -v
 # 4. /tts provider openai (if OpenAI API key configured)
 ```
 
-Last updated: 13 March 2026 – after merge with main
+Last updated: 16 March 2026 – validated against code; all 58 tests passing
