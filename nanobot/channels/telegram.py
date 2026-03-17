@@ -517,6 +517,11 @@ class TelegramChannel(BaseChannel):
                     tts_config.voice = chat_override["voice"]
                 if "provider" in chat_override:
                     tts_config.provider = chat_override["provider"]
+                if "enabled" in chat_override:
+                    tts_config.enabled = chat_override["enabled"]
+                
+                # Log effective TTS config for debugging
+                logger.debug(f"TTS effective config: chat_id={chat_id} override=True enabled={tts_config.enabled} provider={tts_config.provider} voice={tts_config.voice}")
 
                 # Create temporary TTS manager with overridden config
                 from nanobot.tts.manager import TTSManager
@@ -698,13 +703,61 @@ class TelegramChannel(BaseChannel):
                     if len(voices) > 20:
                         lines.append(f"… and {len(voices) - 20} more. Narrow with /tts voices en-US")
                 else:
-                    # Riva / OpenAI — small list, show all
-                    lines = [f"🎙️ Available voices (use /tts voice [name]):"]
-                    for v in voices:
-                        marker = " ✅" if v["name"] == current_voice else ""
-                        gender = v.get("gender", "")
-                        icon = "👩" if "Female" in gender else "👨" if "Male" in gender else "🎤"
-                        lines.append(f"{icon} {v['name']}{marker}")
+                    # Riva / OpenAI — filter and paginate if needed
+                    if locale_filter:
+                        voices = [v for v in voices if locale_filter in v.get("locale", "").lower()]
+
+                    # For Riva with many voices, group by base voice (without emotion)
+                    if provider_name == "riva" and len(voices) > 30:
+                        # Group by base voice name (without emotion)
+                        base_voices = {}
+                        for v in voices:
+                            # Extract base name: "Magpie-Multilingual.EN-US.Mia.Happy" -> "EN-US.Mia"
+                            name = v["name"]
+                            # Remove prefix and emotion
+                            if "Magpie-Multilingual." in name:
+                                name = name.replace("Magpie-Multilingual.", "")
+
+                            name_parts = name.rsplit(".", 1)
+                            base_name = name_parts[0] if len(name_parts) > 1 and name_parts[1] in ["Neutral", "Calm", "Angry", "Happy", "Sad", "Fearful", "Disgust", "PleasantSurprised", "Disgusted"] else name
+
+                            if base_name not in base_voices:
+                                base_voices[base_name] = []
+                            base_voices[base_name].append(v)
+
+                        # Show base voices with available emotions
+                        lines = [f"🎙️ Riva Magpie Voices"]
+                        lines.append(f"💡 Filter: /tts voices en-us")
+                        lines.append(f"💡 Set voice: /tts voice Magpie-Multilingual.EN-US.Mia.Happy\n")
+
+                        for base_name in sorted(base_voices.keys())[:15]:
+                            variants = base_voices[base_name]
+                            marker = " ✅" if any(v["name"] == current_voice for v in variants) else ""
+                            gender = variants[0].get("gender", "")
+                            icon = "👩" if "Female" in gender else "👨" if "Male" in gender else "🎤"
+
+                            # Collect emotions for this voice
+                            emotions = [v.get("emotion") for v in variants if v.get("emotion")]
+
+                            lines.append(f"{icon} {base_name}{marker}")
+                            if emotions:
+                                lines.append(f"   🎭 {' · '.join(emotions)}")
+
+                        if len(base_voices) > 15:
+                            lines.append(f"\n+{len(base_voices) - 15} more (use locale filter)")
+                    else:
+                        # Small list, show all
+                        lines = [f"🎙️ Available voices (use /tts voice [name]):"]
+                        for v in voices[:30]:  # Cap at 30
+                            marker = " ✅" if v["name"] == current_voice else ""
+                            gender = v.get("gender", "")
+                            icon = "👩" if "Female" in gender else "👨" if "Male" in gender else "🎤"
+                            # Shorten name for display
+                            display_name = v['name'].replace("Magpie-Multilingual.", "")
+                            lines.append(f"{icon} {display_name}{marker}")
+
+                        if len(voices) > 30:
+                            lines.append(f"\n+{len(voices) - 30} more")
 
                 await update.message.reply_text("\n".join(lines))
 
