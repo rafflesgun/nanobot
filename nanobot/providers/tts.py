@@ -26,6 +26,7 @@ class TTSConfig:
     riva_function_id: str = "877104f7-e885-42b9-8de8-f6e4c6303969"  # Function ID for NVCF Riva services
     riva_api_key: Optional[str] = None  # API key for NVIDIA Cloud Functions
     openai_api_key: Optional[str] = None  # API key for OpenAI TTS
+    openai_base_url: Optional[str] = None  # Custom base URL for OpenAI-compatible TTS API
 
 class BaseTTSProvider(ABC):
     """Abstract base class for TTS providers."""
@@ -137,7 +138,12 @@ class OpenAITTSProvider(BaseTTSProvider):
         
         try:
             import openai
-            client = openai.AsyncOpenAI(api_key=api_key)
+            client_kwargs = {"api_key": api_key}
+            base_url = self.config.openai_base_url or os.getenv("OPENAI_TTS_BASE_URL")
+            if base_url:
+                client_kwargs["base_url"] = base_url
+                logger.debug(f"OpenAI TTS using custom base URL: {base_url}")
+            client = openai.AsyncOpenAI(**client_kwargs)
             
             response = await client.audio.speech.create(
                 model=self.config.openai_model,
