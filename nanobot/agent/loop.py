@@ -100,6 +100,7 @@ class AgentLoop:
         self._mcp_connecting = False
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._processing_lock = asyncio.Lock()
+        self._model_overrides: dict[str, str] = {}  # session_key -> model override
         self.fallback_model = fallback_model
         self.memory_consolidator = MemoryConsolidator(
             workspace=workspace,
