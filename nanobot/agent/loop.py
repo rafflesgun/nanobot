@@ -76,6 +76,7 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self.fallback_model = fallback_model
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
