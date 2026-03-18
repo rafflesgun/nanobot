@@ -61,6 +61,7 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        fallback_model: str | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -84,6 +85,7 @@ class AgentLoop:
             workspace=workspace,
             bus=bus,
             model=self.model,
+            fallback_model=self.fallback_model,
             brave_api_key=brave_api_key,
             web_proxy=web_proxy,
             exec_config=self.exec_config,
@@ -97,7 +99,7 @@ class AgentLoop:
         self._mcp_connecting = False
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._processing_lock = asyncio.Lock()
-        self._model_overrides: dict[str, str] = {}  # session_key -> model override
+        self.fallback_model = fallback_model
         self.memory_consolidator = MemoryConsolidator(
             workspace=workspace,
             provider=provider,
@@ -243,11 +245,28 @@ class AgentLoop:
 
             tool_defs = self.tools.get_definitions()
 
-            response = await self.provider.chat_with_retry(
-                messages=messages,
-                tools=tool_defs,
-                model=effective_model,
-            )
+            try:
+                response = await self.provider.chat_with_retry(
+                    messages=messages,
+                    tools=tool_defs,
+                    model=effective_model,
+                )
+            except Exception as e:
+                # Check if there's a fallback model and this is a provider error
+                error_msg = str(e).lower()
+                if self.fallback_model and ('provider returned error' in error_msg or '502' in error_msg or '503' in error_msg or 'timeout' in error_msg):
+                    logger.warning("Primary model failed, trying fallback model: {}", self.fallback_model)
+                    try:
+                        response = await self.provider.chat_with_retry(
+                            messages=messages,
+                            tools=tool_defs,
+                            model=self.fallback_model,
+                        )
+                    except Exception as fallback_error:
+                        logger.error("Both primary and fallback models failed: {}", fallback_error)
+                        raise e  # Re-raise the original error if fallback also fails
+                else:
+                    raise e  # Re-raise the original error if no fallback or different error type
 
             if response.has_tool_calls:
                 if on_progress:

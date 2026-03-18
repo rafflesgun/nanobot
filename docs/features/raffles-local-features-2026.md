@@ -13,7 +13,7 @@ understand intended behavior quickly.
 | Telegram Topic support in groups             | ✅     | channels/telegram.py, cron/*, agent/tools/cron.py | tests/test_cron_topic_delivery.py            | session_key includes `:topic:{thread_id}`   |
 | Telegram groups → mention-only mode          | ✅     | channels/telegram.py                               | manual + group_policy test                   | `group_policy = "mention"` (default)        |
 | Group commands via @mention                  | ✅     | channels/telegram.py → _on_message                 | manual                                       | `@BotName /command` → text message path     |
-| /model command – per-session model override  | ✅     | agent/loop.py                                      | tests/test_model_switch.py                   | stored in `_model_overrides[session_key]`; reset with `/model reset`   |
+| Automatic fallback model on provider errors | ✅     | agent/loop.py, config/schema.py, cli/commands.py | manual testing                                | `fallback_model: null` (default) |
 | "Thinking…" placeholder (PM only)            | ✅     | channels/telegram.py → _send_thinking_message      | tests/test_thinking_message.py               | skipped when `is_group == True`             |
 | Typing indicator & ACK reaction              | ✅     | channels/telegram.py                               | tests/test_typing_ack.py                     | typing per chat+thread, reaction per msg    |
 | Heartbeat results → DM / private only        | ✅     | heartbeat/service.py                               | test_heartbeat_service.py + manual           | skips negative IDs and topic sub-sessions   |
@@ -72,6 +72,25 @@ Default should stay `"mention"`.
 **Resolution priority**
 Keep `_model_overrides` dict + `effective_model = model_override or self.model`.
 Reset keyword is `reset` (not `default`).
+
+### 4. Automatic fallback model on provider errors
+
+**Core behavior**
+- Configure `fallback_model` in agent defaults to specify backup model when primary fails
+- Automatically activates when primary model encounters 502/503 errors, timeouts, or other provider issues
+- Transparent operation - users don't need to manually switch models
+- Falls back to configured model only when specific provider errors detected
+
+**Files**
+- nanobot/config/schema.py → AgentDefaults.fallback_model field
+- nanobot/agent/loop.py → _run_agent_loop with try/catch logic and fallback mechanism
+- nanobot/cli/commands.py → Wiring of fallback_model parameter to AgentLoop
+
+**Resolution priority**
+Preserve the try/catch wrapper around provider.chat_with_retry that checks for provider errors and attempts fallback model.
+
+**Quick validation**
+Configure fallback_model in config and test with a temporarily unavailable primary provider.
 
 ### 4–8. Other smaller features (summary)
 
