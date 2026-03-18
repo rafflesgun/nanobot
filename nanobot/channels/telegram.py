@@ -508,45 +508,50 @@ class TelegramChannel(BaseChannel):
         tts_enabled = chat_override.get("enabled", self.tts_manager.config.enabled)
 
         if tts_enabled and msg.content and msg.content.strip():
-            try:
-                logger.debug("Attempting TTS generation for message")
+            # Skip TTS for messages containing table-like structures
+            # These are typically cron job or health check messages
+            if "|" in msg.content and "---" in msg.content:
+                logger.debug("Skipping TTS for table-like message")
+            else:
+                try:
+                    logger.debug("Attempting TTS generation for message")
 
-                # Apply chat-specific overrides for TTS generation
-                tts_config = self.config.tts.model_copy()
-                if "voice" in chat_override:
-                    tts_config.voice = chat_override["voice"]
-                if "provider" in chat_override:
-                    tts_config.provider = chat_override["provider"]
-                if "enabled" in chat_override:
-                    tts_config.enabled = chat_override["enabled"]
-                
-                # Log effective TTS config for debugging
-                logger.debug(f"TTS effective config: chat_id={chat_id} override=True enabled={tts_config.enabled} provider={tts_config.provider} voice={tts_config.voice}")
+                    # Apply chat-specific overrides for TTS generation
+                    tts_config = self.config.tts.model_copy()
+                    if "voice" in chat_override:
+                        tts_config.voice = chat_override["voice"]
+                    if "provider" in chat_override:
+                        tts_config.provider = chat_override["provider"]
+                    if "enabled" in chat_override:
+                        tts_config.enabled = chat_override["enabled"]
 
-                # Create temporary TTS manager with overridden config
-                from nanobot.tts.manager import TTSManager
-                temp_tts_manager = TTSManager(tts_config)
+                    # Log effective TTS config for debugging
+                    logger.debug(f"TTS effective config: chat_id={chat_id} override=True enabled={tts_config.enabled} provider={tts_config.provider} voice={tts_config.voice}")
 
-                ogg_bytes = await temp_tts_manager.generate_voice_note(msg.content)
+                    # Create temporary TTS manager with overridden config
+                    from nanobot.tts.manager import TTSManager
+                    temp_tts_manager = TTSManager(tts_config)
 
-                if ogg_bytes:
-                    duration = await get_audio_duration(ogg_bytes, "ogg")
-                    voice_file = BytesIO(ogg_bytes)
-                    voice_file.name = "voice_note.ogg"
+                    ogg_bytes = await temp_tts_manager.generate_voice_note(msg.content)
 
-                    await self._app.bot.send_voice(
-                        chat_id=chat_id,
-                        voice=voice_file,
-                        duration=int(duration),
-                        reply_parameters=reply_params,
-                        **thread_kwargs,
-                    )
-                    voice_note_sent = True
-                    logger.info(f"TTS voice note sent ({duration:.1f}s)")
-                else:
-                    logger.warning("TTS returned no audio → skipping voice note")
-            except Exception as e:
-                logger.exception("TTS generation or sending failed → falling back to text only")
+                    if ogg_bytes:
+                        duration = await get_audio_duration(ogg_bytes, "ogg")
+                        voice_file = BytesIO(ogg_bytes)
+                        voice_file.name = "voice_note.ogg"
+
+                        await self._app.bot.send_voice(
+                            chat_id=chat_id,
+                            voice=voice_file,
+                            duration=int(duration),
+                            reply_parameters=reply_params,
+                            **thread_kwargs,
+                        )
+                        voice_note_sent = True
+                        logger.info(f"TTS voice note sent ({duration:.1f}s)")
+                    else:
+                        logger.warning("TTS returned no audio → skipping voice note")
+                except Exception as e:
+                    logger.exception("TTS generation or sending failed → falling back to text only")
 
         # Send text content
         if msg.content and msg.content != "[empty message]":
