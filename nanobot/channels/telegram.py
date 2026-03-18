@@ -508,10 +508,21 @@ class TelegramChannel(BaseChannel):
         tts_enabled = chat_override.get("enabled", self.tts_manager.config.enabled)
 
         if tts_enabled and msg.content and msg.content.strip():
-            # Skip TTS for messages containing table-like structures
-            # These are typically cron job or health check messages
-            if "|" in msg.content and "---" in msg.content:
+            # Skip TTS for messages that look like structured data or errors
+            # These are typically cron job, health check, or error messages
+            content = msg.content.strip()
+            if "|" in content and "---" in content:
+                # Table-like structure - likely cron job or health check output
                 logger.debug("Skipping TTS for table-like message")
+            elif content.startswith("{") and content.endswith("}"):
+                # JSON-like object - likely error or structured data
+                logger.debug("Skipping TTS for JSON-like message")
+            elif content.startswith("[") and content.endswith("]"):
+                # JSON array - likely error or structured data
+                logger.debug("Skipping TTS for JSON array message")
+            elif "Error:" in content and ":" in content:
+                # Error message pattern
+                logger.debug("Skipping TTS for error message")
             else:
                 try:
                     logger.debug("Attempting TTS generation for message")
