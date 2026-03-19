@@ -234,8 +234,16 @@ class AgentLoop:
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
         model_override: str | None = None,
+        on_turn_saved: Callable[[list[dict]], Awaitable[None]] | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
-        """Run the agent iteration loop."""
+        """Run the agent iteration loop.
+
+        Args:
+            initial_messages: Starting messages for the conversation
+            on_progress: Callback for progress updates during processing
+            model_override: Specific model to use for this loop
+            on_turn_saved: Callback triggered after each turn is saved incrementally
+        """
         messages = initial_messages
         iteration = 0
         final_content = None
@@ -310,6 +318,10 @@ class AgentLoop:
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
+
+                # Incremental save after processing tool calls
+                if on_turn_saved:
+                    await on_turn_saved(messages)
             else:
                 clean = self._strip_think(response.content)
                 clean = self._fix_missing_newlines(clean)
@@ -524,9 +536,15 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
+        # Define the incremental save callback
+        async def _on_turn_saved(messages: list[dict]) -> None:
+            self._save_turn(session, messages, 1 + len(history))
+            self.sessions.save(session)
+
         final_content, _, all_msgs = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
             model_override=self._model_overrides.get(key),
+            on_turn_saved=_on_turn_saved,
         )
 
         if final_content is None:
