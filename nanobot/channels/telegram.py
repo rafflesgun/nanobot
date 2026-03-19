@@ -628,6 +628,7 @@ class TelegramChannel(BaseChannel):
             "/tts — Control TTS settings (on/off, voice, provider)\n"
             "/trace — Toggle agent trace output (on/off/status)\n"
             "/stats — Show token usage statistics\n"
+            "/stats topic — Show token usage for this topic\n"
             "/help — Show available commands"
         )
 
@@ -1238,43 +1239,67 @@ class TelegramChannel(BaseChannel):
             workspace_path = Path(self._workspace_path) if self._workspace_path else Path("~/.nanobot/workspace").expanduser()
             stats_manager = StatsManager(workspace_path)
 
-            # Get statistics
-            if args and args[0].lower() == "all":
-                # Show all statistics
-                stats = stats_manager.get_all_stats()
-                if stats:
-                    total_input = stats.get("total_input_tokens", 0)
-                    total_output = stats.get("total_output_tokens", 0)
-                    total_tokens = stats.get("total_tokens", 0)
-                    count = stats.get("count", 0)
+            # Check if topic-specific stats are requested
+            if args and args[0].lower() == "topic":
+                # Show stats for this specific topic
+                message_thread_id = getattr(update.effective_message, "message_thread_id", None)
+                if message_thread_id:
+                    topic_stats = stats_manager.get_stats("telegram", f"{chat_id}:topic:{message_thread_id}")
+                    if topic_stats:
+                        total_input = topic_stats.get("total_input_tokens", 0)
+                        total_output = topic_stats.get("total_output_tokens", 0)
+                        total_tokens = topic_stats.get("total_tokens", 0)
+                        count = topic_stats.get("count", 0)
 
-                    response = (
-                        "📊 <b>Total Token Usage Statistics</b>\n\n"
-                        f"🔢 Total Requests: <code>{count}</code>\n"
-                        f"📥 Input Tokens: <code>{total_input:,}</code>\n"
-                        f"📤 Output Tokens: <code>{total_output:,}</code>\n"
-                        f"总计 Tokens: <code>{total_tokens:,}</code>"
-                    )
+                        response = (
+                            "📊 <b>Token Usage Statistics (This Topic)</b>\n\n"
+                            f"🔢 Requests in this topic: <code>{count}</code>\n"
+                            f"📥 Input Tokens: <code>{total_input:,}</code>\n"
+                            f"📤 Output Tokens: <code>{total_output:,}</code>\n"
+                            f"总计 Tokens: <code>{total_tokens:,}</code>"
+                        )
+                    else:
+                        response = "📊 No token usage statistics found for this topic."
                 else:
-                    response = "📊 No token usage statistics found."
+                    response = "❌ This command is only available in topic threads."
             else:
-                # Show statistics for this specific channel/chat
-                stats = stats_manager.get_stats("telegram", chat_id)
-                if stats:
-                    total_input = stats.get("total_input_tokens", 0)
-                    total_output = stats.get("total_output_tokens", 0)
-                    total_tokens = stats.get("total_tokens", 0)
-                    count = stats.get("count", 0)
+                # Get statistics
+                if args and args[0].lower() == "all":
+                    # Show all statistics
+                    stats = stats_manager.get_all_stats()
+                    if stats:
+                        total_input = stats.get("total_input_tokens", 0)
+                        total_output = stats.get("total_output_tokens", 0)
+                        total_tokens = stats.get("total_tokens", 0)
+                        count = stats.get("count", 0)
 
-                    response = (
-                        "📊 <b>Token Usage Statistics (This Chat)</b>\n\n"
-                        f"🔢 Requests in this chat: <code>{count}</code>\n"
-                        f"📥 Input Tokens: <code>{total_input:,}</code>\n"
-                        f"📤 Output Tokens: <code>{total_output:,}</code>\n"
-                        f"总计 Tokens: <code>{total_tokens:,}</code>"
-                    )
+                        response = (
+                            "📊 <b>Total Token Usage Statistics</b>\n\n"
+                            f"🔢 Total Requests: <code>{count}</code>\n"
+                            f"📥 Input Tokens: <code>{total_input:,}</code>\n"
+                            f"📤 Output Tokens: <code>{total_output:,}</code>\n"
+                            f"总计 Tokens: <code>{total_tokens:,}</code>"
+                        )
+                    else:
+                        response = "📊 No token usage statistics found."
                 else:
-                    response = "📊 No token usage statistics found for this chat."
+                    # Show statistics for this specific channel/chat
+                    stats = stats_manager.get_stats("telegram", chat_id)
+                    if stats:
+                        total_input = stats.get("total_input_tokens", 0)
+                        total_output = stats.get("total_output_tokens", 0)
+                        total_tokens = stats.get("total_tokens", 0)
+                        count = stats.get("count", 0)
+
+                        response = (
+                            "📊 <b>Token Usage Statistics (This Chat)</b>\n\n"
+                            f"🔢 Requests in this chat: <code>{count}</code>\n"
+                            f"📥 Input Tokens: <code>{total_input:,}</code>\n"
+                            f"📤 Output Tokens: <code>{total_output:,}</code>\n"
+                            f"总计 Tokens: <code>{total_tokens:,}</code>"
+                        )
+                    else:
+                        response = "📊 No token usage statistics found for this chat."
 
             await update.message.reply_text(response, parse_mode="HTML")
 

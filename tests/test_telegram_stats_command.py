@@ -225,3 +225,24 @@ async def test_stats_command_error_handling(tmp_path):
     update.message.reply_text.assert_called_once_with(
         "📊 No token usage statistics found for this chat.", parse_mode="HTML"
     )
+
+
+@pytest.mark.asyncio
+async def test_stats_command_topic_no_topic(tmp_path):
+    """Test /stats topic command when not in a topic thread."""
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"])
+    channel = TelegramChannel(config, MessageBus())
+    channel._app = _FakeApp()
+    channel._workspace_path = str(tmp_path)
+
+    update, context = _make_telegram_update(text="/stats", args=["topic"])
+
+    # Mock the reply_text method
+    update.message.reply_text = AsyncMock()
+
+    await channel._on_stats_command(update, context)
+
+    # Should show error message for non-topic context
+    update.message.reply_text.assert_called_once_with(
+        "❌ This command is only available in topic threads.", parse_mode="HTML"
+    )

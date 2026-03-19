@@ -23,6 +23,7 @@ class CustomProvider(LLMProvider):
             base_url=api_base,
             default_headers={"x-session-affinity": uuid.uuid4().hex},
         )
+        self._last_usage = {}
 
     async def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
                    model: str | None = None, max_tokens: int = 4096, temperature: float = 0.7,
@@ -55,7 +56,10 @@ class CustomProvider(LLMProvider):
             kwargs.update(tools=tools, tool_choice="auto")
         try:
             response = await self._client.chat.completions.create(**kwargs)
-            return self._parse(response)
+            parsed_response = self._parse(response)
+            # Store usage for potential retrieval via get_usage()
+            self._last_usage = parsed_response.usage
+            return parsed_response
         except Exception as e:
             import traceback
             logger.error("CustomProvider exception: {}", str(e))
@@ -86,6 +90,19 @@ class CustomProvider(LLMProvider):
             usage={"prompt_tokens": u.prompt_tokens, "completion_tokens": u.completion_tokens, "total_tokens": u.total_tokens} if u else {},
             reasoning_content=getattr(msg, "reasoning_content", None) or None,
         )
+
+    def get_usage(self) -> dict[str, int] | None:
+        """Get the usage from the last response."""
+        # Convert from the format used by OpenAI-compatible providers to the format expected by the stats system
+        if not self._last_usage:
+            return None
+
+        # Map OpenAI-style usage fields to the expected format
+        return {
+            "input_tokens": self._last_usage.get("prompt_tokens", 0),
+            "output_tokens": self._last_usage.get("completion_tokens", 0),
+            "total_tokens": self._last_usage.get("total_tokens", 0)
+        }
 
     def get_default_model(self) -> str:
         return self.default_model
