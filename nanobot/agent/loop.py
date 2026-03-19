@@ -256,7 +256,14 @@ class AgentLoop:
             except Exception as e:
                 # Check if there's a fallback model and this is a provider error
                 error_msg = str(e).lower()
-                if self.fallback_model and ('provider returned error' in error_msg or '502' in error_msg or '503' in error_msg or 'timeout' in error_msg):
+                if (self.fallback_model and
+                    ('provider returned error' in error_msg or
+                     '502' in error_msg or
+                     '503' in error_msg or
+                     'timeout' in error_msg or
+                     '404' in error_msg or
+                     'not found' in error_msg or
+                     'invalid model' in error_msg)):
                     logger.warning("Primary model failed, trying fallback model: {}", self.fallback_model)
                     try:
                         response = await self.provider.chat_with_retry(
