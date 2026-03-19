@@ -185,6 +185,7 @@ class TelegramChannel(BaseChannel):
         BotCommand("model", "Show or switch the LLM model"),
         BotCommand("tts", "Control TTS settings (on/off, voices, voice, provider)"),
         BotCommand("trace", "Toggle agent trace output (on/off/status)"),
+        BotCommand("stats", "Show token usage statistics"),
         BotCommand("help", "Show available commands"),
     ]
 
@@ -283,6 +284,8 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(CommandHandler("help", self._on_help, filters=private_only))
         self._app.add_handler(CommandHandler("tts", self._on_tts_command, filters=private_only))
         self._app.add_handler(CommandHandler("trace", self._on_trace_command, filters=private_only))
+        self._app.add_handler(CommandHandler("stats", self._on_stats_command, filters=private_only))
+        self._app.add_handler(CommandHandler("stats", self._on_stats_command, filters=private_only))
 
         # Add message handler for text, photos极voice, documents.
         # In groups, commands typed as "@BotName /cmd" are plain TEXT (not COMMAND
@@ -624,6 +627,7 @@ class TelegramChannel(BaseChannel):
             "/model — Show or switch the LLM model\n"
             "/tts — Control TTS settings (on/off, voice, provider)\n"
             "/trace — Toggle agent trace output (on/off/status)\n"
+            "/stats — Show token usage statistics\n"
             "/help — Show available commands"
         )
 
@@ -1208,6 +1212,75 @@ class TelegramChannel(BaseChannel):
             pass
         except Exception as e:
             logger.debug("Typing indicator stopped for {}: {}", comp_key, e)
+
+    async def _on_stats_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /stats command to show token usage statistics."""
+        if not update.message or not update.effective_user:
+            return
+
+        chat_id = str(update.effective_message.chat_id)
+        user_id = str(update.effective_user.id)
+
+        # Check if user is allowed
+        if not self.is_allowed(self._sender_id(update.effective_user)):
+            await update.message.reply_text("❌ You are not authorized to use this bot.")
+            return
+
+        # Parse command arguments
+        args = context.args if context.args else []
+
+        try:
+            # Import StatsManager to get usage statistics
+            from nanobot.utils.stats import StatsManager
+            from pathlib import Path
+
+            # Get workspace path
+            workspace_path = Path(self._workspace_path) if self._workspace_path else Path("~/.nanobot/workspace").expanduser()
+            stats_manager = StatsManager(workspace_path)
+
+            # Get statistics
+            if args and args[0].lower() == "all":
+                # Show all statistics
+                stats = stats_manager.get_all_stats()
+                if stats:
+                    total_input = stats.get("total_input_tokens", 0)
+                    total_output = stats.get("total_output_tokens", 0)
+                    total_tokens = stats.get("total_tokens", 0)
+                    count = stats.get("count", 0)
+
+                    response = (
+                        "📊 <b>Total Token Usage Statistics</b>\n\n"
+                        f"🔢 Total Requests: <code>{count}</code>\n"
+                        f"📥 Input Tokens: <code>{total_input:,}</code>\n"
+                        f"📤 Output Tokens: <code>{total_output:,}</code>\n"
+                        f"总计 Tokens: <code>{total_tokens:,}</code>"
+                    )
+                else:
+                    response = "📊 No token usage statistics found."
+            else:
+                # Show statistics for this specific channel/chat
+                stats = stats_manager.get_stats("telegram", chat_id)
+                if stats:
+                    total_input = stats.get("total_input_tokens", 0)
+                    total_output = stats.get("total_output_tokens", 0)
+                    total_tokens = stats.get("total_tokens", 0)
+                    count = stats.get("count", 0)
+
+                    response = (
+                        "📊 <b>Token Usage Statistics (This Chat)</b>\n\n"
+                        f"🔢 Requests in this chat: <code>{count}</code>\n"
+                        f"📥 Input Tokens: <code>{total_input:,}</code>\n"
+                        f"📤 Output Tokens: <code>{total_output:,}</code>\n"
+                        f"总计 Tokens: <code>{total_tokens:,}</code>"
+                    )
+                else:
+                    response = "📊 No token usage statistics found for this chat."
+
+            await update.message.reply_text(response, parse_mode="HTML")
+
+        except Exception as e:
+            logger.error("Failed to fetch stats: {}", e)
+            await update.message.reply_text("❌ Failed to fetch token usage statistics.")
 
     async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Log polling / handler errors instead of silently swallowing them."""

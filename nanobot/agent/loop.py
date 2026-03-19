@@ -25,6 +25,7 @@ from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
+from nanobot.utils.stats import StatsManager
 
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig
@@ -81,6 +82,7 @@ class AgentLoop:
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
+        self.stats_manager = StatsManager(workspace)
         self.subagents = SubagentManager(
             provider=provider,
             workspace=workspace,
@@ -540,6 +542,19 @@ class AgentLoop:
         async def _on_turn_saved(messages: list[dict]) -> None:
             self._save_turn(session, messages, 1 + len(history))
             self.sessions.save(session)
+            # Record token usage if provider supports it
+            if hasattr(self.provider, 'get_usage'):
+                usage = self.provider.get_usage()
+                if usage:
+                    self.stats_manager.record_usage(
+                        msg.channel,
+                        msg.chat_id,
+                        self.model,
+                        usage.get('input_tokens', 0),
+                        usage.get('output_tokens', 0),
+                        usage.get('total_tokens', 0),
+                        session.key
+                    )
 
         final_content, _, all_msgs = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
@@ -559,6 +574,15 @@ class AgentLoop:
 
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
+
+        # Add token usage hint if configured
+        if (self.channels_config and self.channels_config.show_usage and
+            hasattr(self.provider, 'get_usage')):
+            usage = self.provider.get_usage()
+            if usage:
+                usage_hint = f"\n\n💡 Token usage: {usage.get('input_tokens', 0)} in / {usage.get('output_tokens', 0)} out / {usage.get('total_tokens', 0)} total"
+                final_content += usage_hint
+
         return OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=final_content,
             metadata=msg.metadata or {},

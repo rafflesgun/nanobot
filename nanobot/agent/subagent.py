@@ -17,6 +17,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ExecToolConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.utils.helpers import build_assistant_message
+from nanobot.utils.stats import StatsManager
 
 
 class SubagentManager:
@@ -46,6 +47,7 @@ class SubagentManager:
         self.restrict_to_workspace = restrict_to_workspace
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
+        self.stats_manager = StatsManager(workspace)
 
     async def spawn(
         self,
@@ -166,10 +168,24 @@ class SubagentManager:
             logger.info("Subagent [{}] completed successfully", task_id)
             await self._announce_result(task_id, label, task, final_result, origin, "ok")
 
+            # Record subagent token usage
+            if hasattr(self.provider, 'get_usage'):
+                usage = self.provider.get_usage()
+                if usage:
+                    self.stats_manager.record_usage(
+                        "system",
+                        f"subagent:{task_id}",
+                        self.model,
+                        usage.get('input_tokens', 0),
+                        usage.get('output_tokens', 0),
+                        usage.get('total_tokens', 0),
+                        f"subagent:{task_id}"
+                    )
+
         except Exception as e:
             error_msg = f"Error: {str(e)}"
             logger.error("Subagent [{}] failed: {}", task_id, e)
-            await self._announce_result(task_id, label, task, error_msg, origin, "error")
+            await self._announce_result(task_id, label极, task, error_msg, origin, "error")
 
     async def _announce_result(
         self,
