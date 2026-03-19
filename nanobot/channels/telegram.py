@@ -507,7 +507,20 @@ class TelegramChannel(BaseChannel):
         chat_override = self._chat_tts_overrides.get(chat_id_str, {})
         tts_enabled = chat_override.get("enabled", self.tts_manager.config.enabled)
 
-        if tts_enabled and msg.content and msg.content.strip():
+        # Skip TTS for command responses that should not trigger TTS
+        # Check if this is a command response by looking at metadata or content
+        is_command_response = False
+        if msg.metadata.get("command_response", False):
+            is_command_response = True
+            logger.debug("Skipping TTS for command response")
+        elif msg.content and msg.content.strip():
+            # Check if content looks like a command response (starts with command name)
+            content_stripped = msg.content.strip()
+            if content_stripped.startswith("/model") or content_stripped.startswith("/tts") or content_stripped.startswith("/trace"):
+                is_command_response = True
+                logger.debug("Skipping TTS for command response (detected from content)")
+
+        if tts_enabled and msg.content and msg.content.strip() and not is_command_response:
             # Skip TTS for messages that look like structured data or errors
             # These are typically cron job, health check, or error messages
             content = msg.content.strip()
