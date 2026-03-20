@@ -977,6 +977,46 @@ That's it! Environment variables, model prefixing, config matching, and `nanobot
 </details>
 
 
+### Fallback Model Configuration
+
+The fallback model feature provides automatic failover capability when the primary model becomes unavailable or hits usage limits.
+
+**Configuration:**
+
+```yaml
+# config.yaml
+agents:
+  defaults:
+    model: "primary-model-name"  # Main model to use
+    fallback_model: "backup-model-name"  # Fallback when primary fails
+```
+
+Or via environment variables:
+
+```bash
+export NANOBOT_FALLBACK_MODEL="gpt-4-turbo-preview"
+```
+
+**Supported Failure Conditions:**
+- Model unavailability (404 errors)
+- Rate limiting and quota exhaustion (403 errors)
+- Server errors (502, 503)
+- Network timeouts
+- Invalid model specifications
+
+**How It Works:**
+1. Requests are first sent to the configured primary model
+2. If the primary model fails with a recognized error condition, the system automatically retries with the fallback model
+3. If both models fail, the original error is raised
+
+**Use Cases:**
+- Ensuring continuous operation when premium models hit daily limits
+- Cost management by falling back from expensive models to more economical alternatives
+- Providing resilience against temporary service disruptions
+
+> [!NOTE]
+> The fallback model feature was implemented in the `raffles/local` branch and is documented in `docs/features/raffles-local-features-2026.md`.
+
 ### MCP (Model Context Protocol)
 
 > [!TIP]

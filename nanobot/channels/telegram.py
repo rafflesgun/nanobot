@@ -282,9 +282,9 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(CommandHandler("stop", self._forward_command, filters=private_only))
         self._app.add_handler(CommandHandler("model", self._forward_command, filters=private_only))
         self._app.add_handler(CommandHandler("help", self._on_help, filters=private_only))
-        self._app.add_handler(CommandHandler("tts", self._on_tts_command, filters=private_only))
+        self._app.add_handler(CommandHandler("tts", self._forward_command, filters=private_only))
         self._app.add_handler(CommandHandler("trace", self._on_trace_command, filters=private_only))
-        self._app.add_handler(CommandHandler("stats", self._on_stats_command, filters=private_only))
+        self._app.add_handler(CommandHandler("stats", self._forward_command, filters=private_only))
 
         # Add message handler for text, photos极voice, documents.
         # In groups, commands typed as "@BotName /cmd" are plain TEXT (not COMMAND

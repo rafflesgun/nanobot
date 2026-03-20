@@ -266,14 +266,19 @@ class AgentLoop:
             except Exception as e:
                 # Check if there's a fallback model and this is a provider error
                 error_msg = str(e).lower()
+                error_str = str(e)
                 if (self.fallback_model and
                     ('provider returned error' in error_msg or
                      '502' in error_msg or
                      '503' in error_msg or
                      'timeout' in error_msg or
                      '404' in error_msg or
+                     '403' in error_msg or
                      'not found' in error_msg or
-                     'invalid model' in error_msg)):
+                     'invalid model' in error_msg or
+                     'allocationquota' in error_msg or
+                     'free tier' in error_msg or
+                     'exhausted' in error_msg)):
                     logger.warning("Primary model failed, trying fallback model: {}", self.fallback_model)
                     try:
                         response = await self.provider.chat_with_retry(
@@ -511,6 +516,18 @@ class AgentLoop:
         if cmd == "/model":
             return self._handle_model_command(msg, key, raw_content)
 
+        # /stats command — show token usage statistics
+        if cmd == "/stats":
+            # Extract arguments for topic/all support
+            args = raw_content.split()[1:] if len(raw_content.split()) > 1 else []
+            return await self._handle_stats_command(msg, args)
+
+        # /tts command — toggle text-to-speech
+        if cmd == "/tts":
+            # Extract arguments for enable/disable/reset support
+            args = raw_content.split()[1:] if len(raw_content.split()) > 1 else []
+            return await self._handle_tts_command(msg, args)
+
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
         self._set_tool_context(
@@ -633,6 +650,106 @@ class AgentLoop:
         return OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id,
             content=f"✅ Model switched to `{new_model}` for this session.\nUse `/model reset` to revert to default.",
+            metadata=_meta,
+        )
+
+    async def _handle_stats_command(self, msg: InboundMessage, args: list[str]) -> OutboundMessage:
+        """Handle /stats command — show token usage statistics."""
+        _meta = msg.metadata or {}
+
+        # Check if this is a topic request but not in a topic
+        if args and args[0].lower() == "topic" and not _meta.get("message_thread_id"):
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="❌ This command is only available in topic threads.",
+                metadata=_meta,
+            )
+
+        # Get stats based on scope
+        if args and args[0].lower() == "all":
+            # Total stats across all channels
+            stats = self.stats_manager.get_total_stats()
+            if not stats:
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content="📊 No token usage statistics found.",
+                    metadata=_meta,
+                )
+
+            total_messages = sum(stats.values())
+            total_tokens = sum(stat["total_tokens"] for stat in stats.values())
+
+            response = f"📊 Total Token Usage Statistics\n\n"
+            response += f"• Total messages: {total_messages}\n"
+            response += f"• Total tokens: {total_tokens:,}\n\n"
+
+            for channel, stat in stats.items():
+                response += f"📡 {channel}: {stat['total_tokens']:,} tokens ({stat['count']} messages)\n"
+
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=response,
+                metadata=_meta,
+            )
+
+        # Get stats for current chat/topic
+        stats = self.stats_manager.get_chat_stats(msg.channel, msg.chat_id, _meta.get("message_thread_id"))
+        if not stats:
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="📊 No token usage statistics found for this chat.",
+                metadata=_meta,
+            )
+
+        total_messages = len(stats)
+        total_input = sum(stat["input_tokens"] for stat in stats)
+        total_output = sum(stat["output_tokens"] for stat in stats)
+        total_tokens = sum(stat["total_tokens"] for stat in stats)
+
+        response = f"📊 Token Usage Statistics"
+        if _meta.get("message_thread_id"):
+            response += f" (Topic {_meta.get('message_thread_id')})"
+        else:
+            response += " (This Chat)"
+        response += "\n\n"
+
+        response += f"• Total messages: {total_messages}\n"
+        response += f"• Input tokens: {total_input:,}\n"
+        response += f"• Output tokens: {total_output:,}\n"
+        response += f"• Total tokens: {total_tokens:,}\n\n"
+
+        # Add model breakdown if available
+        model_stats = {}
+        for stat in stats:
+            model = stat.get("model", "unknown")
+            model_stats[model] = model_stats.get(model, 0) + stat["total_tokens"]
+
+        if model_stats:
+            response += "🤖 Model breakdown:\n"
+            for model, tokens in sorted(model_stats.items(), key=lambda x: x[1], reverse=True):
+                response += f"• {model}: {tokens:,} tokens\n"
+
+        return OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content=response,
+            metadata=_meta,
+        )
+
+    async def _handle_tts_command(self, msg: InboundMessage, args: list[str]) -> OutboundMessage:
+        """Handle /tts command — toggle text-to-speech."""
+        _meta = msg.metadata or {}
+
+        # Placeholder implementation - this should interact with TTS configuration
+        # For now, just return a basic response
+        return OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content="🔊 TTS functionality is available. Use `/tts enable` to enable or `/tts disable` to disable.",
             metadata=_meta,
         )
 

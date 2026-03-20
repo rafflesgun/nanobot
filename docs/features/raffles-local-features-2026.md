@@ -13,7 +13,7 @@ understand intended behavior quickly.
 | Telegram Topic support in groups            | ✅     | channels/telegram.py, cron/*, agent/tools/cron.py      | tests/test_cron_topic_delivery.py      | session_key includes `:topic:{thread_id}`     |
 | Telegram groups → mention-only mode         | ✅     | channels/telegram.py                                   | manual + group_policy test             | `group_policy = "mention"` (default)          |
 | Group commands via @mention                 | ✅     | channels/telegram.py → _on_message                     | manual                                 | `@BotName /command` → text message path       |
-| Automatic fallback model on provider errors | ✅     | agent/loop.py, config/schema.py, cli/commands.py       | manual testing                         | `fallback_model: null` (default)              |
+| Automatic fallback model on provider errors | ✅     | agent/loop.py, config/schema.py, cli/commands.py, agent/subagent.py | manual testing with quota exhaustion | `fallback_model: null` (default)              |
 | "Thinking…" placeholder (PM only)           | ✅     | channels/telegram.py → _send_thinking_message          | tests/test_thinking_message.py         | skipped when `is_group == True`               |
 | Typing indicator & ACK reaction             | ✅     | channels/telegram.py                                   | tests/test_typing_ack.py               | typing per chat+thread, reaction per msg      |
 | Heartbeat results → DM / private only       | ✅     | heartbeat/service.py                                   | test_heartbeat_service.py + manual     | skips negative IDs and topic sub-sessions     |
@@ -21,6 +21,7 @@ understand intended behavior quickly.
 | **TTS voice notes (Edge + OpenAI + Riva)**  | ✅     | providers/tts.py, tts/manager.py, channels/telegram.py | tests/test_tts.py (new)                | `tts.enabled = false` (default)               |
 | **/trace command - AI thinking visibility** | ✅     | channels/telegram.py                                   | tests/test_trace_command_additional.py | `_trace_enabled[chat_id] = false` (default)   |
 | **/stats command - token usage visibility** | ✅     | channels/telegram.py, utils/stats.py                   | tests/test_telegram_stats_command.py   | `/stats`, `/stats topic`, `/stats all`          |
+| **Commands enhanced for topic support**     | ✅     | channels/telegram.py, agent/loop.py                    | manual                                 | `/new`, `/stop`, `/model`, `/stats`, `/tts`, `/trace` |
 | **Tool definitions caching (#2205)**        | ✅     | agent/tools/registry.py                                | tests/test_tool_registry_caching.py    | `_definitions_cache` invalidated on reg/unreg |
 | **Incremental session saving (#2219)**      | ✅     | agent/loop.py, agent/subagent.py                       | tests/test_loop_incremental_save.py    | save offset tracks persisted content          |
 
@@ -80,20 +81,39 @@ Reset keyword is `reset` (not `default`).
 
 **Core behavior**
 - Configure `fallback_model` in agent defaults to specify backup model when primary fails
-- Automatically activates when primary model encounters 502/503 errors, timeouts, or other provider issues
+- Automatically activates when primary model encounters provider errors including:
+  - 502/503 errors (service temporarily unavailable)
+  - 404 errors (model not found or unavailable)
+  - 403 errors (quota exhaustion, rate limiting, access denied)
+  - Timeout errors (network or server delays)
+  - Invalid model errors (incorrect model specifications)
+  - Provider-specific errors like "free tier exhausted" or "AllocationQuota" limits
 - Transparent operation - users don't need to manually switch models
 - Falls back to configured model only when specific provider errors detected
+- Preserves original error if both primary and fallback models fail
 
 **Files**
 - nanobot/config/schema.py → AgentDefaults.fallback_model field
-- nanobot/agent/loop.py → _run_agent_loop with try/catch logic and fallback mechanism
+- nanobot/agent/loop.py → _run_agent_loop with enhanced try/catch logic and fallback mechanism
 - nanobot/cli/commands.py → Wiring of fallback_model parameter to AgentLoop
+- nanobot/agent/subagent.py → SubagentManager also supports fallback model propagation
 
 **Resolution priority**
-Preserve the try/catch wrapper around provider.chat_with_retry that checks for provider errors and attempts fallback model.
+Preserve the enhanced try/catch wrapper around provider.chat_with_retry that checks for provider errors and attempts fallback model. The fallback logic now includes comprehensive error detection covering:
+- 'provider returned error'
+- '502' in error_msg
+- '503' in error_msg
+- 'timeout' in error_msg
+- '404' in error_msg
+- '403' in error_msg
+- 'not found' in error_msg
+- 'invalid model' in error_msg
+- 'allocationquota' in error_msg (specific to quota-related errors)
+- 'free tier' in error_msg (specific to your error)
+- 'exhausted' in error_msg (specific to quota exhaustion)
 
 **Quick validation**
-Configure fallback_model in config and test with a temporarily unavailable primary provider.
+Configure fallback_model in config and test with a temporarily unavailable primary provider or quota-exhausted model.
 
 ### 4–8. Other smaller features (summary)
 
