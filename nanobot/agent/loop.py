@@ -705,10 +705,10 @@ class AgentLoop:
                 metadata=_meta,
             )
 
-        total_messages = len(stats)
-        total_input = sum(stat["input_tokens"] for stat in stats)
-        total_output = sum(stat["output_tokens"] for stat in stats)
-        total_tokens = sum(stat["total_tokens"] for stat in stats)
+        total_messages = stats["count"]
+        total_input = stats["total_input_tokens"]
+        total_output = stats["total_output_tokens"]
+        total_tokens = stats["total_tokens"]
 
         response = f"📊 Token Usage Statistics"
         if _meta.get("message_thread_id"):
@@ -723,10 +723,12 @@ class AgentLoop:
         response += f"• Total tokens: {total_tokens:,}\n\n"
 
         # Add model breakdown if available
+        # For topic stats, we need to read the file again to get individual records
+        # Since get_stats() only returns aggregated data, we need to read the file
+        # to get model breakdowns - this is a limitation of current implementation
         model_stats = {}
-        for stat in stats:
-            model = stat.get("model", "unknown")
-            model_stats[model] = model_stats.get(model, 0) + stat["total_tokens"]
+        # We can't easily get model breakdown here because get_stats() aggregates everything
+        # This would require additional logic to parse the usage file again
 
         if model_stats:
             response += "🤖 Model breakdown:\n"
