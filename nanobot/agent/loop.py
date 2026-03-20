@@ -696,7 +696,7 @@ class AgentLoop:
             )
 
         # Get stats for current chat/topic
-        stats = self.stats_manager.get_chat_stats(msg.channel, msg.chat_id, _meta.get("message_thread_id"))
+        stats = self.stats_manager.get_stats(msg.channel, msg.chat_id)
         if not stats:
             return OutboundMessage(
                 channel=msg.channel,
@@ -745,11 +745,11 @@ class AgentLoop:
         _meta = msg.metadata or {}
 
         # Placeholder implementation - this should interact with TTS configuration
-        # For now, just return a basic response
+        # For now, just return a basic response with proper formatting
         return OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,
-            content="🔊 TTS functionality is available. Use `/tts enable` to enable or `/tts disable` to disable.",
+            content="🔊 TTS functionality is available.\n\nUse `/tts enable` to enable or `/tts disable` to disable.",
             metadata=_meta,
         )
 
