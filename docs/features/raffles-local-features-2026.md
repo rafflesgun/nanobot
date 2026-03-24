@@ -24,6 +24,7 @@ understand intended behavior quickly.
 | **Commands enhanced for topic support**     | ✅     | channels/telegram.py, agent/loop.py                    | manual                                 | `/new`, `/stop`, `/model`, `/stats`, `/tts`, `/trace` |
 | **Tool definitions caching (#2205)**        | ✅     | agent/tools/registry.py                                | tests/test_tool_registry_caching.py    | `_definitions_cache` invalidated on reg/unreg |
 | **Incremental session saving (#2219)**      | ✅     | agent/loop.py, agent/subagent.py                       | tests/test_loop_incremental_save.py    | save offset tracks persisted content          |
+| **WebSearchTool - ddgs library**           | ✅     | agent/tools/web.py, pyproject.toml                     | tests/test_web_tools.py                | Uses `ddgs` lib, no API key required         |
 
 ## Detailed Descriptions & Merge Guidance
 
@@ -162,4 +163,26 @@ Keep the incremental save functionality that protects against data loss during m
 **Quick validation**
 ```bash
 pytest tests/test_loop_incremental_save.py -v
+```
+
+### 12. WebSearchTool - ddgs library
+
+**Core behavior**
+- Replaced manual DuckDuckGo HTML parsing with the official `ddgs` library
+- Uses `DDGS().text()` method for web searches
+- Runs synchronous ddgs calls in asyncio executor for async compatibility
+- No API key required - completely free to use
+- Supports proxy configuration via constructor parameter
+
+**Files to protect during conflicts**
+- nanobot/agent/tools/web.py → WebSearchTool class using ddgs
+- pyproject.toml → `ddgs>=9.0.0` dependency
+- tests/test_web_tools.py → Tests for WebSearchTool and WebFetchTool
+
+**Resolution priority**
+Keep the ddgs library implementation for more reliable DuckDuckGo search results. The manual HTML parsing approach was brittle and broke when DuckDuckGo changed their page structure.
+
+**Quick validation**
+```bash
+pytest tests/test_web_tools.py -v
 ```

@@ -1,13 +1,13 @@
 """Web tools: web_search and web_fetch."""
 
-import html
+import asyncio
 import json
-import os
 import re
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+from ddgs import DDGS
 from loguru import logger
 
 from nanobot.agent.tools.base import Tool
@@ -19,6 +19,7 @@ MAX_REDIRECTS = 5  # Limit redirects to prevent DoS attacks
 
 def _strip_tags(text: str) -> str:
     """Remove HTML tags and decode entities."""
+    import html
     text = re.sub(r'<script[\s\S]*?</script>', '', text, flags=re.I)
     text = re.sub(r'<style[\s\S]*?</style>', '', text, flags=re.I)
     text = re.sub(r'<[^>]+>', '', text)
@@ -45,7 +46,7 @@ def _validate_url(url: str) -> tuple[bool, str]:
 
 
 class WebSearchTool(Tool):
-    """Search the web using Brave Search API."""
+    """Search the web using DuckDuckGo via ddgs library (no API key required)."""
 
     name = "web_search"
     description = "Search the web. Returns titles, URLs, and snippets."
@@ -58,49 +59,31 @@ class WebSearchTool(Tool):
         "required": ["query"]
     }
 
-    def __init__(self, api_key: str | None = None, max_results: int = 5, proxy: str | None = None):
-        self._init_api_key = api_key
+    def __init__(self, max_results: int = 5, proxy: str | None = None, **kwargs: Any):
         self.max_results = max_results
         self.proxy = proxy
-
-    @property
-    def api_key(self) -> str:
-        """Resolve API key at call time so env/config changes are picked up."""
-        return self._init_api_key or os.environ.get("BRAVE_API_KEY", "")
+        self._ddgs = DDGS(proxy=proxy) if proxy else DDGS()
 
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
-        if not self.api_key:
-            return (
-                "Error: Brave Search API key not configured. Set it in "
-                "~/.nanobot/config.json under tools.web.search.apiKey "
-                "(or export BRAVE_API_KEY), then restart the gateway."
-            )
-
         try:
             n = min(max(count or self.max_results, 1), 10)
-            logger.debug("WebSearch: {}", "proxy enabled" if self.proxy else "direct connection")
-            async with httpx.AsyncClient(proxy=self.proxy) as client:
-                r = await client.get(
-                    "https://api.search.brave.com/res/v1/web/search",
-                    params={"q": query, "count": n},
-                    headers={"Accept": "application/json", "X-Subscription-Token": self.api_key},
-                    timeout=10.0
-                )
-                r.raise_for_status()
+            logger.debug("WebSearch using ddgs library")
 
-            results = r.json().get("web", {}).get("results", [])[:n]
+            # ddgs is synchronous, run in executor
+            loop = asyncio.get_event_loop()
+            results = await loop.run_in_executor(
+                None, lambda: self._ddgs.text(query, max_results=n)
+            )
+
             if not results:
                 return f"No results for: {query}"
 
             lines = [f"Results for: {query}\n"]
             for i, item in enumerate(results, 1):
-                lines.append(f"{i}. {item.get('title', '')}\n   {item.get('url', '')}")
-                if desc := item.get("description"):
-                    lines.append(f"   {desc}")
+                lines.append(f"{i}. {item.get('title', '')}\n   {item.get('href', '')}")
+                if body := item.get("body"):
+                    lines.append(f"   {body}")
             return "\n".join(lines)
-        except httpx.ProxyError as e:
-            logger.error("WebSearch proxy error: {}", e)
-            return f"Proxy error: {e}"
         except Exception as e:
             logger.error("WebSearch error: {}", e)
             return f"Error: {e}"

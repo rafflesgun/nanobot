@@ -48,6 +48,7 @@ dependencies = [
     "edge-tts>=6.1.0",
     "pydub>=0.25.1",
     "nvidia-riva-client>=2.0.0",
+    "ddgs>=9.0.0",
 ]
 
 [project.optional-dependencies]
