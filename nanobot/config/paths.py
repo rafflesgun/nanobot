@@ -34,6 +34,13 @@ def get_media_dir(channel: str | None = None) -> Path:
     return base_dir
 
 
+def is_default_workspace(workspace: str | Path | None) -> bool:
+    """Return whether a workspace resolves to nanobot's default workspace path."""
+    current = Path(workspace).expanduser() if workspace is not None else Path.home() / ".nanobot" / "workspace"
+    default = Path.home() / ".nanobot" / "workspace"
+    return current.resolve(strict=False) == default.resolve(strict=False)
+
+
 def get_cli_history_path() -> Path:
     """Get the CLI history file path."""
     return Path.home() / ".nanobot" / "history" / "cli_history"
