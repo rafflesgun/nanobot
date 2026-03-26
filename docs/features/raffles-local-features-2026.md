@@ -28,7 +28,7 @@ understand intended behavior quickly.
 | **Commands enhanced for topic support**     | ✅     | channels/telegram.py, agent/loop.py                    | manual                                 | `/new`, `/stop`, `/model`, `/stats`, `/tts`, `/trace` |
 | **Tool definitions caching (#2205)**        | ✅     | agent/tools/registry.py                                | tests/test_tool_registry_caching.py    | `_definitions_cache` invalidated on reg/unreg |
 | **Incremental session saving (#2219)**      | ✅     | agent/loop.py, agent/subagent.py                       | tests/test_loop_incremental_save.py    | save offset tracks persisted content          |
-| **WebSearchTool - ddgs library**           | ✅     | agent/tools/web.py, pyproject.toml                     | tests/test_web_tools.py                | Uses `ddgs` lib, no API key required         |
+| Web search enhancements merged into main   | ℹ️     | agent/tools/web.py, README.md                          | tests/tools/test_web_search_tool.py    | Multi-provider search now upstream (`brave`, `tavily`, `duckduckgo`, `searxng`, `jina`) |
 
 ## Detailed Descriptions & Merge Guidance
 
@@ -240,24 +240,23 @@ Keep the incremental save functionality that protects against data loss during m
 pytest tests/test_loop_incremental_save.py -v
 ```
 
-### 12. WebSearchTool - ddgs library
+### 12. Web search status after merge
 
 **Core behavior**
-- Replaced manual DuckDuckGo HTML parsing with the official `ddgs` library
-- Uses `DDGS().text()` method for web searches
-- Runs synchronous ddgs calls in asyncio executor for async compatibility
-- No API key required - completely free to use
-- Supports proxy configuration via constructor parameter
+- The old local-only DuckDuckGo enhancement is no longer branch-specific
+- `origin/main` now includes the web search implementation in `nanobot/agent/tools/web.py`
+- Upstream supports multiple providers: `brave`, `tavily`, `duckduckgo`, `searxng`, `jina`
+- `duckduckgo` still uses the `ddgs` library, but this is now part of the merged baseline
 
 **Files to protect during conflicts**
-- nanobot/agent/tools/web.py → WebSearchTool class using ddgs
-- pyproject.toml → `ddgs>=9.0.0` dependency
-- tests/test_web_tools.py → Tests for WebSearchTool and WebFetchTool
+- nanobot/agent/tools/web.py
+- README.md
+- tests/tools/test_web_search_tool.py
 
 **Resolution priority**
-Keep the ddgs library implementation for more reliable DuckDuckGo search results. The manual HTML parsing approach was brittle and broke when DuckDuckGo changed their page structure.
+Do not treat web search as a local-only feature anymore. Keep the upstream multi-provider implementation and only document truly branch-specific behavior in this file.
 
 **Quick validation**
 ```bash
-pytest tests/test_web_tools.py -v
+pytest tests/tools/test_web_search_tool.py -q
 ```

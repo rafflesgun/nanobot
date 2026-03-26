@@ -345,9 +345,9 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(CommandHandler("stop", self._forward_command, filters=private_only))
         self._app.add_handler(CommandHandler("model", self._forward_command, filters=private_only))
         self._app.add_handler(CommandHandler("help", self._on_help, filters=private_only))
-        self._app.add_handler(CommandHandler("tts", self._forward_command, filters=private_only))
+        self._app.add_handler(CommandHandler("tts", self._on_tts_command, filters=private_only))
         self._app.add_handler(CommandHandler("trace", self._on_trace_command, filters=private_only))
-        self._app.add_handler(CommandHandler("stats", self._forward_command, filters=private_only))
+        self._app.add_handler(CommandHandler("stats", self._on_stats_command, filters=private_only))
         self._app.add_handler(CommandHandler("restart", self._forward_command, filters=private_only))
         self._app.add_handler(CommandHandler("status", self._forward_command, filters=private_only))
 
@@ -1237,6 +1237,33 @@ class TelegramChannel(BaseChannel):
         stripped = re.sub(r'^@\S+\s*', '', (content or '').strip())
         return stripped.startswith("/")
 
+    def _extract_local_command(self, content: str) -> tuple[str, list[str]] | None:
+        """Parse Telegram-local commands from raw text or @mention-prefixed text."""
+        stripped = re.sub(r'^@\S+\s*', '', (content or '').strip())
+        if not stripped.startswith("/"):
+            return None
+        parts = stripped.split()
+        if not parts:
+            return None
+        command = parts[0][1:].split("@", 1)[0].lower()
+        if command not in {"tts", "trace", "stats"}:
+            return None
+        return command, parts[1:]
+
+    async def _dispatch_local_command(self, update: Update, command: str, args: list[str]) -> bool:
+        """Run Telegram-local command handlers outside the agent loop."""
+        context = type("TelegramLocalCommandContext", (), {"args": args})()
+        if command == "tts":
+            await self._on_tts_command(update, context)
+            return True
+        if command == "trace":
+            await self._on_trace_command(update, context)
+            return True
+        if command == "stats":
+            await self._on_stats_command(update, context)
+            return True
+        return False
+
     def _find_media_group_buffer(self, lane: str) -> dict[str, Any] | None:
         for buf in self._media_group_buffers.values():
             if buf.get("lane") == lane:
@@ -1423,6 +1450,11 @@ class TelegramChannel(BaseChannel):
 
         # Build metadata including thread_id for topic support
         msg_metadata = self._build_message_metadata(message, user)
+
+        if local_command := self._extract_local_command(content):
+            command, args = local_command
+            await self._dispatch_local_command(update, command, args)
+            return
 
         # Telegram media groups: buffer briefly, forward as one aggregated turn.
         if media_group_id := getattr(message, "media_group_id", None):

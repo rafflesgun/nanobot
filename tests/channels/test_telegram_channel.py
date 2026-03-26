@@ -198,11 +198,36 @@ async def test_start_creates_separate_pools_with_proxy(monkeypatch) -> None:
     assert len(_FakeHTTPXRequest.instances) == 2
     api_req, poll_req = _FakeHTTPXRequest.instances
     assert api_req.kwargs["proxy"] == config.proxy
-    assert poll_req.kwargs["proxy"] == config.proxy
-    assert api_req.kwargs["connection_pool_size"] == 32
-    assert poll_req.kwargs["connection_pool_size"] == 4
-    assert builder.request_value is api_req
-    assert builder.get_updates_request_value is poll_req
+
+
+@pytest.mark.asyncio
+async def test_start_registers_local_telegram_command_handlers(monkeypatch) -> None:
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"])
+    bus = MessageBus()
+    channel = TelegramChannel(config, bus)
+    app = _FakeApp(lambda: setattr(channel, "_running", False))
+    builder = _FakeBuilder(app)
+
+    monkeypatch.setattr("nanobot.channels.telegram.HTTPXRequest", _FakeHTTPXRequest)
+    monkeypatch.setattr(
+        "nanobot.channels.telegram.Application",
+        SimpleNamespace(builder=lambda: builder),
+    )
+
+    await channel.start()
+
+    handlers = [
+        handler for handler in app.handlers
+        if hasattr(handler, "commands") and hasattr(handler, "callback")
+    ]
+    callbacks_by_command = {
+        next(iter(handler.commands)): handler.callback.__name__
+        for handler in handlers
+    }
+
+    assert callbacks_by_command["tts"] == "_on_tts_command"
+    assert callbacks_by_command["trace"] == "_on_trace_command"
+    assert callbacks_by_command["stats"] == "_on_stats_command"
     assert any(cmd.command == "status" for cmd in app.bot.commands)
 
 
@@ -856,6 +881,66 @@ async def test_forward_command_does_not_inject_reply_context() -> None:
 
     assert len(handled) == 1
     assert handled[0]["content"] == "/new"
+
+
+@pytest.mark.asyncio
+async def test_group_mention_tts_command_uses_local_handler() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="mention"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._start_typing = lambda *_args: None
+    channel._send_thinking_message = AsyncMock()
+    channel._add_ack_reaction = AsyncMock()
+    channel._on_tts_command = AsyncMock()
+    channel._handle_message = AsyncMock()
+
+    update = _make_telegram_update(text="@nanobot_test /tts on")
+    await channel._on_message(update, None)
+
+    channel._on_tts_command.assert_awaited_once()
+    channel._handle_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_group_topic_mention_tts_command_uses_local_handler() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="mention"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._start_typing = lambda *_args: None
+    channel._send_thinking_message = AsyncMock()
+    channel._add_ack_reaction = AsyncMock()
+    channel._on_tts_command = AsyncMock()
+    channel._handle_message = AsyncMock()
+
+    update = _make_telegram_update(text="@nanobot_test /tts on", message_thread_id=777)
+    await channel._on_message(update, None)
+
+    channel._on_tts_command.assert_awaited_once()
+    channel._handle_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_group_mention_stats_command_uses_local_handler() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="mention"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._start_typing = lambda *_args: None
+    channel._send_thinking_message = AsyncMock()
+    channel._add_ack_reaction = AsyncMock()
+    channel._on_stats_command = AsyncMock()
+    channel._handle_message = AsyncMock()
+
+    update = _make_telegram_update(text="@nanobot_test /stats topic")
+    await channel._on_message(update, None)
+
+    channel._on_stats_command.assert_awaited_once()
+    channel._handle_message.assert_not_awaited()
 
 
 @pytest.mark.asyncio

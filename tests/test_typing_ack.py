@@ -63,6 +63,22 @@ async def test_ack_reaction_error_handling():
 
 
 @pytest.mark.asyncio
+async def test_ack_reaction_still_random_when_fixed_emoji_is_empty():
+    """Explicit react_emoji='' should still allow the random ACK reaction path."""
+    channel = TelegramChannel(
+        config={"group_policy": "mention", "token": "fake_token", "allowFrom": ["*"], "react_emoji": ""},
+        bus=AsyncMock(),
+    )
+    channel._app = AsyncMock()
+    channel._app.bot = AsyncMock()
+    channel._app.bot.set_message_reaction = AsyncMock()
+
+    await channel._add_ack_reaction(chat_id=123456, message_id=789)
+
+    channel._app.bot.set_message_reaction.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_typing_indicator_started():
     """Test that typing indicator is started correctly."""
     config = AsyncMock()
