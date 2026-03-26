@@ -16,8 +16,12 @@ understand intended behavior quickly.
 | Automatic fallback model on provider errors | ✅     | agent/loop.py, config/schema.py, cli/commands.py, agent/subagent.py | manual testing with quota exhaustion | `fallback_model: null` (default)              |
 | "Thinking…" placeholder (PM only)           | ✅     | channels/telegram.py → _send_thinking_message          | tests/test_thinking_message.py         | skipped when `is_group == True`               |
 | Typing indicator & ACK reaction             | ✅     | channels/telegram.py                                   | tests/test_typing_ack.py               | typing per chat+thread, reaction per msg      |
-| Heartbeat results → DM / private only       | ✅     | heartbeat/service.py                                   | test_heartbeat_service.py + manual     | skips negative IDs and topic sub-sessions     |
+| Heartbeat results → DM / private only       | ✅     | cli/commands.py, heartbeat/service.py                  | test_heartbeat_service.py + targeted tests | skips negative IDs and topic sub-sessions  |
+| Heartbeat session bounded by content+tail   | ✅     | cli/commands.py, session/manager.py                    | session history regressions            | `prune_by_content_length(4000)` + keep_recent |
 | Media downloads → workspace/media/          | ✅     | channels/telegram.py                                   | tests/test_media_download.py           | falls back to `~/.nanobot/media`              |
+| OpenAI compat uses `max_completion_tokens` only | ✅  | providers/openai_compat_provider.py                    | tests/providers/test_litellm_kwargs.py | no duplicate `max_tokens` field               |
+| SDK retries disabled + surfaced to progress | ✅     | providers/base.py, providers/*, agent/loop.py         | tests/providers/test_provider_retry.py | provider SDK retries forced to `0`            |
+| Telegram forwarded message debounce         | ✅     | channels/telegram.py                                   | tests/channels/test_telegram_channel.py | 80ms lane = `chat_id:thread_id`              |
 | **TTS voice notes (Edge + OpenAI + Riva)**  | ✅     | providers/tts.py, tts/manager.py, channels/telegram.py | tests/test_tts.py (new)                | `tts.enabled = false` (default)               |
 | **/trace command - AI thinking visibility** | ✅     | channels/telegram.py                                   | tests/test_trace_command_additional.py | `_trace_enabled[chat_id] = false` (default)   |
 | **/stats command - token usage visibility** | ✅     | channels/telegram.py, utils/stats.py                   | tests/test_telegram_stats_command.py   | `/stats`, `/stats topic`, `/stats all`          |
@@ -116,12 +120,83 @@ Preserve the enhanced try/catch wrapper around provider.chat_with_retry that che
 **Quick validation**
 Configure fallback_model in config and test with a temporarily unavailable primary provider or quota-exhausted model.
 
-### 4–8. Other smaller features (summary)
+### 5. Provider retry plumbing and OpenAI compat request shape
+
+**Core behavior**
+- `OpenAICompatProvider` now sends only `max_completion_tokens` for OpenAI-compatible backends that reject simultaneous `max_tokens` + `max_completion_tokens`
+- Native SDK retries are disabled for both `AsyncOpenAI` and `AsyncAnthropic`
+- Provider retry helpers accept an `on_retry(attempt, total)` callback
+- `AgentLoop` forwards retry attempts to progress sinks as `Retrying... (attempt x/y)`
+
+**Files to protect during conflicts**
+- `nanobot/providers/openai_compat_provider.py`
+- `nanobot/providers/anthropic_provider.py`
+- `nanobot/providers/base.py`
+- `nanobot/agent/loop.py`
+
+**Resolution priority**
+Keep the SDK constructors with `max_retries=0` and explicit `httpx.Timeout(180.0, connect=10.0)`.  
+Keep `OpenAICompatProvider._build_kwargs()` using `max_completion_tokens` only.  
+Preserve the additive `on_retry` callback wiring in both retry helpers and the loop progress bridge.
+
+**Quick validation**
+```bash
+pytest tests/providers/test_custom_provider.py tests/providers/test_litellm_kwargs.py tests/providers/test_provider_retry.py -q
+```
+
+### 6. Heartbeat session bounding
+
+**Core behavior**
+- Gateway heartbeat now reuses the stable `heartbeat` session key
+- Before and after each run, heartbeat history is pruned in two dimensions:
+  - `Session.prune_by_content_length(4000)` truncates oversized message text
+  - `retain_recent_legal_suffix(keep_recent_messages)` keeps only a valid recent tail
+- Direct-turn persistence keeps the user prompt, which is required for legal suffix trimming to work
+
+**Files to protect during conflicts**
+- `nanobot/cli/commands.py`
+- `nanobot/session/manager.py`
+- `nanobot/agent/loop.py`
+
+**Resolution priority**
+Keep heartbeat cleanup on the same session that `process_direct()` uses.  
+Keep the direct-turn save behavior that persists the user message, not just the assistant reply.
+
+**Quick validation**
+```bash
+pytest tests/agent/test_loop_save_turn.py tests/agent/test_session_manager_history.py -q
+```
+
+### 7. Telegram forwarded-message debounce
+
+**Core behavior**
+- Forwarded messages get an 80ms debounce window so Telegram’s split updates become one agent turn
+- Plain text gets the same 80ms companion window to support reverse ordering (`text` then `forward`)
+- Buffers are isolated per `chat_id:message_thread_id`
+- Commands bypass debounce
+- Non-forward media bypass debounce
+- Media groups route through the same debounce path, and `stop()` cancels pending debounce tasks without flushing
+
+**Files to protect during conflicts**
+- `nanobot/channels/telegram.py`
+- `tests/channels/test_telegram_channel.py`
+
+**Resolution priority**
+Preserve topic-aware lane isolation and command bypass.  
+Do not regress local Telegram features such as topic routing, mention-only mode, trace, stats, TTS, or thinking placeholders while editing `_on_message()` / `_flush_media_group()`.
+
+**Quick validation**
+```bash
+pytest tests/channels/test_telegram_channel.py -q
+```
+
+### 8–12. Other smaller features (summary)
 
 - Thinking draft message → PM only (`if is_group: return`)
 - Typing + ACK reaction → per composite key (chat+thread)
 - Heartbeat DM-only logic lives in `_pick_heartbeat_target()` inside `nanobot/cli/commands.py` (not `heartbeat/service.py`)
 - Skips topic sub-sessions and negative Telegram chat IDs
+- Heartbeat history is bounded pre/post run by content length and recent legal suffix
 - Media → `workspace/media/` when workspace configured
 
 ### 10. Tool definitions caching (#2205)

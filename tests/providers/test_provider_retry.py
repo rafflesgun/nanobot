@@ -125,6 +125,68 @@ async def test_chat_with_retry_explicit_override_beats_defaults() -> None:
     assert provider.last_kwargs["reasoning_effort"] == "low"
 
 
+@pytest.mark.asyncio
+async def test_chat_with_retry_calls_on_retry_with_attempt_and_total(monkeypatch) -> None:
+    provider = ScriptedProvider([
+        LLMResponse(content="429 rate limit", finish_reason="error"),
+        LLMResponse(content="ok"),
+    ])
+    attempts: list[tuple[int, int]] = []
+
+    async def _fake_sleep(_delay: int) -> None:
+        return None
+
+    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
+
+    response = await provider.chat_with_retry(
+        messages=[{"role": "user", "content": "hello"}],
+        on_retry=lambda attempt, total: attempts.append((attempt, total)),
+    )
+
+    assert response.content == "ok"
+    assert attempts == [(1, 3)]
+
+
+@pytest.mark.asyncio
+async def test_chat_with_retry_does_not_call_on_retry_when_first_attempt_succeeds() -> None:
+    provider = ScriptedProvider([LLMResponse(content="ok")])
+    attempts: list[tuple[int, int]] = []
+
+    response = await provider.chat_with_retry(
+        messages=[{"role": "user", "content": "hello"}],
+        on_retry=lambda attempt, total: attempts.append((attempt, total)),
+    )
+
+    assert response.content == "ok"
+    assert attempts == []
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_with_retry_calls_on_retry(monkeypatch) -> None:
+    provider = ScriptedProvider([
+        LLMResponse(content="503 overloaded", finish_reason="error"),
+        LLMResponse(content="stream ok"),
+    ])
+    attempts: list[tuple[int, int]] = []
+
+    async def _fake_sleep(_delay: int) -> None:
+        return None
+
+    async def _chat_stream(**kwargs) -> LLMResponse:
+        return await provider.chat(**kwargs)
+
+    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
+    provider.chat_stream = _chat_stream
+
+    response = await provider.chat_stream_with_retry(
+        messages=[{"role": "user", "content": "hello"}],
+        on_retry=lambda attempt, total: attempts.append((attempt, total)),
+    )
+
+    assert response.content == "stream ok"
+    assert attempts == [(1, 3)]
+
+
 # ---------------------------------------------------------------------------
 # Image fallback tests
 # ---------------------------------------------------------------------------

@@ -62,6 +62,7 @@ async def test_on_message_accepts_mention_in_caption(monkeypatch) -> None:
     update = SimpleNamespace(message=message, effective_user=SimpleNamespace(id=111, username="alice", first_name="Alice"))
 
     await channel._on_message(update, None)
+    await asyncio.sleep(0.12)
 
     assert handled, "_handle_message was not called"
     assert handled[0][0].startswith("111"), "sender_id should be derived from effective_user"

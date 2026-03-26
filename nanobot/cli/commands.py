@@ -651,13 +651,12 @@ def gateway(
     # Create heartbeat service
     async def on_heartbeat_execute(tasks: str) -> str:
         """Phase 2: execute heartbeat tasks through the full agent loop."""
-        import time
         channel, chat_id = _pick_heartbeat_target()
-        # Use a unique per-run session key so that a failed heartbeat
-        # (which saves the user message but no assistant reply) never
-        # causes consecutive same-role messages that trigger a 400 error
-        # on the next run.  Each heartbeat tick is fully stateless.
-        session_key = f"heartbeat:{int(time.time())}"
+        session_key = "heartbeat"
+        session = agent.sessions.get_or_create(session_key)
+        session.prune_by_content_length(4000)
+        session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
+        agent.sessions.save(session)
         logger.info(
             "Heartbeat: executing via channel={} chat_id={} session={}",
             channel, chat_id, session_key,
@@ -674,9 +673,8 @@ def gateway(
             on_progress=_silent,
         )
 
-        # Keep a small tail of heartbeat history so the loop stays bounded
-        # without losing all short-term context between runs.
-        session = agent.sessions.get_or_create("heartbeat")
+        session = agent.sessions.get_or_create(session_key)
+        session.prune_by_content_length(4000)
         session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
         agent.sessions.save(session)
 

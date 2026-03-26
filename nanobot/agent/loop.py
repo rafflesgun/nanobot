@@ -294,6 +294,10 @@ class AgentLoop:
             if incremental and _raw_stream:
                 await _raw_stream(incremental)
 
+        def _on_retry(attempt: int, total: int) -> None:
+            if on_progress:
+                asyncio.create_task(on_progress(f"Retrying... (attempt {attempt}/{total})"))
+
         while iteration < self.max_iterations:
             iteration += 1
 
@@ -306,12 +310,14 @@ class AgentLoop:
                         tools=tool_defs,
                         model=effective_model,
                         on_content_delta=_filtered_stream,
+                        on_retry=_on_retry,
                     )
                 else:
                     response = await self.provider.chat_with_retry(
                         messages=messages,
                         tools=tool_defs,
                         model=effective_model,
+                        on_retry=_on_retry,
                     )
             except Exception as e:
                 # Check if there's a fallback model and this is a provider error
@@ -336,12 +342,14 @@ class AgentLoop:
                                 tools=tool_defs,
                                 model=self.fallback_model,
                                 on_content_delta=_filtered_stream,
+                                on_retry=_on_retry,
                             )
                         else:
                             response = await self.provider.chat_with_retry(
                                 messages=messages,
                                 tools=tool_defs,
                                 model=self.fallback_model,
+                                on_retry=_on_retry,
                             )
                     except Exception as fallback_error:
                         logger.error("Both primary and fallback models failed: {}", fallback_error)

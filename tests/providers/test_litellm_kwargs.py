@@ -132,6 +132,8 @@ async def test_standard_provider_passes_model_through() -> None:
 
     call_kwargs = mock_create.call_args.kwargs
     assert call_kwargs["model"] == "deepseek-chat"
+    assert "max_tokens" not in call_kwargs
+    assert call_kwargs["max_completion_tokens"] > 0
 
 
 @pytest.mark.asyncio

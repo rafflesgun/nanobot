@@ -36,6 +36,9 @@ class _FakeUpdater:
     async def start_polling(self, **kwargs) -> None:
         self._on_start_polling()
 
+    async def stop(self) -> None:
+        pass
+
 
 class _FakeBot:
     def __init__(self) -> None:
@@ -74,6 +77,9 @@ class _FakeBot:
             pass
         return SimpleNamespace(download_to_drive=_fake_download)
 
+    async def set_message_reaction(self, **kwargs) -> None:
+        pass
+
 
 class _FakeApp:
     def __init__(self, on_start_polling) -> None:
@@ -92,6 +98,12 @@ class _FakeApp:
         pass
 
     async def start(self) -> None:
+        pass
+
+    async def stop(self) -> None:
+        pass
+
+    async def shutdown(self) -> None:
         pass
 
 
@@ -132,6 +144,13 @@ def _make_telegram_update(
     entities=None,
     caption_entities=None,
     reply_to_message=None,
+    forward_origin=None,
+    media_group_id=None,
+    message_thread_id=None,
+    photo=None,
+    voice=None,
+    audio=None,
+    document=None,
 ):
     user = SimpleNamespace(id=12345, username="alice", first_name="Alice")
     message = SimpleNamespace(
@@ -142,13 +161,14 @@ def _make_telegram_update(
         entities=entities or [],
         caption_entities=caption_entities or [],
         reply_to_message=reply_to_message,
-        photo=None,
-        voice=None,
-        audio=None,
-        document=None,
-        media_group_id=None,
-        message_thread_id=None,
+        photo=photo,
+        voice=voice,
+        audio=audio,
+        document=document,
+        media_group_id=media_group_id,
+        message_thread_id=message_thread_id,
         message_id=1,
+        forward_origin=forward_origin,
     )
     return SimpleNamespace(message=message, effective_user=user)
 
@@ -451,7 +471,9 @@ async def test_group_policy_mention_accepts_text_mention_and_caches_bot_identity
 
     mention = SimpleNamespace(type="mention", offset=0, length=13)
     await channel._on_message(_make_telegram_update(text="@nanobot_test hi", entities=[mention]), None)
+    await asyncio.sleep(0.12)
     await channel._on_message(_make_telegram_update(text="@nanobot_test again", entities=[mention]), None)
+    await asyncio.sleep(0.12)
 
     assert len(handled) == 2
     assert channel._app.bot.get_me_calls == 1
@@ -478,6 +500,7 @@ async def test_group_policy_mention_accepts_caption_mention() -> None:
         _make_telegram_update(caption="@nanobot_test photo", caption_entities=[mention]),
         None,
     )
+    await asyncio.sleep(0.12)
 
     assert len(handled) == 1
     assert handled[0]["content"] == "@nanobot_test photo"
@@ -501,6 +524,7 @@ async def test_group_policy_mention_accepts_reply_to_bot() -> None:
 
     reply = SimpleNamespace(from_user=SimpleNamespace(id=999))
     await channel._on_message(_make_telegram_update(text="reply", reply_to_message=reply), None)
+    await asyncio.sleep(0.12)
 
     assert len(handled) == 1
 
@@ -522,6 +546,7 @@ async def test_group_policy_open_accepts_plain_group_message() -> None:
     channel._start_typing = lambda _chat_id: None
 
     await channel._on_message(_make_telegram_update(text="hello group"), None)
+    await asyncio.sleep(0.12)
 
     assert len(handled) == 1
     assert channel._app.bot.get_me_calls == 0
@@ -583,6 +608,7 @@ async def test_on_message_includes_reply_context() -> None:
     reply = SimpleNamespace(text="Hello", message_id=2, from_user=SimpleNamespace(id=1))
     update = _make_telegram_update(text="translate this", reply_to_message=reply)
     await channel._on_message(update, None)
+    await asyncio.sleep(0.12)
 
     assert len(handled) == 1
     assert handled[0]["content"].startswith("[Reply to: Hello]")
@@ -717,6 +743,7 @@ async def test_on_message_attaches_reply_to_media_when_available(monkeypatch, tm
         reply_to_message=reply_with_photo,
     )
     await channel._on_message(update, None)
+    await asyncio.sleep(0.12)
 
     assert len(handled) == 1
     assert handled[0]["content"].startswith("[Reply to: [image:")
@@ -753,6 +780,7 @@ async def test_on_message_reply_to_media_fallback_when_download_fails() -> None:
     )
     update = _make_telegram_update(text="what is this?", reply_to_message=reply_with_photo)
     await channel._on_message(update, None)
+    await asyncio.sleep(0.12)
 
     assert len(handled) == 1
     assert "what is this?" in handled[0]["content"]
@@ -800,6 +828,7 @@ async def test_on_message_reply_to_caption_and_media(monkeypatch, tmp_path) -> N
         reply_to_message=reply_with_caption_and_photo,
     )
     await channel._on_message(update, None)
+    await asyncio.sleep(0.12)
 
     assert len(handled) == 1
     assert "[Reply to: A cute cat]" in handled[0]["content"]
@@ -827,6 +856,246 @@ async def test_forward_command_does_not_inject_reply_context() -> None:
 
     assert len(handled) == 1
     assert handled[0]["content"] == "/new"
+
+
+@pytest.mark.asyncio
+async def test_forward_and_text_are_coalesced() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._start_typing = lambda *_args: None
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+
+    await channel._on_message(
+        _make_telegram_update(text="forwarded body", forward_origin=object()),
+        None,
+    )
+    await channel._on_message(_make_telegram_update(text="summarize this"), None)
+    await asyncio.sleep(0.12)
+
+    assert len(handled) == 1
+    assert handled[0]["content"] == "summarize this\n\nforwarded body"
+
+
+@pytest.mark.asyncio
+async def test_text_then_forward_are_coalesced() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._start_typing = lambda *_args: None
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+
+    await channel._on_message(_make_telegram_update(text="summarize this"), None)
+    await channel._on_message(
+        _make_telegram_update(text="forwarded body", forward_origin=object()),
+        None,
+    )
+    await asyncio.sleep(0.12)
+
+    assert len(handled) == 1
+    assert handled[0]["content"] == "summarize this\n\nforwarded body"
+
+
+@pytest.mark.asyncio
+async def test_forward_is_buffered_before_delivery() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._start_typing = lambda *_args: None
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+
+    await channel._on_message(
+        _make_telegram_update(text="forwarded body", forward_origin=object()),
+        None,
+    )
+    await asyncio.sleep(0.02)
+    assert handled == []
+    await asyncio.sleep(0.12)
+    assert len(handled) == 1
+
+
+@pytest.mark.asyncio
+async def test_text_only_waits_for_forward_companion_window() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._start_typing = lambda *_args: None
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+
+    await channel._on_message(_make_telegram_update(text="plain text"), None)
+    await asyncio.sleep(0.02)
+    assert handled == []
+    await asyncio.sleep(0.12)
+    assert len(handled) == 1
+    assert handled[0]["content"] == "plain text"
+
+
+@pytest.mark.asyncio
+async def test_non_forward_media_bypasses_debounce() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._start_typing = lambda *_args: None
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+
+    update = _make_telegram_update(
+        caption="photo caption",
+        photo=[SimpleNamespace(file_id="fid", mime_type="image/jpeg")],
+    )
+    await channel._on_message(update, None)
+
+    assert len(handled) == 1
+    assert "photo caption" in handled[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_commands_bypass_debounce() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._start_typing = lambda *_args: None
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+
+    await channel._on_message(_make_telegram_update(text="@nanobot_test /status"), None)
+
+    assert len(handled) == 1
+    assert handled[0]["content"] == "@nanobot_test /status"
+
+
+@pytest.mark.asyncio
+async def test_forum_topics_use_separate_debounce_lanes() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._start_typing = lambda *_args: None
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+
+    await channel._on_message(
+        _make_telegram_update(text="forward A", forward_origin=object(), message_thread_id=1),
+        None,
+    )
+    await channel._on_message(
+        _make_telegram_update(text="forward B", forward_origin=object(), message_thread_id=2),
+        None,
+    )
+    await asyncio.sleep(0.12)
+
+    assert len(handled) == 2
+    assert {item["metadata"]["message_thread_id"] for item in handled} == {1, 2}
+
+
+@pytest.mark.asyncio
+async def test_text_joins_pending_media_group_buffer() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._start_typing = lambda *_args: None
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+    import tempfile
+    from pathlib import Path
+    media_dir = Path(tempfile.mkdtemp())
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("nanobot.channels.telegram.get_media_dir", lambda channel=None: media_dir)
+        await channel._on_message(
+            _make_telegram_update(
+                caption="album",
+                media_group_id="grp1",
+                photo=[SimpleNamespace(file_id="fid", mime_type="image/jpeg")],
+                forward_origin=object(),
+            ),
+            None,
+        )
+        await channel._on_message(_make_telegram_update(text="summarize this"), None)
+    await asyncio.sleep(0.8)
+
+    assert len(handled) == 1
+    assert handled[0]["content"].startswith("summarize this\n\nalbum")
+    assert "[image:" in handled[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_stop_cancels_pending_debounce_tasks() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._start_typing = lambda *_args: None
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+
+    await channel._on_message(
+        _make_telegram_update(text="forwarded body", forward_origin=object()),
+        None,
+    )
+    assert channel._debounce_buffers
+
+    await channel.stop()
+    await asyncio.sleep(0.12)
+
+    assert handled == []
+    assert channel._debounce_buffers == {}
 
 
 @pytest.mark.asyncio

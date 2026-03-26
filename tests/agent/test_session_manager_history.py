@@ -116,6 +116,23 @@ def test_retain_recent_legal_suffix_keeps_legal_tool_boundary():
     assert history[0]["content"] == "keep"
 
 
+def test_prune_by_content_length_truncates_string_and_list_text() -> None:
+    session = Session(key="test:prune")
+    session.messages = [
+        {"role": "user", "content": "x" * 10},
+        {"role": "assistant", "content": [
+            {"type": "text", "text": "y" * 8},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+        ]},
+    ]
+
+    session.prune_by_content_length(4)
+
+    assert session.messages[0]["content"] == "xxxx"
+    assert session.messages[1]["content"][0]["text"] == "yyyy"
+    assert session.messages[1]["content"][1]["type"] == "image_url"
+
+
 # --- last_consolidated > 0 ---
 
 def test_orphan_trim_with_last_consolidated():

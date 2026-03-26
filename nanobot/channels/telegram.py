@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import random
 import re
+import time
 import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -35,6 +36,7 @@ from nanobot.utils.helpers import split_message
 
 TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
 TELEGRAM_REPLY_CONTEXT_MAX_LEN = TELEGRAM_MAX_MESSAGE_LEN  # Max length for reply context in user message
+FORWARD_DEBOUNCE_MS = 80
 
 
 # ACK reaction emojis pool
@@ -251,6 +253,7 @@ class TelegramChannel(BaseChannel):
         self._thinking_messages: dict[str, int] = {}  # composite_key -> thinking message_id
         self._media_group_buffers: dict[str, dict] = {}
         self._media_group_tasks: dict[str, asyncio.Task] = {}
+        self._debounce_buffers: dict[str, dict[str, Any]] = {}
         self._message_threads: dict[tuple[str, int], int] = {}
         self._bot_user_id: int | None = None
         self._bot_username: str | None = None
@@ -400,6 +403,12 @@ class TelegramChannel(BaseChannel):
             task.cancel()
         self._media_group_tasks.clear()
         self._media_group_buffers.clear()
+
+        for buf in self._debounce_buffers.values():
+            task = buf.get("task")
+            if task and not task.done():
+                task.cancel()
+        self._debounce_buffers.clear()
 
         if self._app:
             logger.info("Stopping Telegram bot...")
@@ -1054,6 +1063,15 @@ class TelegramChannel(BaseChannel):
         return f"telegram:{message.chat_id}:topic:{message_thread_id}"
 
     @staticmethod
+    def _get_thread_id(message) -> int | None:
+        """Extract the Telegram topic thread id if present."""
+        return getattr(message, "message_thread_id", None)
+
+    def _resolve_debounce_lane(self, message) -> str:
+        """Scope debounce buffering by chat + topic."""
+        return f"{message.chat_id}:{self._get_thread_id(message)}"
+
+    @staticmethod
     def _build_message_metadata(message, user) -> dict:
         """Build common Telegram inbound metadata payload."""
         reply_to = getattr(message, "reply_to_message", None)
@@ -1207,6 +1225,122 @@ class TelegramChannel(BaseChannel):
         if len(self._message_threads) > 1000:
             self._message_threads.pop(next(iter(self._message_threads)))
 
+    @staticmethod
+    def _has_current_media(message) -> bool:
+        return any(
+            getattr(message, attr, None)
+            for attr in ("photo", "voice", "audio", "document", "video", "video_note", "animation")
+        )
+
+    @staticmethod
+    def _looks_like_command(content: str) -> bool:
+        stripped = re.sub(r'^@\S+\s*', '', (content or '').strip())
+        return stripped.startswith("/")
+
+    def _find_media_group_buffer(self, lane: str) -> dict[str, Any] | None:
+        for buf in self._media_group_buffers.values():
+            if buf.get("lane") == lane:
+                return buf
+        return None
+
+    @staticmethod
+    def _merge_debounce_content(companion: str | None, forward: str | None) -> str:
+        parts = [part for part in (companion, forward) if part and part != "[empty message]"]
+        return "\n\n".join(parts) if parts else "[empty message]"
+
+    def _store_debounce_task(self, lane: str) -> None:
+        buf = self._debounce_buffers[lane]
+        task = buf.get("task")
+        if task and not task.done():
+            return
+        buf["task"] = asyncio.create_task(self._flush_debounce(lane))
+
+    async def _enqueue_debounce(
+        self,
+        lane: str,
+        *,
+        sender_id: str,
+        chat_id: str,
+        content: str,
+        media: list[str],
+        metadata: dict[str, Any],
+        session_key: str | None,
+        is_forward: bool,
+        companion_text: str | None = None,
+    ) -> None:
+        buf = self._debounce_buffers.setdefault(lane, {})
+
+        if is_forward:
+            buf["forward"] = {
+                "sender_id": sender_id,
+                "chat_id": chat_id,
+                "content": content,
+                "media": list(dict.fromkeys(media)),
+                "metadata": metadata,
+                "session_key": session_key,
+            }
+            if companion_text:
+                buf["companion"] = {
+                    "sender_id": sender_id,
+                    "chat_id": chat_id,
+                    "content": companion_text,
+                    "media": [],
+                    "metadata": metadata,
+                    "session_key": session_key,
+                }
+        else:
+            buf["companion"] = {
+                "sender_id": sender_id,
+                "chat_id": chat_id,
+                "content": content,
+                "media": list(dict.fromkeys(media)),
+                "metadata": metadata,
+                "session_key": session_key,
+            }
+
+        self._store_debounce_task(lane)
+
+    async def _flush_debounce(self, lane: str) -> None:
+        await asyncio.sleep(FORWARD_DEBOUNCE_MS / 1000)
+        current = asyncio.current_task()
+        buf = self._debounce_buffers.get(lane)
+        if not buf or buf.get("task") is not current:
+            return
+
+        self._debounce_buffers.pop(lane, None)
+        forward = buf.get("forward")
+        companion = buf.get("companion")
+        payload = companion or forward
+        if not payload:
+            return
+
+        content = payload["content"]
+        media = payload["media"]
+        metadata = payload["metadata"]
+        session_key = payload["session_key"]
+        sender_id = payload["sender_id"]
+        chat_id = payload["chat_id"]
+
+        if forward:
+            content = self._merge_debounce_content(
+                companion["content"] if companion else None,
+                forward["content"],
+            )
+            media = list(dict.fromkeys((forward.get("media") or []) + (companion.get("media") or [] if companion else [])))
+            metadata = {**forward["metadata"], **(companion["metadata"] if companion else {})}
+            session_key = companion["session_key"] if companion and companion.get("session_key") is not None else forward["session_key"]
+            sender_id = companion["sender_id"] if companion else forward["sender_id"]
+            chat_id = companion["chat_id"] if companion else forward["chat_id"]
+
+        await self._handle_message(
+            sender_id=sender_id,
+            chat_id=chat_id,
+            content=content,
+            media=media,
+            metadata=metadata,
+            session_key=session_key,
+        )
+
     async def _forward_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Forward slash commands (private chats only) to the bus for handling in AgentLoop."""
         if not update.message or not update.effective_user:
@@ -1241,7 +1375,8 @@ class TelegramChannel(BaseChannel):
             return
 
         # Capture topic thread_id for topic-aware routing
-        thread_id = getattr(message, "message_thread_id", None)
+        thread_id = self._get_thread_id(message)
+        lane = self._resolve_debounce_lane(message)
 
         # Add ACK reaction to acknowledge message receipt
         await self._add_ack_reaction(chat_id, message.message_id)
@@ -1293,10 +1428,22 @@ class TelegramChannel(BaseChannel):
         if media_group_id := getattr(message, "media_group_id", None):
             key = f"{str_chat_id}:{media_group_id}"
             if key not in self._media_group_buffers:
+                companion_text = None
+                if pending := self._debounce_buffers.pop(lane, None):
+                    task = pending.get("task")
+                    if task and not task.done():
+                        task.cancel()
+                    companion = pending.get("companion")
+                    if companion and not pending.get("forward"):
+                        companion_text = companion.get("content")
                 self._media_group_buffers[key] = {
                     "sender_id": sender_id, "chat_id": str_chat_id,
                     "contents": [], "media": [],
                     "metadata": msg_metadata,
+                    "lane": lane,
+                    "is_forward": bool(getattr(message, "forward_origin", None)),
+                    "session_key": self._derive_topic_session_key(message),
+                    "companion_text": companion_text,
                 }
                 try:
                     self._start_typing(comp_key, thread_id)
@@ -1321,6 +1468,50 @@ class TelegramChannel(BaseChannel):
         # Scope session per topic to isolate conversation context
         session_key = self._derive_topic_session_key(message)
 
+        if self._looks_like_command(content):
+            await self._handle_message(
+                sender_id=sender_id,
+                chat_id=str_chat_id,
+                content=content,
+                media=media_paths,
+                metadata=msg_metadata,
+                session_key=session_key,
+            )
+            return
+
+        if existing_media_group := self._find_media_group_buffer(lane):
+            if content and content != "[empty message]":
+                existing_media_group["companion_text"] = self._merge_debounce_content(
+                    existing_media_group.get("companion_text"),
+                    content,
+                )
+            return
+
+        is_forward = bool(getattr(message, "forward_origin", None))
+        if is_forward or not self._has_current_media(message):
+            existing = self._debounce_buffers.get(lane)
+            if existing and existing.get("forward") and content and content != "[empty message]":
+                existing["companion"] = {
+                    "sender_id": sender_id,
+                    "chat_id": str_chat_id,
+                    "content": content,
+                    "media": media_paths,
+                    "metadata": msg_metadata,
+                    "session_key": session_key,
+                }
+                return
+            await self._enqueue_debounce(
+                lane,
+                sender_id=sender_id,
+                chat_id=str_chat_id,
+                content=content,
+                media=media_paths,
+                metadata=msg_metadata,
+                session_key=session_key,
+                is_forward=is_forward,
+            )
+            return
+
         # Forward to the message bus
         await self._handle_message(
             sender_id=sender_id,
@@ -1338,11 +1529,26 @@ class TelegramChannel(BaseChannel):
             if not (buf := self._media_group_buffers.pop(key, None)):
                 return
             content = "\n".join(buf["contents"]) or "[empty message]"
-            await self._handle_message(
-                sender_id=buf["sender_id"], chat_id=buf["chat_id"],
-                content=content, media=list(dict.fromkeys(buf["media"])),
-                metadata=buf["metadata"],
-            )
+            if buf.get("is_forward"):
+                await self._enqueue_debounce(
+                    buf["lane"],
+                    sender_id=buf["sender_id"],
+                    chat_id=buf["chat_id"],
+                    content=content,
+                    media=list(dict.fromkeys(buf["media"])),
+                    metadata=buf["metadata"],
+                    session_key=buf.get("session_key"),
+                    is_forward=True,
+                    companion_text=buf.get("companion_text"),
+                )
+            else:
+                content = self._merge_debounce_content(buf.get("companion_text"), content)
+                await self._handle_message(
+                    sender_id=buf["sender_id"], chat_id=buf["chat_id"],
+                    content=content, media=list(dict.fromkeys(buf["media"])),
+                    metadata=buf["metadata"],
+                    session_key=buf.get("session_key"),
+                )
         finally:
             self._media_group_tasks.pop(key, None)
 

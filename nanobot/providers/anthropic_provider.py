@@ -8,6 +8,7 @@ import string
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+import httpx
 import json_repair
 from loguru import logger
 
@@ -47,6 +48,8 @@ class AnthropicProvider(LLMProvider):
             client_kw["base_url"] = api_base
         if extra_headers:
             client_kw["default_headers"] = extra_headers
+        client_kw["max_retries"] = 0
+        client_kw["timeout"] = httpx.Timeout(180.0, connect=10.0)
         self._client = AsyncAnthropic(**client_kw)
 
     @staticmethod

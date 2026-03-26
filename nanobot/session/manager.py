@@ -133,6 +133,38 @@ class Session:
         self.last_consolidated = max(0, self.last_consolidated - dropped)
         self.updated_at = datetime.now()
 
+    def prune_by_content_length(self, max_chars: int) -> None:
+        """Truncate oversized message text content in-place."""
+        if max_chars <= 0:
+            return
+
+        changed = False
+        for message in self.messages:
+            content = message.get("content")
+            if isinstance(content, str) and len(content) > max_chars:
+                message["content"] = content[:max_chars]
+                changed = True
+                continue
+            if isinstance(content, list):
+                new_content: list[Any] = []
+                list_changed = False
+                for item in content:
+                    if (
+                        isinstance(item, dict)
+                        and isinstance(item.get("text"), str)
+                        and len(item["text"]) > max_chars
+                    ):
+                        new_content.append({**item, "text": item["text"][:max_chars]})
+                        list_changed = True
+                    else:
+                        new_content.append(item)
+                if list_changed:
+                    message["content"] = new_content
+                    changed = True
+
+        if changed:
+            self.updated_at = datetime.now()
+
 
 class SessionManager:
     """

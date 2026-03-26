@@ -1,5 +1,12 @@
+import asyncio
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.loop import AgentLoop
+from nanobot.bus.queue import MessageBus
+from nanobot.providers.base import GenerationSettings, LLMResponse
 from nanobot.session.manager import Session
 
 
@@ -72,3 +79,60 @@ def test_save_turn_keeps_tool_results_under_16k() -> None:
     )
 
     assert session.messages[0]["content"] == content
+
+
+@pytest.mark.asyncio
+async def test_process_direct_persists_direct_user_message(tmp_path) -> None:
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.generation = GenerationSettings(max_tokens=0)
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
+
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+    )
+    loop.tools.get_definitions = MagicMock(return_value=[])
+
+    await loop.process_direct("hello direct", session_key="cli:test")
+
+    session = loop.sessions.get_or_create("cli:test")
+    assert session.messages[0]["role"] == "user"
+    assert session.messages[0]["content"] == "hello direct"
+    assert session.messages[1]["role"] == "assistant"
+    assert session.messages[1]["content"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_process_direct_surfaces_retry_progress(tmp_path) -> None:
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.generation = GenerationSettings(max_tokens=0)
+
+    async def _chat_with_retry(**kwargs):
+        kwargs["on_retry"](1, 3)
+        return LLMResponse(content="ok", tool_calls=[])
+
+    provider.chat_with_retry = _chat_with_retry
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
+
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+    )
+    loop.tools.get_definitions = MagicMock(return_value=[])
+
+    progress: list[str] = []
+
+    async def _on_progress(text: str, *, tool_hint: bool = False) -> None:
+        progress.append(text)
+
+    await loop.process_direct("hello direct", session_key="cli:test", on_progress=_on_progress)
+    await asyncio.sleep(0)
+
+    assert "Retrying... (attempt 1/3)" in progress

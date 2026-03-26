@@ -1,5 +1,6 @@
 """Tests for OpenAICompatProvider handling custom/direct endpoints."""
 
+import httpx
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -53,3 +54,12 @@ def test_custom_provider_parse_chunks_accepts_plain_text_chunks() -> None:
 
     assert result.finish_reason == "stop"
     assert result.content == "hello world"
+
+
+def test_custom_provider_client_disables_sdk_retries_and_sets_timeout() -> None:
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_client:
+        OpenAICompatProvider(api_key="test-key", api_base="https://example.com/v1")
+
+    kwargs = mock_client.call_args.kwargs
+    assert kwargs["max_retries"] == 0
+    assert kwargs["timeout"] == httpx.Timeout(180.0, connect=10.0)
