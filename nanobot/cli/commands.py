@@ -46,6 +46,7 @@ from nanobot import __logo__, __version__
 from nanobot.cli.stream import StreamRenderer, ThinkingSpinner
 from nanobot.config.paths import get_workspace_path, is_default_workspace
 from nanobot.config.schema import Config
+from nanobot.utils import helpers as helper_utils
 from nanobot.utils.helpers import sync_workspace_templates
 
 app = typer.Typer(
@@ -64,6 +65,11 @@ EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit", ":q"}
 
 _PROMPT_SESSION: PromptSession | None = None
 _SAVED_TERM_ATTRS = None  # original termios settings, restored on exit
+
+
+def get_workspace_path(workspace: str | None = None) -> Path:
+    """Wrapper so tests can patch either the command module or helpers module."""
+    return helper_utils.get_workspace_path(workspace)
 
 
 def _flush_pending_tty_input() -> None:
@@ -264,8 +270,6 @@ def onboard(
     """Initialize nanobot configuration and workspace."""
     from nanobot.config.loader import get_config_path, load_config, save_config, set_config_path
     from nanobot.config.schema import Config
-    from nanobot.utils.helpers import get_workspace_path
-
     if config:
         config_path = Path(config).expanduser().resolve()
         set_config_path(config_path)
@@ -453,7 +457,7 @@ def _make_provider(config: Config):
 
 def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:
     """Load config and optionally override the active workspace."""
-    from nanobot.config.loader import load_config
+    from nanobot.config.loader import load_config, set_config_path
 
     config_path = None
     if config:
@@ -461,6 +465,7 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
         if not config_path.exists():
             console.print(f"[red]Error: Config file not found: {config_path}[/red]")
             raise typer.Exit(1)
+        set_config_path(config_path)
         console.print(f"[dim]Using config: {config_path}[/dim]")
 
     loaded = load_config(config_path)
@@ -489,14 +494,18 @@ def _warn_deprecated_config_keys(config_path: Path | None) -> None:
 
 def _migrate_cron_store(config: "Config") -> None:
     """One-time migration: move legacy global cron store into the workspace."""
+    from loguru import logger
     from nanobot.config.paths import get_cron_dir
 
-    legacy_path = get_cron_dir() / "jobs.json"
-    new_path = config.workspace_path / "cron" / "jobs.json"
-    if legacy_path.is_file() and not new_path.exists():
-        new_path.parent.mkdir(parents=True, exist_ok=True)
-        import shutil
-        shutil.move(str(legacy_path), str(new_path))
+    try:
+        legacy_path = get_cron_dir() / "jobs.json"
+        new_path = config.workspace_path / "cron" / "jobs.json"
+        if legacy_path.is_file() and not new_path.exists():
+            new_path.parent.mkdir(parents=True, exist_ok=True)
+            import shutil
+            shutil.move(str(legacy_path), str(new_path))
+    except PermissionError:
+        logger.debug("Skipping cron store migration: legacy path is not accessible")
 
 
 # ============================================================================

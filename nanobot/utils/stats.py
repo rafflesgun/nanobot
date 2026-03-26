@@ -22,6 +22,20 @@ class StatsManager:
         """Ensure the stats directory exists."""
         self.stats_dir.mkdir(parents=True, exist_ok=True)
 
+    @staticmethod
+    def _coerce_int(value: Any) -> int:
+        """Coerce provider/token values to plain ints for JSONL persistence."""
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        try:
+            return int(value)
+        except Exception:
+            return 0
+
     def record_usage(self, channel: str, chat_id: str, model: str, input_tokens: int, output_tokens: int,
                      total_tokens: int, session_key: str, timestamp: str = None) -> None:
         """Record token usage statistics."""
@@ -30,13 +44,13 @@ class StatsManager:
 
         stats_data = {
             "timestamp": timestamp,
-            "channel": channel,
-            "chat_id": chat_id,
-            "model": model,
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "total_tokens": total_tokens,
-            "session_key": session_key
+            "channel": str(channel),
+            "chat_id": str(chat_id),
+            "model": str(model),
+            "input_tokens": self._coerce_int(input_tokens),
+            "output_tokens": self._coerce_int(output_tokens),
+            "total_tokens": self._coerce_int(total_tokens),
+            "session_key": str(session_key),
         }
 
         # Append to the usage file in JSONL format
@@ -82,3 +96,32 @@ class StatsManager:
     def get_all_stats(self) -> Dict[str, Any]:
         """Get all token usage statistics."""
         return self.get_stats()
+
+    def get_total_stats(self) -> Dict[str, Any]:
+        """Aggregate token usage by channel."""
+        if not self.usage_file.exists():
+            return {}
+
+        totals: Dict[str, Any] = {}
+        try:
+            with open(self.usage_file, "r") as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    data = json.loads(line)
+                    channel = str(data.get("channel", "unknown"))
+                    stat = totals.setdefault(channel, {
+                        "total_input_tokens": 0,
+                        "total_output_tokens": 0,
+                        "total_tokens": 0,
+                        "count": 0,
+                    })
+                    stat["total_input_tokens"] += self._coerce_int(data.get("input_tokens", 0))
+                    stat["total_output_tokens"] += self._coerce_int(data.get("output_tokens", 0))
+                    stat["total_tokens"] += self._coerce_int(data.get("total_tokens", 0))
+                    stat["count"] += 1
+        except Exception as e:
+            logger.error(f"Error reading stats file: {e}")
+            return {}
+
+        return totals

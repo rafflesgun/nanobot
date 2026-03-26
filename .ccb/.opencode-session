@@ -1,0 +1,16 @@
+{
+  "session_id": "ai-1774518313-21646",
+  "ccb_session_id": "ai-1774518313-21646",
+  "ccb_project_id": "eb5da6fd0546eee4226c7c942c68db73fed2f2812e36f5f957537ea961129404",
+  "runtime_dir": "/var/folders/5j/96v2psts2ld0c9_5xclqv8h00000gn/T/claude-ai-raffles/ai-1774518313-21646/opencode",
+  "terminal": "tmux",
+  "tmux_session": null,
+  "pane_id": "%1",
+  "pane_title_marker": "CCB-OpenCode",
+  "work_dir": "/Users/raffles/git/nanobot-rg",
+  "work_dir_norm": "/Users/raffles/git/nanobot-rg",
+  "start_dir": "/Users/raffles/git/nanobot-rg",
+  "active": true,
+  "started_at": "2026-03-26 17:45:15",
+  "start_cmd": "export CCB_MANAGED=1; export CCB_PARENT_PID=21646; export CCB_RUN_DIR=/Users/raffles/.cache/ccb/projects/eb5da6fd0546eee4; export CCB_CALLER=opencode; export PATH=/Users/raffles/.local/share/codex-dual/bin:'/Users/raffles/.local/bin:/Users/raffles/.nvm/versions/node/v24.14.1/bin:/Library/Frameworks/Python.framework/Versions/3.13/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Applications/VMware Fusion.app/Contents/Public:/usr/local/share/dotnet:~/.dotnet/tools:/Library/Apple/usr/bin:/Users/raffles/.local/bin:/Users/raffles/.nvm/versions/node/v24.14.1/bin:/Library/Frameworks/Python.framework/Versions/3.13/bin:/Applications/iTerm.app/Contents/Resources/utilities'; opencode"
+}

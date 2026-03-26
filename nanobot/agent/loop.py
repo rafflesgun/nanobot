@@ -124,7 +124,7 @@ class AgentLoop:
             context_window_tokens=context_window_tokens,
             build_messages=self.context.build_messages,
             get_tool_definitions=self.tools.get_definitions,
-            max_completion_tokens=provider.generation.max_tokens,
+            max_completion_tokens=getattr(getattr(provider, "generation", None), "max_tokens", 4096),
         )
         self._register_default_tools()
         self.commands = CommandRouter()
@@ -898,11 +898,17 @@ class AgentLoop:
                     filtered = self._sanitize_persisted_blocks(content, drop_runtime=True)
                     if not filtered:
                         continue
+                    had_non_text_blocks = any(
+                        isinstance(c, dict) and c.get("type") != "text" for c in content
+                    )
                     # If all remaining items are plain text blocks, flatten to a
                     # string so history never contains list-format user messages.
                     # List-content in history causes 400 errors on providers that
                     # expect content to be a dict/string, not a list.
-                    if all(isinstance(c, dict) and c.get("type") == "text" for c in filtered):
+                    if (
+                        not had_non_text_blocks
+                        and all(isinstance(c, dict) and c.get("type") == "text" for c in filtered)
+                    ):
                         entry["content"] = "\n".join(c.get("text", "") for c in filtered)
                     else:
                         entry["content"] = filtered

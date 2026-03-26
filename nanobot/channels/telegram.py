@@ -27,7 +27,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
-from nanobot.config.schema import TelegramConfig, Base
+from nanobot.config.schema import Base, TTSConfig as SchemaTTSConfig
 from nanobot.security.network import validate_url_target
 from nanobot.tts.manager import TTSManager
 from nanobot.utils.audio import convert_to_ogg_opus, get_audio_duration
@@ -200,6 +200,7 @@ class TelegramConfig(Base):
     connection_pool_size: int = 32
     pool_timeout: float = 5.0
     streaming: bool = True
+    tts: SchemaTTSConfig = Field(default_factory=SchemaTTSConfig)
 
 
 class TelegramChannel(BaseChannel):
@@ -462,11 +463,13 @@ class TelegramChannel(BaseChannel):
             logger.info("[progress:{}] chat={} → {}", label, msg.chat_id, preview)
 
             trace_on = self._trace_enabled.get(str(chat_id), False)
-            if not trace_on:
+            if not trace_on and thread_id is None:
                 return  # suppressed - only logged
 
             # Trace enabled → send to chat with prefix
-            prefix = "🤖 " if is_tool_hint else "💭 "
+            prefix = ""
+            if trace_on:
+                prefix = "🤖 " if is_tool_hint else "💭 "
             trace_content = prefix + (msg.content or "").strip()
 
             # Prepare sending parameters (reuse existing thread/reply logic)
@@ -1295,7 +1298,10 @@ class TelegramChannel(BaseChannel):
                     "contents": [], "media": [],
                     "metadata": msg_metadata,
                 }
-                self._start_typing(comp_key, thread_id)
+                try:
+                    self._start_typing(comp_key, thread_id)
+                except TypeError:
+                    self._start_typing(comp_key)
                 await self._add_reaction(str_chat_id, message.message_id, self.config.react_emoji)
             buf = self._media_group_buffers[key]
             if content and content != "[empty message]":
@@ -1306,7 +1312,10 @@ class TelegramChannel(BaseChannel):
             return
 
         # Start typing indicator before processing
-        self._start_typing(comp_key, thread_id)
+        try:
+            self._start_typing(comp_key, thread_id)
+        except TypeError:
+            self._start_typing(comp_key)
         await self._add_reaction(str_chat_id, message.message_id, self.config.react_emoji)
 
         # Scope session per topic to isolate conversation context

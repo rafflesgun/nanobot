@@ -121,7 +121,13 @@ class NanobotDingTalkHandler(CallbackHandler):
             # Forward to Nanobot via _on_message (non-blocking).
             # Store reference to prevent GC before task completes.
             task = asyncio.create_task(
-                self.channel._on_message(content, sender_id, sender_name)
+                self.channel._on_message(
+                    content,
+                    sender_id,
+                    sender_name,
+                    conversation_type=message.data.get("conversationType"),
+                    conversation_id=message.data.get("conversationId"),
+                )
             )
             self.channel._background_tasks.add(task)
             task.add_done_callback(self.channel._background_tasks.discard)
@@ -363,14 +369,24 @@ class DingTalkChannel(BaseChannel):
             logger.warning("DingTalk HTTP client not initialized, cannot send")
             return False
 
-        url = "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend"
+        is_group_chat = chat_id.startswith("group:")
+        if is_group_chat:
+            url = "https://api.dingtalk.com/v1.0/robot/groupMessages/send"
+            payload = {
+                "robotCode": self.config.client_id,
+                "openConversationId": chat_id.split(":", 1)[1],
+                "msgKey": msg_key,
+                "msgParam": json.dumps(msg_param, ensure_ascii=False),
+            }
+        else:
+            url = "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend"
+            payload = {
+                "robotCode": self.config.client_id,
+                "userIds": [chat_id],
+                "msgKey": msg_key,
+                "msgParam": json.dumps(msg_param, ensure_ascii=False),
+            }
         headers = {"x-acs-dingtalk-access-token": token}
-        payload = {
-            "robotCode": self.config.client_id,
-            "userIds": [chat_id],
-            "msgKey": msg_key,
-            "msgParam": json.dumps(msg_param, ensure_ascii=False),
-        }
 
         try:
             resp = await self._http.post(url, json=payload, headers=headers)
@@ -479,7 +495,14 @@ class DingTalkChannel(BaseChannel):
                 f"[Attachment send failed: {filename}]",
             )
 
-    async def _on_message(self, content: str, sender_id: str, sender_name: str) -> None:
+    async def _on_message(
+        self,
+        content: str,
+        sender_id: str,
+        sender_name: str,
+        conversation_type: str | None = None,
+        conversation_id: str | None = None,
+    ) -> None:
         """Handle incoming message (called by NanobotDingTalkHandler).
 
         Delegates to BaseChannel._handle_message() which enforces allow_from
@@ -487,13 +510,18 @@ class DingTalkChannel(BaseChannel):
         """
         try:
             logger.info("DingTalk inbound: {} from {}", content, sender_name)
+            chat_id = sender_id
+            if str(conversation_type or "") == "2" and conversation_id:
+                chat_id = f"group:{conversation_id}"
             await self._handle_message(
                 sender_id=sender_id,
-                chat_id=sender_id,  # For private chat, chat_id == sender_id
+                chat_id=chat_id,
                 content=str(content),
                 metadata={
                     "sender_name": sender_name,
                     "platform": "dingtalk",
+                    "conversation_type": conversation_type,
+                    "conversation_id": conversation_id,
                 },
             )
         except Exception as e:

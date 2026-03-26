@@ -59,7 +59,11 @@ class TelegramConfig(Base):
         None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
     )
     reply_to_message: bool = False  # If true, bot replies quote the original message
+    react_emoji: str = "👀"
     group_policy: Literal["open", "mention"] = "mention"  # "mention" responds when @mentioned or replied to, "open" responds to all
+    connection_pool_size: int = 32
+    pool_timeout: float = 5.0
+    streaming: bool = True
     tts: TTSConfig = Field(default_factory=TTSConfig)
 
 
@@ -250,17 +254,6 @@ class ChannelsConfig(Base):
     send_progress: bool = True  # stream agent's text progress to the channel
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
     show_usage: bool = False  # show token usage hints in responses
-    whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)
-    telegram: TelegramConfig = Field(default_factory=TelegramConfig)
-    discord: DiscordConfig = Field(default_factory=DiscordConfig)
-    feishu: FeishuConfig = Field(default_factory=FeishuConfig)
-    mochat: MochatConfig = Field(default_factory=MochatConfig)
-    dingtalk: DingTalkConfig = Field(default_factory=DingTalkConfig)
-    email: EmailConfig = Field(default_factory=EmailConfig)
-    slack: SlackConfig = Field(default_factory=SlackConfig)
-    qq: QQConfig = Field(default_factory=QQConfig)
-    matrix: MatrixConfig = Field(default_factory=MatrixConfig)
-    wecom: WecomConfig = Field(default_factory=WecomConfig)
 
 
 class AgentDefaults(Base):

@@ -92,6 +92,7 @@ class WebSearchTool(Tool):
 
         self.config = config if config is not None else WebSearchConfig()
         self.proxy = proxy
+        self.max_results = self.config.max_results
 
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
         provider = self.config.provider.strip().lower() or "brave"
@@ -198,12 +199,13 @@ class WebSearchTool(Tool):
 
     async def _search_duckduckgo(self, query: str, n: int) -> str:
         try:
-            # Note: duckduckgo_search is synchronous and does its own requests
-            # We run it in a thread to avoid blocking the loop
             from ddgs import DDGS
 
-            ddgs = DDGS(timeout=10)
-            raw = await asyncio.to_thread(ddgs.text, query, max_results=n)
+            loop = asyncio.get_event_loop()
+            raw = await loop.run_in_executor(
+                None,
+                lambda: DDGS(timeout=10).text(query, max_results=n),
+            )
             if not raw:
                 return f"No results for: {query}"
             items = [

@@ -3,6 +3,7 @@
 import asyncio
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -82,6 +83,9 @@ class ExecTool(Tool):
         self, command: str, working_dir: str | None = None,
         timeout: int | None = None, **kwargs: Any,
     ) -> str:
+        if shutil.which("python") is None and shutil.which("python3") is not None:
+            command = re.sub(r"(?m)^python(?=\s)", "python3", command, count=1)
+
         cwd = working_dir or self.working_dir or os.getcwd()
         guard_error = self._guard_command(command, cwd)
         if guard_error:

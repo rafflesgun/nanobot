@@ -100,11 +100,18 @@ async def cmd_help(ctx: CommandContext) -> OutboundMessage:
     )
 
 
+async def cmd_model(ctx: CommandContext) -> OutboundMessage:
+    """Delegate /model handling to the agent loop."""
+    return ctx.loop._handle_model_command(ctx.msg, ctx.key, ctx.raw)
+
+
 def register_builtin_commands(router: CommandRouter) -> None:
     """Register the default set of slash commands."""
     router.priority("/stop", cmd_stop)
     router.priority("/restart", cmd_restart)
     router.priority("/status", cmd_status)
     router.exact("/new", cmd_new)
+    router.exact("/model", cmd_model)
     router.exact("/status", cmd_status)
     router.exact("/help", cmd_help)
+    router.prefix("/model ", cmd_model)
