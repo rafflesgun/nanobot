@@ -1,3 +1,11 @@
+# To Build Docker (Multi-arch) with Podman
+# podman machine ssh "sudo podman run --privileged --rm docker.io/multiarch/qemu-user-static --reset -p yes"
+# podman run --rm --privileged docker.io/tonistiigi/binfmt --install all
+#
+# podman manifest rm rafflesg/nanobot:latest 2>$null
+# podman build --platform linux/amd64,linux/arm64 --manifest rafflesg/nanobot:latest .
+# podman manifest push --all rafflesg/nanobot:latest docker://docker.io/rafflesg/nanobot:latest
+
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 # Set environment variable to suppress SyntaxWarnings

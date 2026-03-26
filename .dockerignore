@@ -11,3 +11,11 @@ build/
 node_modules/
 bridge/dist/
 workspace/
+case/
+tests/
+docs/
+.pytest_cache/
+.vscode/
+*.png
+$null
+nul

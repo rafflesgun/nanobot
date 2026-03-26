@@ -174,8 +174,18 @@ class HeartbeatService:
                 preview = (response[:120] + "...") if response and len(response) > 120 else (response or "(empty)")
                 logger.info("Heartbeat: execution result — {}", preview)
                 if response and self.on_notify:
-                    logger.info("Heartbeat: completed, delivering response")
-                    await self.on_notify(response)
+                    from nanobot.utils.evaluator import evaluate_response
+                    should_notify = await evaluate_response(
+                        response=response,
+                        task_context=tasks,
+                        provider=self.provider,
+                        model=self.model,
+                    )
+                    if should_notify:
+                        logger.info("Heartbeat: completed, delivering response")
+                        await self.on_notify(response)
+                    else:
+                        logger.info("Heartbeat: evaluator suppressed notification")
                 elif not response:
                     logger.info("Heartbeat: execution produced no response, skipping delivery")
         except Exception:

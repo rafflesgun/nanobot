@@ -3,7 +3,9 @@
 from pathlib import Path
 
 from nanobot.config.loader import get_config_path
-from nanobot.utils.helpers import ensure_dir
+from nanobot.utils.helpers import ensure_dir, get_workspace_path
+
+__all__ = ["get_workspace_path"]
 
 
 def get_data_dir() -> Path:
