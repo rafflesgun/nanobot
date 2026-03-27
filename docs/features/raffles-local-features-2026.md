@@ -22,6 +22,7 @@ understand intended behavior quickly.
 | Heartbeat session bounded by content+tail   | ✅     | cli/commands.py, session/manager.py                    | session history regressions            | `prune_by_content_length(4000)` + keep_recent |
 | Cron reminders are evaluator-biased to notify | ✅   | cli/commands.py, utils/evaluator.py                    | tests/cli/test_commands.py, tests/agent/test_evaluator.py | scheduled reminder context passed to evaluator |
 | Media downloads → workspace/media/          | ✅     | channels/telegram.py                                   | tests/test_media_download.py           | falls back to `~/.nanobot/media`              |
+| Built-in `ipinfo` skill                     | ✅     | skills/ipinfo/SKILL.md, skills/README.md               | tests/agent/test_builtin_skills.py     | requires `curl`, no API key                   |
 | OpenAI compat uses `max_completion_tokens` only | ✅  | providers/openai_compat_provider.py                    | tests/providers/test_litellm_kwargs.py | no duplicate `max_tokens` field               |
 | SDK retries disabled + surfaced to progress | ✅     | providers/base.py, providers/*, agent/loop.py         | tests/providers/test_provider_retry.py | provider SDK retries forced to `0`            |
 | Fine-grained workspace allowlist for tools   | ✅     | config/schema.py, config/loader.py, cli/commands.py, agent/loop.py, agent/subagent.py, agent/tools/shell.py | tests/config/test_config_migration.py, tests/tools/test_exec_security.py | `restrictToWorkspace = { enabled, extraRead, extraWrite }` |
@@ -306,7 +307,27 @@ Do not drop the exec-side enforcement for allowed working directories, or shell 
 pytest tests/config/test_config_migration.py tests/tools/test_exec_security.py tests/tools/test_tool_validation.py tests/cli/test_commands.py -q
 ```
 
-### 12–16. Other smaller features (summary)
+### 12. Built-in ipinfo skill
+
+**Core behavior**
+- Adds a built-in `ipinfo` skill for public IP and coarse geolocation lookup
+- Uses only free HTTP endpoints and `curl`; no API key or extra packages are required
+- Documents a simple fallback sequence across `ipinfo.io`, `ipify`, and `ipwho.is`
+
+**Files**
+- `nanobot/skills/ipinfo/SKILL.md`
+- `nanobot/skills/README.md`
+
+**Resolution priority**
+Keep the skill in English and dependency-light.  
+Do not expand this phase into runtime code changes or new tool integrations.
+
+**Quick validation**
+```bash
+pytest tests/agent/test_builtin_skills.py -q
+```
+
+### 13–17. Other smaller features (summary)
 
 - Thinking draft message → PM only (`if is_group: return`)
 - Typing + ACK reaction → per composite key (chat+thread)
@@ -315,7 +336,7 @@ pytest tests/config/test_config_migration.py tests/tools/test_exec_security.py t
 - Heartbeat history is bounded pre/post run by content length and recent legal suffix
 - Media → `workspace/media/` when workspace configured
 
-### 13. Tool definitions caching (#2205)
+### 14. Tool definitions caching (#2205)
 
 **Core behavior**
 - Added caching to `ToolRegistry.get_definitions()` to prevent repeated traversal of tool sets and JSON schema construction during each iteration of the agent loop
@@ -335,7 +356,7 @@ Preserve the caching mechanism that improves performance by avoiding redundant s
 pytest tests/test_tool_registry_caching.py -v
 ```
 
-### 14. Incremental session saving (#2219)
+### 15. Incremental session saving (#2219)
 
 **Core behavior**
 - Implements incremental session saving for agent loops to prevent data loss when operations crash or get cancelled mid-process

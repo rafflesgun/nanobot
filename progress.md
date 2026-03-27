@@ -95,9 +95,22 @@
   - `tests/config/test_config_migration.py`
 
 ### Phase 6: Optional low-risk additions
+- **Status:** complete
+- Actions taken:
+  - Added a built-in `ipinfo` skill in English using only `curl` and free IP/geolocation endpoints.
+  - Added loader-level regression coverage to ensure the skill is discoverable and loadable as a built-in skill.
+- Files created/modified:
+  - `task_plan.md`
+  - `progress.md`
+  - `docs/features/raffles-local-features-2026.md`
+  - `nanobot/skills/ipinfo/SKILL.md`
+  - `nanobot/skills/README.md`
+  - `tests/agent/test_builtin_skills.py`
+
+### Phase 7: WebUI single-image planning
 - **Status:** in_progress
 - Actions taken:
-  - Promoted the next planned phase after completing configured subagents.
+  - Promoted the next planned phase after completing the optional skill batch.
 - Files created/modified:
   - `task_plan.md`
   - `progress.md`
@@ -113,6 +126,7 @@
 | Phase 4 broader suite | `pytest tests/agent/test_fallback_models.py tests/agent/test_loop_save_turn.py tests/config/test_config_migration.py tests/cli/test_commands.py -q` | All targeted tests pass | 64 passed | ✓ |
 | Phase 5 red suite | `pytest tests/agent/test_configured_subagents.py tests/config/test_config_migration.py -q` | New configured-subagent tests fail for missing feature pieces | 5 expected failures covering profile resolution, spawn plumbing, and provider factory support | ✓ |
 | Phase 5 broader suite | `pytest tests/agent/test_configured_subagents.py tests/agent/test_task_cancel.py tests/config/test_config_migration.py tests/cli/test_commands.py -q` | All targeted tests pass | 70 passed | ✓ |
+| Phase 6 focused suite | `pytest tests/agent/test_builtin_skills.py -q` | New built-in skill is discoverable and loadable | 1 passed | ✓ |
 
 ## Error Log
 | Timestamp | Error | Attempt | Resolution |

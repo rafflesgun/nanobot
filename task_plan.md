@@ -4,7 +4,7 @@
 Create and execute a phased implementation plan for the selected upstream PRs that are still valuable for `raffles/local`, with each implementation phase ending in a git commit only after its focused tests pass.
 
 ## Current Phase
-Phase 6
+Phase 7
 
 ## Phases
 
@@ -44,16 +44,16 @@ Phase 6
 - **Status:** complete
 
 ### Phase 6: Optional low-risk additions
-- [ ] Add PR #2451 `ipinfo` skill if still desired
-- [ ] Run focused skill/discovery sanity checks
-- [ ] Commit Phase 6 after tests pass
-- **Status:** in_progress
+- [x] Add PR #2451 `ipinfo` skill if still desired
+- [x] Run focused skill/discovery sanity checks
+- [x] Commit Phase 6 after tests pass
+- **Status:** complete
 
 ### Phase 7: WebUI single-image planning
 - [ ] Assess `nanobot-webui` integration points and packaging constraints
 - [ ] Decide whether to vendor, submodule, or produce a composed Docker build
 - [ ] Draft a separate implementation plan for single-image delivery
-- **Status:** pending
+- **Status:** in_progress
 
 ### Phase 8: Delivery
 - [ ] Keep planning files and local feature ledger updated as phases land
