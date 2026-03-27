@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from nanobot.channels.telegram import TelegramChannel
 from nanobot.bus.events import OutboundMessage
+from nanobot.config.schema import TelegramConfig
 
 
 @pytest.mark.asyncio
@@ -130,3 +131,64 @@ async def test_thinking_message_error_handling():
     
     # Still should have been called once
     channel._app.bot.send_message.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_stream_end_deletes_thinking_message():
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        AsyncMock(),
+    )
+    channel._app = AsyncMock()
+    channel._app.bot = AsyncMock()
+    channel._app.bot.send_message = AsyncMock(return_value=MagicMock(message_id=501))
+    channel._app.bot.edit_message_text = AsyncMock()
+    channel._app.bot.delete_message = AsyncMock()
+
+    channel._thinking_messages["123456"] = 999
+
+    await channel.send_delta("123456", "Hello", {"message_id": 1})
+    await channel.send_delta("123456", "", {"_stream_end": True, "message_id": 1})
+
+    channel._app.bot.delete_message.assert_awaited_once_with(chat_id=123456, message_id=999)
+    channel._app.bot.edit_message_text.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_stream_end_topic_tts_uses_topic_override(monkeypatch):
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        AsyncMock(),
+    )
+    channel._app = AsyncMock()
+    channel._app.bot = AsyncMock()
+    channel._app.bot.send_message = AsyncMock(return_value=MagicMock(message_id=7777))
+    channel._app.bot.edit_message_text = AsyncMock()
+    channel._app.bot.delete_message = AsyncMock()
+    channel._app.bot.send_voice = AsyncMock()
+
+    channel._thinking_messages["123456:77"] = 333
+    channel._chat_tts_overrides["123456:77"] = {"enabled": True}
+
+    class FakeTTSManager:
+        def __init__(self, config):
+            self.config = config
+
+        async def generate_voice_note(self, text):
+            assert text == "Hello topic"
+            return b"ogg"
+
+    async def fake_duration(_data, _fmt):
+        return 1.0
+
+    monkeypatch.setattr("nanobot.channels.telegram.TTSManager", FakeTTSManager)
+    monkeypatch.setattr("nanobot.channels.telegram.get_audio_duration", fake_duration)
+
+    await channel.send_delta("123456", "Hello topic", {"message_thread_id": 77})
+    await channel.send_delta("123456", "", {"_stream_end": True, "message_thread_id": 77})
+
+    channel._app.bot.delete_message.assert_awaited_once_with(chat_id=123456, message_id=333)
+    channel._app.bot.send_voice.assert_awaited_once()
+    kwargs = channel._app.bot.send_voice.await_args.kwargs
+    assert kwargs["chat_id"] == 123456
+    assert kwargs["message_thread_id"] == 77

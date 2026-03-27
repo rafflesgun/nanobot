@@ -23,6 +23,7 @@ class ExecTool(Tool):
         deny_patterns: list[str] | None = None,
         allow_patterns: list[str] | None = None,
         restrict_to_workspace: bool = False,
+        allowed_dirs: list[str | Path] | None = None,
         path_append: str = "",
     ):
         self.timeout = timeout
@@ -40,6 +41,10 @@ class ExecTool(Tool):
         ]
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
+        self.allowed_dirs = [
+            Path(p).expanduser().resolve()
+            for p in (allowed_dirs or [])
+        ]
         self.path_append = path_append
 
     @property
@@ -86,7 +91,7 @@ class ExecTool(Tool):
         if shutil.which("python") is None and shutil.which("python3") is not None:
             command = re.sub(r"(?m)^python(?=\s)", "python3", command, count=1)
 
-        cwd = working_dir or self.working_dir or os.getcwd()
+        cwd = str(self._resolve_cwd(working_dir))
         guard_error = self._guard_command(command, cwd)
         if guard_error:
             return guard_error
@@ -176,6 +181,9 @@ class ExecTool(Tool):
                 return "Error: Command blocked by safety guard (path traversal detected)"
 
             cwd_path = Path(cwd).resolve()
+            allowed_dirs = self.allowed_dirs or [cwd_path]
+            if not any(self._is_under(cwd_path, allowed) for allowed in allowed_dirs):
+                return "Error: Command blocked by safety guard (working dir outside allowed dirs)"
 
             for raw in self._extract_absolute_paths(cmd):
                 try:
@@ -183,10 +191,26 @@ class ExecTool(Tool):
                     p = Path(expanded).expanduser().resolve()
                 except Exception:
                     continue
-                if p.is_absolute() and cwd_path not in p.parents and p != cwd_path:
+                if p.is_absolute() and not any(
+                    self._is_under(p, allowed) for allowed in allowed_dirs
+                ):
                     return "Error: Command blocked by safety guard (path outside working dir)"
 
         return None
+
+    def _resolve_cwd(self, working_dir: str | None) -> Path:
+        cwd = Path(working_dir or self.working_dir or os.getcwd()).expanduser()
+        if not cwd.is_absolute():
+            cwd = Path(os.getcwd()) / cwd
+        return cwd.resolve()
+
+    @staticmethod
+    def _is_under(path: Path, directory: Path) -> bool:
+        try:
+            path.relative_to(directory.resolve())
+            return True
+        except ValueError:
+            return False
 
     @staticmethod
     def _extract_absolute_paths(command: str) -> list[str]:

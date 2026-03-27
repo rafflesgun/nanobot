@@ -187,6 +187,7 @@ class _StreamBuf:
     text: str = ""
     message_id: int | None = None
     last_edit: float = 0.0
+    thread_id: int | None = None
 
 
 class TelegramConfig(Base):
@@ -435,6 +436,11 @@ class TelegramChannel(BaseChannel):
         return f"{chat_id}:{thread_id}" if thread_id else chat_id
 
     @staticmethod
+    def _tts_scope_key(chat_id: str, thread_id: int | None = None) -> str:
+        """Scope TTS overrides to the current chat or topic thread."""
+        return f"{chat_id}:{thread_id}" if thread_id else chat_id
+
+    @staticmethod
     def _is_remote_media_url(path: str) -> bool:
         return path.startswith(("http://", "https://"))
 
@@ -593,83 +599,13 @@ class TelegramChannel(BaseChannel):
                     **thread_kwargs,
                 )
 
-        # TTS voice note (if enabled and we have text content)
-        voice_note_sent = False
-
-        # Check if TTS is enabled (considering chat-specific overrides)
-        chat_id_str = str(chat_id)
-        chat_override = self._chat_tts_overrides.get(chat_id_str, {})
-        tts_enabled = chat_override.get("enabled", self.tts_manager.config.enabled)
-
-        # Skip TTS for command responses that should not trigger TTS
-        # Check if this is a command response by looking at metadata or content
-        is_command_response = False
-        if msg.metadata.get("command_response", False):
-            is_command_response = True
-            logger.debug("Skipping TTS for command response")
-        elif msg.content and msg.content.strip():
-            # Check if content looks like a command response (starts with command name)
-            content_stripped = msg.content.strip()
-            if content_stripped.startswith("/model") or content_stripped.startswith("/tts") or content_stripped.startswith("/trace"):
-                is_command_response = True
-                logger.debug("Skipping TTS for command response (detected from content)")
-
-        if tts_enabled and msg.content and msg.content.strip() and not is_command_response:
-            # Skip TTS for messages that look like structured data or errors
-            # These are typically cron job, health check, or error messages
-            content = msg.content.strip()
-            if "|" in content and "---" in content:
-                # Table-like structure - likely cron job or health check output
-                logger.debug("Skipping TTS for table-like message")
-            elif content.startswith("{") and content.endswith("}"):
-                # JSON-like object - likely error or structured data
-                logger.debug("Skipping TTS for JSON-like message")
-            elif content.startswith("[") and content.endswith("]"):
-                # JSON array - likely error or structured data
-                logger.debug("Skipping TTS for JSON array message")
-            elif "Error:" in content and ":" in content:
-                # Error message pattern
-                logger.debug("Skipping TTS for error message")
-            else:
-                try:
-                    logger.debug("Attempting TTS generation for message")
-
-                    # Apply chat-specific overrides for TTS generation
-                    tts_config = self.config.tts.model_copy()
-                    if "voice" in chat_override:
-                        tts_config.voice = chat_override["voice"]
-                    if "provider" in chat_override:
-                        tts_config.provider = chat_override["provider"]
-                    if "enabled" in chat_override:
-                        tts_config.enabled = chat_override["enabled"]
-
-                    # Log effective TTS config for debugging
-                    logger.debug(f"TTS effective config: chat_id={chat_id} override=True enabled={tts_config.enabled} provider={tts_config.provider} voice={tts_config.voice}")
-
-                    # Create temporary TTS manager with overridden config
-                    from nanobot.tts.manager import TTSManager
-                    temp_tts_manager = TTSManager(tts_config)
-
-                    ogg_bytes = await temp_tts_manager.generate_voice_note(msg.content)
-
-                    if ogg_bytes:
-                        duration = await get_audio_duration(ogg_bytes, "ogg")
-                        voice_file = BytesIO(ogg_bytes)
-                        voice_file.name = "voice_note.ogg"
-
-                        await self._app.bot.send_voice(
-                            chat_id=chat_id,
-                            voice=voice_file,
-                            duration=int(duration),
-                            reply_parameters=reply_params,
-                            **thread_kwargs,
-                        )
-                        voice_note_sent = True
-                        logger.info(f"TTS voice note sent ({duration:.1f}s)")
-                    else:
-                        logger.warning("TTS returned no audio → skipping voice note")
-                except Exception as e:
-                    logger.exception("TTS generation or sending failed → falling back to text only")
+        await self._maybe_send_tts(
+            chat_id=chat_id,
+            text=msg.content,
+            reply_params=reply_params,
+            thread_kwargs=thread_kwargs,
+            metadata=msg.metadata,
+        )
 
         # Send text content
         if msg.content and msg.content != "[empty message]":
@@ -720,24 +656,134 @@ class TelegramChannel(BaseChannel):
             except Exception as e2:
                 logger.error("Error sending Telegram message: {}", e2)
 
+    def _get_tts_override(self, chat_id: str, thread_id: int | None = None) -> dict[str, Any]:
+        """Resolve TTS overrides with topic-specific settings taking precedence."""
+        base = dict(self._chat_tts_overrides.get(chat_id, {}))
+        if thread_id is None:
+            return base
+        scoped = self._chat_tts_overrides.get(self._tts_scope_key(chat_id, thread_id), {})
+        return {**base, **scoped}
+
+    async def _maybe_send_tts(
+        self,
+        *,
+        chat_id: int,
+        text: str | None,
+        reply_params,
+        thread_kwargs: dict[str, Any] | None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Best-effort TTS delivery for final assistant responses."""
+        if not self._app or not text or not text.strip():
+            return
+
+        meta = metadata or {}
+        thread_kwargs = thread_kwargs or {}
+        thread_id = thread_kwargs.get("message_thread_id", meta.get("message_thread_id"))
+        chat_id_str = str(chat_id)
+        chat_override = self._get_tts_override(chat_id_str, thread_id)
+        tts_enabled = chat_override.get("enabled", self.tts_manager.config.enabled)
+        if not tts_enabled:
+            return
+
+        is_command_response = False
+        if meta.get("command_response", False):
+            is_command_response = True
+            logger.debug("Skipping TTS for command response")
+        else:
+            content_stripped = text.strip()
+            if (
+                content_stripped.startswith("/model")
+                or content_stripped.startswith("/tts")
+                or content_stripped.startswith("/trace")
+                or content_stripped.startswith("/stats")
+            ):
+                is_command_response = True
+                logger.debug("Skipping TTS for command response (detected from content)")
+        if is_command_response:
+            return
+
+        content = text.strip()
+        if "|" in content and "---" in content:
+            logger.debug("Skipping TTS for table-like message")
+            return
+        if content.startswith("{") and content.endswith("}"):
+            logger.debug("Skipping TTS for JSON-like message")
+            return
+        if content.startswith("[") and content.endswith("]"):
+            logger.debug("Skipping TTS for JSON array message")
+            return
+        if "Error:" in content and ":" in content:
+            logger.debug("Skipping TTS for error message")
+            return
+
+        try:
+            tts_config = self.config.tts.model_copy()
+            if "voice" in chat_override:
+                tts_config.voice = chat_override["voice"]
+            if "provider" in chat_override:
+                tts_config.provider = chat_override["provider"]
+            if "enabled" in chat_override:
+                tts_config.enabled = chat_override["enabled"]
+
+            logger.debug(
+                "TTS effective config: chat_id={} thread_id={} enabled={} provider={} voice={}",
+                chat_id,
+                thread_id,
+                tts_config.enabled,
+                tts_config.provider,
+                tts_config.voice,
+            )
+
+            temp_tts_manager = TTSManager(tts_config)
+            ogg_bytes = await temp_tts_manager.generate_voice_note(text)
+            if not ogg_bytes:
+                logger.warning("TTS returned no audio → skipping voice note")
+                return
+
+            duration = await get_audio_duration(ogg_bytes, "ogg")
+            voice_file = BytesIO(ogg_bytes)
+            voice_file.name = "voice_note.ogg"
+
+            await self._app.bot.send_voice(
+                chat_id=chat_id,
+                voice=voice_file,
+                duration=int(duration),
+                reply_parameters=reply_params,
+                **thread_kwargs,
+            )
+            logger.info("TTS voice note sent ({:.1f}s)", duration)
+        except Exception:
+            logger.exception("TTS generation or sending failed → falling back to text only")
+
     async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
         """Progressive message editing: send on first delta, edit on subsequent ones."""
         if not self._app:
             return
         meta = metadata or {}
         int_chat_id = int(chat_id)
+        thread_id = meta.get("message_thread_id")
+        comp_key = self._composite_key(chat_id, thread_id)
+        thread_kwargs = {"message_thread_id": thread_id} if thread_id is not None else {}
 
         if meta.get("_stream_end"):
-            buf = self._stream_bufs.pop(chat_id, None)
+            buf = self._stream_bufs.pop(comp_key, None)
             if not buf or not buf.message_id or not buf.text:
                 return
-            self._stop_typing(chat_id)
+            self._stop_typing(comp_key)
+            thinking_msg_id = self._thinking_messages.pop(comp_key, None)
+            if thinking_msg_id:
+                try:
+                    await self._app.bot.delete_message(chat_id=int_chat_id, message_id=thinking_msg_id)
+                except Exception as e:
+                    logger.debug("Failed to delete thinking message after stream: {}", e)
             try:
                 html = _markdown_to_telegram_html(buf.text)
                 await self._call_with_retry(
                     self._app.bot.edit_message_text,
                     chat_id=int_chat_id, message_id=buf.message_id,
                     text=html, parse_mode="HTML",
+                    **thread_kwargs,
                 )
             except Exception as e:
                 logger.debug("Final stream edit failed (HTML), trying plain: {}", e)
@@ -746,15 +792,23 @@ class TelegramChannel(BaseChannel):
                         self._app.bot.edit_message_text,
                         chat_id=int_chat_id, message_id=buf.message_id,
                         text=buf.text,
+                        **thread_kwargs,
                     )
                 except Exception:
                     pass
+            await self._maybe_send_tts(
+                chat_id=int_chat_id,
+                text=buf.text,
+                reply_params=None,
+                thread_kwargs=thread_kwargs,
+                metadata=meta,
+            )
             return
 
-        buf = self._stream_bufs.get(chat_id)
+        buf = self._stream_bufs.get(comp_key)
         if buf is None:
-            buf = _StreamBuf()
-            self._stream_bufs[chat_id] = buf
+            buf = _StreamBuf(thread_id=thread_id)
+            self._stream_bufs[comp_key] = buf
         buf.text += delta
 
         if not buf.text.strip():
@@ -766,6 +820,7 @@ class TelegramChannel(BaseChannel):
                 sent = await self._call_with_retry(
                     self._app.bot.send_message,
                     chat_id=int_chat_id, text=buf.text,
+                    **thread_kwargs,
                 )
                 buf.message_id = sent.message_id
                 buf.last_edit = now
@@ -777,6 +832,7 @@ class TelegramChannel(BaseChannel):
                     self._app.bot.edit_message_text,
                     chat_id=int_chat_id, message_id=buf.message_id,
                     text=buf.text,
+                    **thread_kwargs,
                 )
                 buf.last_edit = now
             except Exception:
@@ -818,6 +874,8 @@ class TelegramChannel(BaseChannel):
             return
 
         chat_id = str(update.effective_message.chat_id)
+        thread_id = self._get_thread_id(update.effective_message)
+        scope_key = self._tts_scope_key(chat_id, thread_id)
         user_id = str(update.effective_user.id)
         
         # Check if user is allowed
@@ -828,8 +886,8 @@ class TelegramChannel(BaseChannel):
         # Parse command arguments
         args = context.args if context.args else []
         
-        def _tts_status_msg(chat_id: str, extra: str = "") -> str:
-            override = self._chat_tts_overrides.get(chat_id, {})
+        def _tts_status_msg(scope_key: str, extra: str = "") -> str:
+            override = self._chat_tts_overrides.get(scope_key, {})
             enabled = override.get("enabled", self.tts_manager.config.enabled)
             provider = override.get("provider", self.tts_manager.config.provider)
             voice = override.get("voice", self.tts_manager.config.voice)
@@ -843,7 +901,7 @@ class TelegramChannel(BaseChannel):
 
         if not args:
             await update.message.reply_text(_tts_status_msg(
-                chat_id,
+                scope_key,
                 "Usage:\n"
                 "/tts on — Enable TTS\n"
                 "/tts off — Disable TTS\n"
@@ -857,26 +915,24 @@ class TelegramChannel(BaseChannel):
         command = args[0].lower()
         
         if command == "on":
-            # Enable TTS for this chat
-            if chat_id not in self._chat_tts_overrides:
-                self._chat_tts_overrides[chat_id] = {}
-            self._chat_tts_overrides[chat_id]["enabled"] = True
-            await update.message.reply_text("🔊 TTS enabled for this chat.")
+            if scope_key not in self._chat_tts_overrides:
+                self._chat_tts_overrides[scope_key] = {}
+            self._chat_tts_overrides[scope_key]["enabled"] = True
+            await update.message.reply_text("🔊 TTS enabled for this chat/topic.")
             
         elif command == "off":
-            # Disable TTS for this chat
-            if chat_id not in self._chat_tts_overrides:
-                self._chat_tts_overrides[chat_id] = {}
-            self._chat_tts_overrides[chat_id]["enabled"] = False
-            await update.message.reply_text("🔇 TTS disabled for this chat.")
+            if scope_key not in self._chat_tts_overrides:
+                self._chat_tts_overrides[scope_key] = {}
+            self._chat_tts_overrides[scope_key]["enabled"] = False
+            await update.message.reply_text("🔇 TTS disabled for this chat/topic.")
             
         elif command == "status":
-            await update.message.reply_text(_tts_status_msg(chat_id))
+            await update.message.reply_text(_tts_status_msg(scope_key))
             
         elif command == "voices":
             # List available voices for current provider, with optional locale filter
             # Usage: /tts voices [locale_filter]  e.g. /tts voices en-US
-            override = self._chat_tts_overrides.get(chat_id, {})
+            override = self._chat_tts_overrides.get(scope_key, {})
             provider_name = override.get("provider", self.tts_manager.config.provider)
             current_voice = override.get("voice", self.tts_manager.config.voice)
             locale_filter = args[1].lower() if len(args) > 1 else None
@@ -982,18 +1038,18 @@ class TelegramChannel(BaseChannel):
         elif command == "voice" and len(args) > 1:
             # Change voice
             new_voice = args[1]
-            if chat_id not in self._chat_tts_overrides:
-                self._chat_tts_overrides[chat_id] = {}
-            self._chat_tts_overrides[chat_id]["voice"] = new_voice
+            if scope_key not in self._chat_tts_overrides:
+                self._chat_tts_overrides[scope_key] = {}
+            self._chat_tts_overrides[scope_key]["voice"] = new_voice
             await update.message.reply_text(f"🎙️ Voice changed to: {new_voice}")
             
         elif command == "provider" and len(args) > 1:
             # Change provider
             new_provider = args[1].lower()
             if new_provider in ["edge", "openai", "riva"]:
-                if chat_id not in self._chat_tts_overrides:
-                    self._chat_tts_overrides[chat_id] = {}
-                self._chat_tts_overrides[chat_id]["provider"] = new_provider
+                if scope_key not in self._chat_tts_overrides:
+                    self._chat_tts_overrides[scope_key] = {}
+                self._chat_tts_overrides[scope_key]["provider"] = new_provider
                 await update.message.reply_text(f"🔄 TTS provider changed to: {new_provider}")
             else:
                 await update.message.reply_text("❌ Invalid provider. Use 'edge', 'openai', or 'riva'.")

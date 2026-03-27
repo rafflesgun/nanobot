@@ -126,3 +126,62 @@ def test_onboard_refresh_backfills_missing_channel_fields(tmp_path, monkeypatch)
     assert result.exit_code == 0
     saved = json.loads(config_path.read_text(encoding="utf-8"))
     assert saved["channels"]["qq"]["msgFormat"] == "plain"
+
+
+def test_load_config_migrates_exec_restrict_to_workspace_bool(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "tools": {
+                    "exec": {
+                        "restrictToWorkspace": True,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+
+    assert config.tools.restrict_to_workspace.enabled is True
+    assert config.tools.restrict_to_workspace.extra_read == []
+    assert config.tools.restrict_to_workspace.extra_write == []
+
+
+def test_load_config_migrates_top_level_restrict_to_workspace_bool(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "tools": {
+                    "restrictToWorkspace": True,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+
+    assert config.tools.restrict_to_workspace.enabled is True
+    assert config.tools.restrict_to_workspace.extra_read == []
+    assert config.tools.restrict_to_workspace.extra_write == []
+
+
+def test_save_config_writes_nested_workspace_restriction_shape(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    config = load_config(config_path)
+    config.tools.restrict_to_workspace.enabled = True
+    config.tools.restrict_to_workspace.extra_read = ["/tmp/read-only"]
+    config.tools.restrict_to_workspace.extra_write = ["/tmp/read-write"]
+
+    save_config(config, config_path)
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+
+    assert saved["tools"]["restrictToWorkspace"] == {
+        "enabled": True,
+        "extraRead": ["/tmp/read-only"],
+        "extraWrite": ["/tmp/read-write"],
+    }

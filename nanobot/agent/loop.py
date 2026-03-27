@@ -63,6 +63,8 @@ class AgentLoop:
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
+        extra_read: list[str] | None = None,
+        extra_write: list[str] | None = None,
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
@@ -82,6 +84,8 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self.extra_read = extra_read or []
+        self.extra_write = extra_write or []
         self.fallback_model = fallback_model
         self._start_time = time.time()
         self._last_usage: dict[str, int] = {}
@@ -100,6 +104,8 @@ class AgentLoop:
             web_proxy=web_proxy,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
+            extra_read=self.extra_read,
+            extra_write=self.extra_write,
         )
 
         self._running = False
@@ -132,8 +138,8 @@ class AgentLoop:
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
-        allowed_dir = self.workspace if self.restrict_to_workspace else None
-        extra_read = [BUILTIN_SKILLS_DIR] if allowed_dir else None
+        allowed_dir: list[Path] = ([self.workspace] + ([Path(p) for p in self.extra_write] if self.extra_write else [])) if self.restrict_to_workspace else None
+        extra_read: list[Path] = ([BUILTIN_SKILLS_DIR] + ([Path(p) for p in self.extra_read] if self.extra_read else [])) if allowed_dir else None
         self.tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read))
         for cls in (WriteFileTool, EditFileTool, ListDirTool):
             self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
@@ -142,6 +148,7 @@ class AgentLoop:
                 working_dir=str(self.workspace),
                 timeout=self.exec_config.timeout,
                 restrict_to_workspace=self.restrict_to_workspace,
+                allowed_dirs=allowed_dir,
                 path_append=self.exec_config.path_append,
             ))
         self.tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
@@ -499,15 +506,26 @@ class AgentLoop:
                 on_stream = on_stream_end = None
                 if msg.metadata.get("_wants_stream"):
                     async def on_stream(delta: str) -> None:
+                        meta = {
+                            "_stream_delta": True,
+                            "message_thread_id": msg.metadata.get("message_thread_id"),
+                            "message_id": msg.metadata.get("message_id"),
+                        }
                         await self.bus.publish_outbound(OutboundMessage(
                             channel=msg.channel, chat_id=msg.chat_id,
-                            content=delta, metadata={"_stream_delta": True},
+                            content=delta, metadata=meta,
                         ))
 
                     async def on_stream_end(*, resuming: bool = False) -> None:
+                        meta = {
+                            "_stream_end": True,
+                            "_resuming": resuming,
+                            "message_thread_id": msg.metadata.get("message_thread_id"),
+                            "message_id": msg.metadata.get("message_id"),
+                        }
                         await self.bus.publish_outbound(OutboundMessage(
                             channel=msg.channel, chat_id=msg.chat_id,
-                            content="", metadata={"_stream_end": True, "_resuming": resuming},
+                            content="", metadata=meta,
                         ))
 
                 response = await self._process_message(

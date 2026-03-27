@@ -21,6 +21,7 @@ understand intended behavior quickly.
 | Media downloads → workspace/media/          | ✅     | channels/telegram.py                                   | tests/test_media_download.py           | falls back to `~/.nanobot/media`              |
 | OpenAI compat uses `max_completion_tokens` only | ✅  | providers/openai_compat_provider.py                    | tests/providers/test_litellm_kwargs.py | no duplicate `max_tokens` field               |
 | SDK retries disabled + surfaced to progress | ✅     | providers/base.py, providers/*, agent/loop.py         | tests/providers/test_provider_retry.py | provider SDK retries forced to `0`            |
+| Fine-grained workspace allowlist for tools   | ✅     | config/schema.py, config/loader.py, cli/commands.py, agent/loop.py, agent/subagent.py, agent/tools/shell.py | tests/config/test_config_migration.py, tests/tools/test_exec_security.py | `restrictToWorkspace = { enabled, extraRead, extraWrite }` |
 | Telegram forwarded message debounce         | ✅     | channels/telegram.py                                   | tests/channels/test_telegram_channel.py | 80ms lane = `chat_id:thread_id`              |
 | **TTS voice notes (Edge + OpenAI + Riva)**  | ✅     | providers/tts.py, tts/manager.py, channels/telegram.py | tests/test_tts.py (new)                | `tts.enabled = false` (default)               |
 | **/trace command - AI thinking visibility** | ✅     | channels/telegram.py                                   | tests/test_trace_command_additional.py | `_trace_enabled[chat_id] = false` (default)   |
@@ -190,7 +191,40 @@ Do not regress local Telegram features such as topic routing, mention-only mode,
 pytest tests/channels/test_telegram_channel.py -q
 ```
 
-### 8–12. Other smaller features (summary)
+### 8. Fine-grained workspace allowlist for tools
+
+**Core behavior**
+- `tools.restrictToWorkspace` is now a nested object, not just a boolean
+- `enabled: true` keeps file tools and shell execution restricted to the workspace by default
+- `extraRead` adds extra read-only roots for `read_file`
+- `extraWrite` adds extra roots that may be read, written, edited, listed, and used as valid shell working directories
+- Shell guard checks now validate both absolute paths and the effective `working_dir` against the workspace plus `extraWrite`
+
+**Files to protect during conflicts**
+- `nanobot/config/schema.py`
+- `nanobot/config/loader.py`
+- `nanobot/cli/commands.py`
+- `nanobot/agent/loop.py`
+- `nanobot/agent/subagent.py`
+- `nanobot/agent/tools/shell.py`
+- `README.md`
+- `nanobot/templates/TOOLS.md`
+
+**Resolution priority**
+Keep the nested config shape:
+- `restrictToWorkspace.enabled`
+- `restrictToWorkspace.extraRead`
+- `restrictToWorkspace.extraWrite`
+
+Do not regress back to a bare boolean-only config.
+Do not drop the exec-side enforcement for allowed working directories, or shell commands can escape by overriding `working_dir`.
+
+**Quick validation**
+```bash
+pytest tests/config/test_config_migration.py tests/tools/test_exec_security.py tests/tools/test_tool_validation.py tests/cli/test_commands.py -q
+```
+
+### 9–13. Other smaller features (summary)
 
 - Thinking draft message → PM only (`if is_group: return`)
 - Typing + ACK reaction → per composite key (chat+thread)

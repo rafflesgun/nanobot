@@ -419,6 +419,21 @@ def test_agent_uses_explicit_config_path(mock_agent_runtime, tmp_path: Path):
     assert mock_agent_runtime["load_config"].call_args.args == (config_path.resolve(),)
 
 
+def test_agent_passes_nested_workspace_restriction_config(mock_agent_runtime):
+    config = mock_agent_runtime["config"]
+    config.tools.restrict_to_workspace.enabled = True
+    config.tools.restrict_to_workspace.extra_read = ["/tmp/ro"]
+    config.tools.restrict_to_workspace.extra_write = ["/tmp/rw"]
+
+    result = runner.invoke(app, ["agent", "-m", "hello"])
+
+    assert result.exit_code == 0
+    kwargs = mock_agent_runtime["agent_loop_cls"].call_args.kwargs
+    assert kwargs["restrict_to_workspace"] is True
+    assert kwargs["extra_read"] == ["/tmp/ro"]
+    assert kwargs["extra_write"] == ["/tmp/rw"]
+
+
 def test_agent_config_sets_active_path(monkeypatch, tmp_path: Path) -> None:
     config_file = tmp_path / "instance" / "config.json"
     config_file.parent.mkdir(parents=True)

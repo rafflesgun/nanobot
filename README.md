@@ -1391,15 +1391,31 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 ### Security
 
 > [!TIP]
-> For production deployments, set `"restrictToWorkspace": true` in your config to sandbox the agent.
+> For production deployments, set `"restrictToWorkspace": {"enabled": true}` in your config to sandbox the agent.
 > In `v0.1.4.post3` and earlier, an empty `allowFrom` allowed all senders. Since `v0.1.4.post4`, empty `allowFrom` denies all access by default. To allow all senders, set `"allowFrom": ["*"]`.
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `tools.restrictToWorkspace` | `false` | When `true`, restricts **all** agent tools (shell, file read/write/edit, list) to the workspace directory. Prevents path traversal and out-of-scope access. |
+| `tools.restrictToWorkspace.enabled` | `false` | When `true`, restricts **all** agent tools (shell, file read/write/edit, list) to the workspace directory. |
+| `tools.restrictToWorkspace.extraRead` | `[]` | Additional directories that may be read when workspace restriction is enabled. |
+| `tools.restrictToWorkspace.extraWrite` | `[]` | Additional directories that may be read, written, edited, listed, or used as allowed shell working directories when workspace restriction is enabled. |
 | `tools.exec.enable` | `true` | When `false`, the shell `exec` tool is not registered at all. Use this to completely disable shell command execution. |
 | `tools.exec.pathAppend` | `""` | Extra directories to append to `PATH` when running shell commands (e.g. `/usr/sbin` for `ufw`). |
 | `channels.*.allowFrom` | `[]` (deny all) | Whitelist of user IDs. Empty denies all; use `["*"]` to allow everyone. |
+
+Example:
+
+```json
+{
+  "tools": {
+    "restrictToWorkspace": {
+      "enabled": true,
+      "extraRead": ["/opt/shared-docs"],
+      "extraWrite": ["/tmp/nanobot-scratch"]
+    }
+  }
+}
+```
 
 
 
