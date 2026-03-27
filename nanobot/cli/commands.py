@@ -578,6 +578,7 @@ def gateway(
         """Execute a cron job through the agent."""
         from nanobot.agent.tools.cron import CronTool
         from nanobot.agent.tools.message import MessageTool
+        from nanobot.utils.evaluator import evaluate_response
         reminder_note = (
             "[Scheduled Task] Timer finished.\n\n"
             f"Task '{job.name}' has been triggered.\n"
@@ -607,6 +608,14 @@ def gateway(
             return response
 
         if job.payload.deliver and job.payload.to and response:
+            should_notify = await evaluate_response(
+                response=response,
+                task_context=reminder_note,
+                provider=provider,
+                model=agent.model,
+            )
+            if not should_notify:
+                return response
             from nanobot.bus.events import OutboundMessage
             delivery_meta: dict = {}
             if job.payload.thread_id:
@@ -622,6 +631,8 @@ def gateway(
 
     # Create channel manager
     channels = ChannelManager(config, bus)
+
+    hb_cfg = config.gateway.heartbeat
 
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
@@ -655,13 +666,15 @@ def gateway(
         """Phase 2: execute heartbeat tasks through the full agent loop."""
         channel, chat_id = _pick_heartbeat_target()
         session_key = "heartbeat"
-        session = agent.sessions.get_or_create(session_key)
-        session.prune_by_content_length(4000)
-        session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
-        agent.sessions.save(session)
+        ephemeral_session = hb_cfg.keep_recent_messages <= 0
+        if not ephemeral_session:
+            session = agent.sessions.get_or_create(session_key)
+            session.prune_by_content_length(4000)
+            session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
+            agent.sessions.save(session)
         logger.info(
-            "Heartbeat: executing via channel={} chat_id={} session={}",
-            channel, chat_id, session_key,
+            "Heartbeat: executing via channel={} chat_id={} session={} ephemeral={}",
+            channel, chat_id, session_key, ephemeral_session,
         )
 
         async def _silent(*_args, **_kwargs):
@@ -673,12 +686,14 @@ def gateway(
             channel=channel,
             chat_id=chat_id,
             on_progress=_silent,
+            ephemeral_session=ephemeral_session,
         )
 
-        session = agent.sessions.get_or_create(session_key)
-        session.prune_by_content_length(4000)
-        session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
-        agent.sessions.save(session)
+        if not ephemeral_session:
+            session = agent.sessions.get_or_create(session_key)
+            session.prune_by_content_length(4000)
+            session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
+            agent.sessions.save(session)
 
         return resp.content if resp else ""
 
@@ -693,7 +708,6 @@ def gateway(
         logger.info("Heartbeat: delivering to {}:{} — {}", channel, chat_id, preview)
         await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
 
-    hb_cfg = config.gateway.heartbeat
     heartbeat = HeartbeatService(
         workspace=config.workspace_path,
         provider=provider,

@@ -70,6 +70,7 @@ class HeartbeatService:
         self.enabled = enabled
         self._running = False
         self._task: asyncio.Task | None = None
+        self._execute_lock = asyncio.Lock()
 
     @property
     def heartbeat_file(self) -> Path:
@@ -83,10 +84,53 @@ class HeartbeatService:
                 return None
         return None
 
+    @staticmethod
+    def _has_actionable_lines(lines: list[str]) -> bool:
+        """Return True when lines contain real tasks instead of headers/comments."""
+        in_comment = False
+        for line in lines:
+            stripped = line.strip()
+            if in_comment:
+                if "-->" in stripped:
+                    in_comment = False
+                continue
+            if not stripped:
+                continue
+            if stripped.startswith("<!--"):
+                if "-->" not in stripped:
+                    in_comment = True
+                continue
+            if stripped.startswith("#"):
+                continue
+            if re.match(r"^[*-]\s*\[[xX]\]", stripped):
+                continue
+            return True
+        return False
+
     def _has_active_tasks(self, content: str) -> bool:
-        """Lightweight pre-check for active tasks."""
-        # Check for open markdown checkboxes: - [ ] or * [ ]
-        return bool(re.search(r"^[*-]\s*\[\s\]", content, re.MULTILINE))
+        """Check for actionable heartbeat tasks.
+
+        Prefer the ``## Active Tasks`` section when present, but fall back to
+        scanning the whole file for legacy HEARTBEAT.md formats.
+        """
+        lines = content.splitlines()
+        active_lines: list[str] = []
+        in_active_tasks = False
+        saw_active_section = False
+
+        for line in lines:
+            stripped = line.strip()
+            if stripped.lower() == "## active tasks":
+                in_active_tasks = True
+                saw_active_section = True
+                continue
+            if in_active_tasks and stripped.startswith("## "):
+                break
+            if in_active_tasks:
+                active_lines.append(line)
+
+        target_lines = active_lines if saw_active_section else lines
+        return self._has_actionable_lines(target_lines)
 
     async def _decide(self, content: str) -> tuple[str, str]:
         """Phase 1: ask LLM to decide skip/run via virtual tool call.
@@ -149,54 +193,60 @@ class HeartbeatService:
     async def _tick(self) -> None:
         """Execute a single heartbeat tick."""
         content = self._read_heartbeat_file()
-        if not content:
-            logger.debug("Heartbeat: HEARTBEAT.md missing or empty")
-            return
-
-        # Skip LLM call if there are no active tasks (open checkboxes).
-        if not self._has_active_tasks(content):
-            logger.debug("Heartbeat: no active tasks found in HEARTBEAT.md (skipping LLM call)")
-            return
-
-        logger.info("Heartbeat: checking for tasks...")
-
-        try:
-            action, tasks = await self._decide(content)
-
-            if action != "run":
-                logger.info("Heartbeat: OK (nothing to report)")
+        async with self._execute_lock:
+            if not content:
+                logger.debug("Heartbeat: HEARTBEAT.md missing or empty")
                 return
 
-            logger.info("Heartbeat: tasks found, executing...")
-            logger.info("Heartbeat: active tasks — {}", tasks[:300] if tasks else "(no detail)")
-            if self.on_execute:
-                response = await self.on_execute(tasks)
-                preview = (response[:120] + "...") if response and len(response) > 120 else (response or "(empty)")
-                logger.info("Heartbeat: execution result — {}", preview)
-                if response and self.on_notify:
-                    from nanobot.utils.evaluator import evaluate_response
-                    should_notify = await evaluate_response(
-                        response=response,
-                        task_context=tasks,
-                        provider=self.provider,
-                        model=self.model,
-                    )
-                    if should_notify:
-                        logger.info("Heartbeat: completed, delivering response")
-                        await self.on_notify(response)
+            if not self._has_active_tasks(content):
+                logger.debug("Heartbeat: no active tasks found in HEARTBEAT.md (skipping LLM call)")
+                return
+
+            logger.info("Heartbeat: checking for tasks...")
+
+            try:
+                action, tasks = await self._decide(content)
+
+                if action != "run":
+                    logger.info("Heartbeat: OK (nothing to report)")
+                    return
+
+                logger.info("Heartbeat: tasks found, executing...")
+                logger.info("Heartbeat: active tasks — {}", tasks[:300] if tasks else "(no detail)")
+                if self.on_execute:
+                    response = await self.on_execute(tasks)
+                    preview = (response[:120] + "...") if response and len(response) > 120 else (response or "(empty)")
+                    logger.info("Heartbeat: execution result — {}", preview)
+                    if response and self.on_notify:
+                        from nanobot.utils.evaluator import evaluate_response
+                        should_notify = await evaluate_response(
+                            response=response,
+                            task_context=tasks,
+                            provider=self.provider,
+                            model=self.model,
+                        )
+                        if should_notify:
+                            logger.info("Heartbeat: completed, delivering response")
+                            await self.on_notify(response)
+                        else:
+                            logger.info("Heartbeat: evaluator suppressed notification")
+                    elif not response:
+                        logger.info("Heartbeat: execution produced no response, skipping delivery")
                     else:
-                        logger.info("Heartbeat: evaluator suppressed notification")
-                elif not response:
-                    logger.info("Heartbeat: execution produced no response, skipping delivery")
-        except Exception:
-            logger.exception("Heartbeat execution failed")
+                        logger.info("Heartbeat: no notification callback configured")
+            except Exception:
+                logger.exception("Heartbeat execution failed")
 
     async def trigger_now(self) -> str | None:
         """Manually trigger a heartbeat."""
-        content = self._read_heartbeat_file()
-        if not content:
-            return None
-        action, tasks = await self._decide(content)
-        if action != "run" or not self.on_execute:
-            return None
-        return await self.on_execute(tasks)
+        async with self._execute_lock:
+            content = self._read_heartbeat_file()
+            if not content:
+                return None
+            if not self._has_active_tasks(content):
+                logger.debug("Heartbeat: no active tasks found in HEARTBEAT.md (skipping LLM call)")
+                return None
+            action, tasks = await self._decide(content)
+            if action != "run" or not self.on_execute:
+                return None
+            return await self.on_execute(tasks)

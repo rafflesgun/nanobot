@@ -578,6 +578,8 @@ class AgentLoop:
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
+        *,
+        ephemeral_session: bool = False,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         # System messages: parse origin from chat_id ("channel:chat_id")
@@ -610,7 +612,9 @@ class AgentLoop:
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
 
         key = session_key or msg.session_key
-        session = self.sessions.get_or_create(key)
+        session: Session | None = None
+        if not ephemeral_session:
+            session = self.sessions.get_or_create(key)
 
         # Slash commands
         # Strip a leading @mention (e.g. "@BotName /model gpt-4" -> "/model gpt-4")
@@ -621,7 +625,8 @@ class AgentLoop:
         if result := await self.commands.dispatch(ctx):
             return result
 
-        await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+        if session is not None:
+            await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
         self._set_tool_context(
             msg.channel, msg.chat_id,
@@ -632,7 +637,7 @@ class AgentLoop:
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
 
-        history = session.get_history(max_messages=0)
+        history = session.get_history(max_messages=0) if session is not None else []
         initial_messages = self.context.build_messages(
             history=history,
             current_message=msg.content,
@@ -650,6 +655,8 @@ class AgentLoop:
 
         # Define the incremental save callback
         async def _on_turn_saved(messages: list[dict]) -> None:
+            if session is None:
+                return
             self._save_turn(session, messages, 1 + len(history))
             self.sessions.save(session)
             # Record token usage if provider supports it
@@ -680,9 +687,10 @@ class AgentLoop:
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
 
-        self._save_turn(session, all_msgs, 1 + len(history))
-        self.sessions.save(session)
-        self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
+        if session is not None:
+            self._save_turn(session, all_msgs, 1 + len(history))
+            self.sessions.save(session)
+            self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
 
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
             return None
@@ -952,6 +960,8 @@ class AgentLoop:
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
+        *,
+        ephemeral_session: bool = False,
     ) -> OutboundMessage | None:
         """Process a message directly and return the outbound payload."""
         await self._connect_mcp()
@@ -962,4 +972,5 @@ class AgentLoop:
         return await self._process_message(
             msg, session_key=session_key, on_progress=on_progress,
             on_stream=on_stream, on_stream_end=on_stream_end,
+            ephemeral_session=ephemeral_session,
         )

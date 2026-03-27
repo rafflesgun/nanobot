@@ -17,7 +17,9 @@ understand intended behavior quickly.
 | "Thinking…" placeholder (PM only)           | ✅     | channels/telegram.py → _send_thinking_message          | tests/test_thinking_message.py         | skipped when `is_group == True`               |
 | Typing indicator & ACK reaction             | ✅     | channels/telegram.py                                   | tests/test_typing_ack.py               | typing per chat+thread, reaction per msg      |
 | Heartbeat results → DM / private only       | ✅     | cli/commands.py, heartbeat/service.py                  | test_heartbeat_service.py + targeted tests | skips negative IDs and topic sub-sessions  |
+| Heartbeat runs stateless by default         | ✅     | cli/commands.py, config/schema.py, agent/loop.py, heartbeat/service.py | tests/agent/test_heartbeat_service.py, tests/cli/test_commands.py | `heartbeat.keep_recent_messages = 0` |
 | Heartbeat session bounded by content+tail   | ✅     | cli/commands.py, session/manager.py                    | session history regressions            | `prune_by_content_length(4000)` + keep_recent |
+| Cron reminders are evaluator-biased to notify | ✅   | cli/commands.py, utils/evaluator.py                    | tests/cli/test_commands.py, tests/agent/test_evaluator.py | scheduled reminder context passed to evaluator |
 | Media downloads → workspace/media/          | ✅     | channels/telegram.py                                   | tests/test_media_download.py           | falls back to `~/.nanobot/media`              |
 | OpenAI compat uses `max_completion_tokens` only | ✅  | providers/openai_compat_provider.py                    | tests/providers/test_litellm_kwargs.py | no duplicate `max_tokens` field               |
 | SDK retries disabled + surfaced to progress | ✅     | providers/base.py, providers/*, agent/loop.py         | tests/providers/test_provider_retry.py | provider SDK retries forced to `0`            |
@@ -168,7 +170,51 @@ Keep the direct-turn save behavior that persists the user message, not just the 
 pytest tests/agent/test_loop_save_turn.py tests/agent/test_session_manager_history.py -q
 ```
 
-### 7. Telegram forwarded-message debounce
+### 7. Heartbeat is stateless by default
+
+**Core behavior**
+- `heartbeat.keep_recent_messages` now defaults to `0`, which means heartbeat runs do not load or persist chat history
+- The gateway still keeps DM-only delivery targeting and existing content-bound pruning logic when a positive `keep_recent_messages` value is configured
+- `AgentLoop.process_direct(..., ephemeral_session=True)` skips session load, save, and consolidation scheduling for heartbeat-style background work
+- The heartbeat service now uses an execution lock so a timer tick and manual trigger cannot overlap
+
+**Files to protect during conflicts**
+- `nanobot/config/schema.py`
+- `nanobot/cli/commands.py`
+- `nanobot/agent/loop.py`
+- `nanobot/heartbeat/service.py`
+
+**Resolution priority**
+Keep `keep_recent_messages = 0` as the default.  
+Do not regress the explicit ephemeral-session path for background runs.  
+Preserve the execution lock and the more accurate active-task detection that prefers the `## Active Tasks` section.
+
+**Quick validation**
+```bash
+pytest tests/agent/test_heartbeat_service.py tests/agent/test_loop_consolidation_tokens.py tests/cli/test_commands.py -q
+```
+
+### 8. Cron reminder notifications are biased toward delivery
+
+**Core behavior**
+- Cron-triggered reminder jobs now pass scheduled-reminder context into the post-run evaluator
+- The evaluator prompt explicitly treats reminder/timer completions as user-visible by default
+- If the message tool already delivered something during the turn, the evaluator is still bypassed as before
+
+**Files to protect during conflicts**
+- `nanobot/cli/commands.py`
+- `nanobot/utils/evaluator.py`
+
+**Resolution priority**
+Keep the scheduled-reminder context string passed to `evaluate_response(...)`.  
+Keep the evaluator prompt wording that treats reminder/timer completions as usually worth notifying about.
+
+**Quick validation**
+```bash
+pytest tests/agent/test_evaluator.py tests/cli/test_commands.py -q
+```
+
+### 9. Telegram forwarded-message debounce
 
 **Core behavior**
 - Forwarded messages get an 80ms debounce window so Telegram’s split updates become one agent turn
@@ -191,7 +237,7 @@ Do not regress local Telegram features such as topic routing, mention-only mode,
 pytest tests/channels/test_telegram_channel.py -q
 ```
 
-### 8. Fine-grained workspace allowlist for tools
+### 10. Fine-grained workspace allowlist for tools
 
 **Core behavior**
 - `tools.restrictToWorkspace` is now a nested object, not just a boolean
@@ -224,7 +270,7 @@ Do not drop the exec-side enforcement for allowed working directories, or shell 
 pytest tests/config/test_config_migration.py tests/tools/test_exec_security.py tests/tools/test_tool_validation.py tests/cli/test_commands.py -q
 ```
 
-### 9–13. Other smaller features (summary)
+### 11–15. Other smaller features (summary)
 
 - Thinking draft message → PM only (`if is_group: return`)
 - Typing + ACK reaction → per composite key (chat+thread)
@@ -233,7 +279,7 @@ pytest tests/config/test_config_migration.py tests/tools/test_exec_security.py t
 - Heartbeat history is bounded pre/post run by content length and recent legal suffix
 - Media → `workspace/media/` when workspace configured
 
-### 10. Tool definitions caching (#2205)
+### 12. Tool definitions caching (#2205)
 
 **Core behavior**
 - Added caching to `ToolRegistry.get_definitions()` to prevent repeated traversal of tool sets and JSON schema construction during each iteration of the agent loop
@@ -253,7 +299,7 @@ Preserve the caching mechanism that improves performance by avoiding redundant s
 pytest tests/test_tool_registry_caching.py -v
 ```
 
-### 11. Incremental session saving (#2219)
+### 13. Incremental session saving (#2219)
 
 **Core behavior**
 - Implements incremental session saving for agent loops to prevent data loss when operations crash or get cancelled mid-process
