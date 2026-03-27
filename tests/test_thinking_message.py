@@ -188,6 +188,12 @@ async def test_stream_end_topic_tts_uses_topic_override(monkeypatch):
     await channel.send_delta("123456", "", {"_stream_end": True, "message_thread_id": 77})
 
     channel._app.bot.delete_message.assert_awaited_once_with(chat_id=123456, message_id=333)
+    assert channel._app.bot.edit_message_text.await_count == 1
+    edit_kwargs = channel._app.bot.edit_message_text.await_args.kwargs
+    assert edit_kwargs["chat_id"] == 123456
+    assert edit_kwargs["message_id"] == 7777
+    assert edit_kwargs["text"] == "Hello topic"
+    assert "message_thread_id" not in edit_kwargs
     channel._app.bot.send_voice.assert_awaited_once()
     kwargs = channel._app.bot.send_voice.await_args.kwargs
     assert kwargs["chat_id"] == 123456

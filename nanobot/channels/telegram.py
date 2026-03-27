@@ -783,7 +783,6 @@ class TelegramChannel(BaseChannel):
                     self._app.bot.edit_message_text,
                     chat_id=int_chat_id, message_id=buf.message_id,
                     text=html, parse_mode="HTML",
-                    **thread_kwargs,
                 )
             except Exception as e:
                 logger.debug("Final stream edit failed (HTML), trying plain: {}", e)
@@ -792,7 +791,6 @@ class TelegramChannel(BaseChannel):
                         self._app.bot.edit_message_text,
                         chat_id=int_chat_id, message_id=buf.message_id,
                         text=buf.text,
-                        **thread_kwargs,
                     )
                 except Exception:
                     pass
@@ -832,7 +830,6 @@ class TelegramChannel(BaseChannel):
                     self._app.bot.edit_message_text,
                     chat_id=int_chat_id, message_id=buf.message_id,
                     text=buf.text,
-                    **thread_kwargs,
                 )
                 buf.last_edit = now
             except Exception:
