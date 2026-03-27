@@ -13,6 +13,7 @@ understand intended behavior quickly.
 | Telegram Topic support in groups            | ✅     | channels/telegram.py, cron/*, agent/tools/cron.py      | tests/test_cron_topic_delivery.py      | session_key includes `:topic:{thread_id}`     |
 | Telegram groups → mention-only mode         | ✅     | channels/telegram.py                                   | manual + group_policy test             | `group_policy = "mention"` (default)          |
 | Group commands via @mention                 | ✅     | channels/telegram.py → _on_message                     | manual                                 | `@BotName /command` → text message path       |
+| Configured subagents via `spawn(subagent_id)` | ✅   | config/schema.py, cli/commands.py, agent/loop.py, agent/subagent.py, agent/tools/spawn.py | tests/agent/test_configured_subagents.py, tests/agent/test_task_cancel.py | named `agents.*` profiles inherit from `agents.defaults` |
 | Ordered fallback models on provider errors  | ✅     | agent/loop.py, config/schema.py, cli/commands.py, agent/subagent.py | tests/agent/test_fallback_models.py, tests/config/test_config_migration.py | `fallback_model: null`, `fallback_models: []` |
 | "Thinking…" placeholder (PM only)           | ✅     | channels/telegram.py → _send_thinking_message          | tests/test_thinking_message.py         | skipped when `is_group == True`               |
 | Typing indicator & ACK reaction             | ✅     | channels/telegram.py                                   | tests/test_typing_ack.py               | typing per chat+thread, reaction per msg      |
@@ -85,7 +86,33 @@ Default should stay `"mention"`.
 Keep `_model_overrides` dict + `effective_model = model_override or self.model`.
 Reset keyword is `reset` (not `default`).
 
-### 4. Ordered fallback models on provider errors
+### 4. Configured subagents via spawn
+
+**Core behavior**
+- Additional named entries under `agents` are treated as subagent profiles
+- Non-default profiles inherit unspecified fields from `agents.defaults`
+- `spawn` accepts `subagent_id` so the main agent can deliberately pick a configured subagent backend
+- The spawn tool description advertises configured profiles so the main agent can discover them in-context
+- This phase is intentionally limited to background subagents; it does not implement full peer-agent routing or handoff
+
+**Files**
+- `nanobot/config/schema.py` → `AgentsConfig` now preserves named agent profiles and resolves them against `defaults`
+- `nanobot/cli/commands.py` → provider factory wiring for per-profile subagent providers
+- `nanobot/agent/loop.py` → passes named agent config + provider factory into `SubagentManager`
+- `nanobot/agent/subagent.py` → resolves selected profile, builds the matching provider, and runs the subagent with that model/settings
+- `nanobot/agent/tools/spawn.py` → adds `subagent_id` parameter and dynamic profile advertising
+
+**Resolution priority**
+Keep named agent profiles as overlays on `agents.defaults`, not fully separate standalone configs.  
+Keep the scope limited to `spawn(subagent_id=...)`. Do not conflate this with the larger multi-agent work from PR #2064.  
+Preserve the existing default subagent path when no `subagent_id` is provided.
+
+**Quick validation**
+```bash
+pytest tests/agent/test_configured_subagents.py tests/agent/test_task_cancel.py tests/config/test_config_migration.py tests/cli/test_commands.py -q
+```
+
+### 5. Ordered fallback models on provider errors
 
 **Core behavior**
 - Configure `fallback_model` in agent defaults to specify the legacy first fallback when the primary fails
@@ -179,7 +206,7 @@ Keep the direct-turn save behavior that persists the user message, not just the 
 pytest tests/agent/test_loop_save_turn.py tests/agent/test_session_manager_history.py -q
 ```
 
-### 7. Heartbeat is stateless by default
+### 8. Heartbeat is stateless by default
 
 **Core behavior**
 - `heartbeat.keep_recent_messages` now defaults to `0`, which means heartbeat runs do not load or persist chat history
@@ -203,7 +230,7 @@ Preserve the execution lock and the more accurate active-task detection that pre
 pytest tests/agent/test_heartbeat_service.py tests/agent/test_loop_consolidation_tokens.py tests/cli/test_commands.py -q
 ```
 
-### 8. Cron reminder notifications are biased toward delivery
+### 9. Cron reminder notifications are biased toward delivery
 
 **Core behavior**
 - Cron-triggered reminder jobs now pass scheduled-reminder context into the post-run evaluator
@@ -223,7 +250,7 @@ Keep the evaluator prompt wording that treats reminder/timer completions as usua
 pytest tests/agent/test_evaluator.py tests/cli/test_commands.py -q
 ```
 
-### 9. Telegram forwarded-message debounce
+### 10. Telegram forwarded-message debounce
 
 **Core behavior**
 - Forwarded messages get an 80ms debounce window so Telegram’s split updates become one agent turn
@@ -246,7 +273,7 @@ Do not regress local Telegram features such as topic routing, mention-only mode,
 pytest tests/channels/test_telegram_channel.py -q
 ```
 
-### 10. Fine-grained workspace allowlist for tools
+### 11. Fine-grained workspace allowlist for tools
 
 **Core behavior**
 - `tools.restrictToWorkspace` is now a nested object, not just a boolean
@@ -279,7 +306,7 @@ Do not drop the exec-side enforcement for allowed working directories, or shell 
 pytest tests/config/test_config_migration.py tests/tools/test_exec_security.py tests/tools/test_tool_validation.py tests/cli/test_commands.py -q
 ```
 
-### 11–15. Other smaller features (summary)
+### 12–16. Other smaller features (summary)
 
 - Thinking draft message → PM only (`if is_group: return`)
 - Typing + ACK reaction → per composite key (chat+thread)
@@ -288,7 +315,7 @@ pytest tests/config/test_config_migration.py tests/tools/test_exec_security.py t
 - Heartbeat history is bounded pre/post run by content length and recent legal suffix
 - Media → `workspace/media/` when workspace configured
 
-### 12. Tool definitions caching (#2205)
+### 13. Tool definitions caching (#2205)
 
 **Core behavior**
 - Added caching to `ToolRegistry.get_definitions()` to prevent repeated traversal of tool sets and JSON schema construction during each iteration of the agent loop
@@ -308,7 +335,7 @@ Preserve the caching mechanism that improves performance by avoiding redundant s
 pytest tests/test_tool_registry_caching.py -v
 ```
 
-### 13. Incremental session saving (#2219)
+### 14. Incremental session saving (#2219)
 
 **Core behavior**
 - Implements incremental session saving for agent loops to prevent data loss when operations crash or get cancelled mid-process

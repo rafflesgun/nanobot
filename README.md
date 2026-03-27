@@ -1225,6 +1225,39 @@ Duplicate model names are skipped automatically.
 - Cost management by falling back from expensive models to more economical alternatives
 - Providing resilience against temporary service disruptions
 
+### Configured Subagents
+
+Subagents can now use named agent profiles from the `agents` config block. This lets background `spawn` tasks run with a different model, provider, temperature, token limit, or reasoning effort than the main agent.
+
+```yaml
+agents:
+  defaults:
+    model: "openrouter/openai/gpt-4.1"
+    temperature: 0.2
+
+  research:
+    model: "anthropic/claude-sonnet-4-5"
+    provider: "anthropic"
+    temperature: 0.0
+    reasoning_effort: "high"
+
+  fastdraft:
+    model: "openrouter/openai/gpt-4.1-mini"
+    temperature: 0.6
+```
+
+Use `spawn` with `subagent_id` to select one of these profiles. Unspecified fields inherit from `agents.defaults`.
+
+Example:
+```json
+{
+  "task": "Research the linked issue and summarize the likely root cause",
+  "subagent_id": "research"
+}
+```
+
+This phase only adds configured subagents for background tasks. It does not add full peer-agent routing or multi-agent handoff.
+
 ### Web Search
 
 > [!TIP]

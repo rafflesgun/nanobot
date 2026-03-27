@@ -29,13 +29,21 @@ class SpawnTool(Tool):
 
     @property
     def description(self) -> str:
-        return (
+        description = (
             "Spawn a subagent to handle a task in the background. "
             "Use this for complex or time-consuming tasks that can run independently. "
             "The subagent will complete the task and report back when done. "
             "For deliverables or existing projects, inspect the workspace first "
             "and use a dedicated subdirectory when helpful."
         )
+        profiles = self._manager.list_profiles()
+        if profiles:
+            advertised = "; ".join(
+                f"{profile['id']}: {profile.get('description') or profile.get('label') or 'configured profile'}"
+                for profile in profiles
+            )
+            description += f" Available configured subagents: {advertised}. Use subagent_id to select one."
+        return description
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -50,11 +58,15 @@ class SpawnTool(Tool):
                     "type": "string",
                     "description": "Optional short label for the task (for display)",
                 },
+                "subagent_id": {
+                    "type": "string",
+                    "description": "Optional configured subagent profile to use for this task",
+                },
             },
             "required": ["task"],
         }
 
-    async def execute(self, task: str, label: str | None = None, **kwargs: Any) -> str:
+    async def execute(self, task: str, label: str | None = None, subagent_id: str | None = None, **kwargs: Any) -> str:
         """Spawn a subagent to execute the given task."""
         return await self._manager.spawn(
             task=task,
@@ -62,4 +74,5 @@ class SpawnTool(Tool):
             origin_channel=self._origin_channel,
             origin_chat_id=self._origin_chat_id,
             session_key=self._session_key,
+            subagent_id=subagent_id,
         )

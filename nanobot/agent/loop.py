@@ -7,6 +7,7 @@ import json
 import re
 import os
 import time
+from collections.abc import Callable as AbcCallable
 from contextlib import AsyncExitStack, nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
@@ -70,6 +71,8 @@ class AgentLoop:
         channels_config: ChannelsConfig | None = None,
         fallback_model: str | None = None,
         fallback_models: list[str] | None = None,
+        agents_config: "Any" = None,
+        provider_factory: AbcCallable[[Any], LLMProvider] | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 
@@ -89,6 +92,8 @@ class AgentLoop:
         self.extra_write = extra_write or []
         self.fallback_model = fallback_model
         self.fallback_models = fallback_models or []
+        self.agents_config = agents_config
+        self.provider_factory = provider_factory
         self._start_time = time.time()
         self._last_usage: dict[str, int] = {}
 
@@ -103,6 +108,8 @@ class AgentLoop:
             model=self.model,
             fallback_model=self.fallback_model,
             fallback_models=self.fallback_models,
+            agents_config=self.agents_config,
+            provider_factory=self.provider_factory,
             web_search_config=self.web_search_config,
             web_proxy=web_proxy,
             exec_config=self.exec_config,

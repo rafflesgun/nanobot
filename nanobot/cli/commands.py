@@ -388,7 +388,7 @@ def _onboard_plugins(config_path: Path) -> None:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
-def _make_provider(config: Config):
+def _make_provider(config: Config, agent_config=None):
     """Create the appropriate LLM provider from config.
 
     Routing is driven by ``ProviderSpec.backend`` in the registry.
@@ -396,9 +396,10 @@ def _make_provider(config: Config):
     from nanobot.providers.base import GenerationSettings
     from nanobot.providers.registry import find_by_name
 
-    model = config.agents.defaults.model
-    provider_name = config.get_provider_name(model)
-    p = config.get_provider(model)
+    defaults = agent_config or config.agents.defaults
+    model = defaults.model
+    provider_name = config.get_provider_name(model, agent=defaults)
+    p = config.get_provider(model, agent=defaults)
     spec = find_by_name(provider_name) if provider_name else None
     backend = spec.backend if spec else "openai_compat"
 
@@ -432,7 +433,7 @@ def _make_provider(config: Config):
         from nanobot.providers.anthropic_provider import AnthropicProvider
         provider = AnthropicProvider(
             api_key=p.api_key if p else None,
-            api_base=config.get_api_base(model),
+            api_base=config.get_api_base(model, agent=defaults),
             default_model=model,
             extra_headers=p.extra_headers if p else None,
         )
@@ -440,13 +441,12 @@ def _make_provider(config: Config):
         from nanobot.providers.openai_compat_provider import OpenAICompatProvider
         provider = OpenAICompatProvider(
             api_key=p.api_key if p else None,
-            api_base=config.get_api_base(model),
+            api_base=config.get_api_base(model, agent=defaults),
             default_model=model,
             extra_headers=p.extra_headers if p else None,
             spec=spec,
         )
 
-    defaults = config.agents.defaults
     provider.generation = GenerationSettings(
         temperature=defaults.temperature,
         max_tokens=defaults.max_tokens,
@@ -572,6 +572,8 @@ def gateway(
         channels_config=config.channels,
         fallback_model=config.agents.defaults.fallback_model,
         fallback_models=config.agents.defaults.fallback_models,
+        agents_config=config.agents,
+        provider_factory=lambda agent_cfg: _make_provider(config, agent_cfg),
     )
 
     # Set cron callback (needs agent)
@@ -814,6 +816,8 @@ def agent(
         channels_config=config.channels,
         fallback_model=config.agents.defaults.fallback_model,
         fallback_models=config.agents.defaults.fallback_models,
+        agents_config=config.agents,
+        provider_factory=lambda agent_cfg: _make_provider(config, agent_cfg),
     )
 
     # Shared reference for progress callbacks

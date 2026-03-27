@@ -221,3 +221,31 @@ def test_save_config_writes_ordered_fallback_models(tmp_path) -> None:
 
     assert defaults["fallbackModel"] == "legacy-fallback"
     assert defaults["fallbackModels"] == ["backup-a", "backup-b"]
+
+
+def test_load_config_preserves_named_agent_profiles(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "agents": {
+                    "defaults": {
+                        "model": "main-model",
+                        "temperature": 0.4,
+                    },
+                    "research": {
+                        "model": "research-model",
+                        "temperature": 0.1,
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+    resolved = config.agents.resolve("research")
+
+    assert resolved.model == "research-model"
+    assert resolved.temperature == 0.1
+    assert config.agents.agent_ids() == ["defaults", "research"]

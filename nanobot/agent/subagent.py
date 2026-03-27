@@ -3,6 +3,7 @@
 import asyncio
 import json
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,8 @@ class SubagentManager:
         model: str | None = None,
         fallback_model: str | None = None,
         fallback_models: list[str] | None = None,
+        agents_config: "AgentsConfig | None" = None,
+        provider_factory: Callable[["AgentDefaults"], LLMProvider] | None = None,
         web_search_config: "WebSearchConfig | None" = None,
         web_proxy: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
@@ -39,7 +42,7 @@ class SubagentManager:
         extra_read: list[str] | None = None,
         extra_write: list[str] | None = None,
     ):
-        from nanobot.config.schema import ExecToolConfig, WebSearchConfig
+        from nanobot.config.schema import AgentsConfig, ExecToolConfig, WebSearchConfig
 
         self.provider = provider
         self.workspace = workspace
@@ -47,6 +50,8 @@ class SubagentManager:
         self.model = model or provider.get_default_model()
         self.fallback_model = fallback_model
         self.fallback_models = fallback_models or []
+        self.agents_config = agents_config or AgentsConfig()
+        self.provider_factory = provider_factory
         self.web_search_config = web_search_config or WebSearchConfig()
         self.web_proxy = web_proxy
         self.exec_config = exec_config or ExecToolConfig()
@@ -64,6 +69,7 @@ class SubagentManager:
         origin_channel: str = "cli",
         origin_chat_id: str = "direct",
         session_key: str | None = None,
+        subagent_id: str | None = None,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
         task_id = str(uuid.uuid4())[:8]
@@ -71,7 +77,7 @@ class SubagentManager:
         origin = {"channel": origin_channel, "chat_id": origin_chat_id}
 
         bg_task = asyncio.create_task(
-            self._run_subagent(task_id, task, display_label, origin)
+            self._run_subagent(task_id, task, display_label, origin, subagent_id=subagent_id)
         )
         self._running_tasks[task_id] = bg_task
         if session_key:
@@ -89,17 +95,44 @@ class SubagentManager:
         logger.info("Spawned subagent [{}]: {}", task_id, display_label)
         return f"Subagent [{display_label}] started (id: {task_id}). I'll notify you when it completes."
 
+    def list_profiles(self) -> list[dict[str, str]]:
+        """Return configured non-default subagent profiles for tool advertising."""
+        profiles: list[dict[str, str]] = []
+        for agent_id in self.agents_config.agent_ids():
+            if agent_id == "defaults":
+                continue
+            overrides = self.agents_config._agent_overrides(agent_id)
+            profile = {"id": agent_id}
+            if label := overrides.get("label"):
+                profile["label"] = str(label)
+            if description := overrides.get("description"):
+                profile["description"] = str(description)
+            elif model := overrides.get("model"):
+                profile["description"] = f"model={model}"
+            profiles.append(profile)
+        return profiles
+
+    def _resolve_subagent_backend(self, subagent_id: str | None) -> tuple["AgentDefaults", LLMProvider]:
+        """Resolve the agent config and provider for a subagent run."""
+        agent_config = self.agents_config.resolve(subagent_id or "defaults")
+        if self.provider_factory:
+            return agent_config, self.provider_factory(agent_config)
+        return agent_config, self.provider
+
     async def _run_subagent(
         self,
         task_id: str,
         task: str,
         label: str,
         origin: dict[str, str],
+        subagent_id: str | None = None,
     ) -> None:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
 
         try:
+            agent_config, provider = self._resolve_subagent_backend(subagent_id)
+
             # Build subagent tools (no message tool, no spawn tool)
             tools = ToolRegistry()
             allowed_dir: list[Path] = ([self.workspace] + ([Path(p) for p in self.extra_write] if self.extra_write else [])) if self.restrict_to_workspace else None
@@ -132,10 +165,10 @@ class SubagentManager:
             while iteration < max_iterations:
                 iteration += 1
 
-                response = await self.provider.chat_with_retry(
+                response = await provider.chat_with_retry(
                     messages=messages,
                     tools=tools.get_definitions(),
-                    model=self.model,
+                    model=agent_config.model,
                 )
 
                 if response.has_tool_calls:
@@ -172,13 +205,13 @@ class SubagentManager:
             await self._announce_result(task_id, label, task, final_result, origin, "ok")
 
             # Record subagent token usage
-            if hasattr(self.provider, 'get_usage'):
-                usage = self.provider.get_usage()
+            if hasattr(provider, 'get_usage'):
+                usage = provider.get_usage()
                 if usage:
                     self.stats_manager.record_usage(
                         "system",
                         f"subagent:{task_id}",
-                        self.model,
+                        agent_config.model,
                         usage.get('input_tokens', 0),
                         usage.get('output_tokens', 0),
                         usage.get('total_tokens', 0),

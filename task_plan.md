@@ -4,7 +4,7 @@
 Create and execute a phased implementation plan for the selected upstream PRs that are still valuable for `raffles/local`, with each implementation phase ending in a git commit only after its focused tests pass.
 
 ## Current Phase
-Phase 5
+Phase 6
 
 ## Phases
 
@@ -37,17 +37,17 @@ Phase 5
 - **Status:** complete
 
 ### Phase 5: Configured subagents
-- [ ] Implement PR #2368 configured subagents
-- [ ] Keep scope limited to configured subagents, not full peer-agent architecture
-- [ ] Reconcile with local spawn, message bus, and channel manager behavior
-- [ ] Commit Phase 5 after all targeted tests pass
-- **Status:** in_progress
+- [x] Implement PR #2368 configured subagents
+- [x] Keep scope limited to configured subagents, not full peer-agent architecture
+- [x] Reconcile with local spawn, message bus, and channel manager behavior
+- [x] Commit Phase 5 after all targeted tests pass
+- **Status:** complete
 
 ### Phase 6: Optional low-risk additions
 - [ ] Add PR #2451 `ipinfo` skill if still desired
 - [ ] Run focused skill/discovery sanity checks
 - [ ] Commit Phase 6 after tests pass
-- **Status:** pending
+- **Status:** in_progress
 
 ### Phase 7: WebUI single-image planning
 - [ ] Assess `nanobot-webui` integration points and packaging constraints
@@ -75,6 +75,7 @@ Phase 5
 | Require a git commit only after each phase's targeted tests pass | Matches user instruction and keeps history clean and defensible |
 | Defer PR #2064 | It overlaps configured-subagent work but is much broader and riskier |
 | Keep `fallback_model` as the first compatibility fallback, then append `fallback_models` | Preserves existing configs while enabling ordered fallback chains without a breaking migration |
+| Keep configured subagents as `agents.defaults` overlays selected only through `spawn(subagent_id)` | Delivers the useful backend specialization from PR #2368 without adopting a larger multi-agent architecture |
 
 ## Errors Encountered
 | Error | Attempt | Resolution |
