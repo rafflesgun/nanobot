@@ -4,7 +4,7 @@
 Create and execute a phased implementation plan for the selected upstream PRs that are still valuable for `raffles/local`, with each implementation phase ending in a git commit only after its focused tests pass.
 
 ## Current Phase
-Phase 4
+Phase 5
 
 ## Phases
 
@@ -30,18 +30,18 @@ Phase 4
 - **Status:** complete
 
 ### Phase 4: Fallback model enhancement
-- [ ] Implement PR #2417 ordered fallback models
-- [ ] Preserve backward compatibility with existing local `fallback_model`
-- [ ] Add migration and runtime tests for both single and ordered fallback config
-- [ ] Commit Phase 4 after all targeted tests pass
-- **Status:** in_progress
+- [x] Implement PR #2417 ordered fallback models
+- [x] Preserve backward compatibility with existing local `fallback_model`
+- [x] Add migration and runtime tests for both single and ordered fallback config
+- [x] Commit Phase 4 after all targeted tests pass
+- **Status:** complete
 
 ### Phase 5: Configured subagents
 - [ ] Implement PR #2368 configured subagents
 - [ ] Keep scope limited to configured subagents, not full peer-agent architecture
 - [ ] Reconcile with local spawn, message bus, and channel manager behavior
 - [ ] Commit Phase 5 after all targeted tests pass
-- **Status:** pending
+- **Status:** in_progress
 
 ### Phase 6: Optional low-risk additions
 - [ ] Add PR #2451 `ipinfo` skill if still desired
@@ -74,6 +74,7 @@ Phase 4
 | Treat `nanobot-webui` as a separate workstream | It is packaging/integration work, not a small upstream repo patch |
 | Require a git commit only after each phase's targeted tests pass | Matches user instruction and keeps history clean and defensible |
 | Defer PR #2064 | It overlaps configured-subagent work but is much broader and riskier |
+| Keep `fallback_model` as the first compatibility fallback, then append `fallback_models` | Preserves existing configs while enabling ordered fallback chains without a breaking migration |
 
 ## Errors Encountered
 | Error | Attempt | Resolution |

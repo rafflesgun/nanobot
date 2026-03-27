@@ -571,6 +571,7 @@ def gateway(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         fallback_model=config.agents.defaults.fallback_model,
+        fallback_models=config.agents.defaults.fallback_models,
     )
 
     # Set cron callback (needs agent)
@@ -812,6 +813,7 @@ def agent(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         fallback_model=config.agents.defaults.fallback_model,
+        fallback_models=config.agents.defaults.fallback_models,
     )
 
     # Shared reference for progress callbacks

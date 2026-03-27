@@ -1180,7 +1180,7 @@ That's it! Environment variables, model routing, config matching, and `nanobot s
 
 ### Fallback Model Configuration
 
-The fallback model feature provides automatic failover capability when the primary model becomes unavailable or hits usage limits.
+The fallback model feature provides automatic failover capability when the primary model becomes unavailable or hits usage limits. You can configure either a single legacy fallback model or an ordered list of additional fallback models.
 
 **Configuration:**
 
@@ -1189,7 +1189,10 @@ The fallback model feature provides automatic failover capability when the prima
 agents:
   defaults:
     model: "primary-model-name"  # Main model to use
-    fallback_model: "backup-model-name"  # Fallback when primary fails
+    fallback_model: "backup-model-name"  # Legacy first fallback when primary fails
+    fallback_models:                     # Additional fallbacks tried in order
+      - "backup-model-2"
+      - "backup-model-3"
 ```
 
 Or via environment variables:
@@ -1197,6 +1200,13 @@ Or via environment variables:
 ```bash
 export NANOBOT_FALLBACK_MODEL="gpt-4-turbo-preview"
 ```
+
+If both `fallback_model` and `fallback_models` are set, nanobot tries them in this order:
+1. Primary model
+2. `fallback_model`
+3. Each entry in `fallback_models`, in order
+
+Duplicate model names are skipped automatically.
 
 **Supported Failure Conditions:**
 - Model unavailability (404 errors)
@@ -1207,8 +1217,8 @@ export NANOBOT_FALLBACK_MODEL="gpt-4-turbo-preview"
 
 **How It Works:**
 1. Requests are first sent to the configured primary model
-2. If the primary model fails with a recognized error condition, the system automatically retries with the fallback model
-3. If both models fail, the original error is raised
+2. If the primary model fails with a recognized error condition, the system retries each configured fallback model in order
+3. If the full fallback chain fails, the original primary-model error is raised
 
 **Use Cases:**
 - Ensuring continuous operation when premium models hit daily limits

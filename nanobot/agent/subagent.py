@@ -31,6 +31,7 @@ class SubagentManager:
         bus: MessageBus,
         model: str | None = None,
         fallback_model: str | None = None,
+        fallback_models: list[str] | None = None,
         web_search_config: "WebSearchConfig | None" = None,
         web_proxy: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
@@ -45,6 +46,7 @@ class SubagentManager:
         self.bus = bus
         self.model = model or provider.get_default_model()
         self.fallback_model = fallback_model
+        self.fallback_models = fallback_models or []
         self.web_search_config = web_search_config or WebSearchConfig()
         self.web_proxy = web_proxy
         self.exec_config = exec_config or ExecToolConfig()

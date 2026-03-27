@@ -185,3 +185,39 @@ def test_save_config_writes_nested_workspace_restriction_shape(tmp_path) -> None
         "extraRead": ["/tmp/read-only"],
         "extraWrite": ["/tmp/read-write"],
     }
+
+
+def test_load_config_accepts_ordered_fallback_models(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "agents": {
+                    "defaults": {
+                        "fallbackModel": "legacy-fallback",
+                        "fallbackModels": ["backup-a", "backup-b"],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+
+    assert config.agents.defaults.fallback_model == "legacy-fallback"
+    assert config.agents.defaults.fallback_models == ["backup-a", "backup-b"]
+
+
+def test_save_config_writes_ordered_fallback_models(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    config = load_config(config_path)
+    config.agents.defaults.fallback_model = "legacy-fallback"
+    config.agents.defaults.fallback_models = ["backup-a", "backup-b"]
+
+    save_config(config, config_path)
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+    defaults = saved["agents"]["defaults"]
+
+    assert defaults["fallbackModel"] == "legacy-fallback"
+    assert defaults["fallbackModels"] == ["backup-a", "backup-b"]

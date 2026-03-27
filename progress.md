@@ -55,12 +55,42 @@
   - `task_plan.md`
   - `progress.md`
 
+### Phase 4: Fallback model enhancement
+- **Status:** complete
+- Actions taken:
+  - Reviewed the existing single-model failover path against upstream PR #2417.
+  - Added ordered fallback model support while preserving legacy `fallback_model` behavior as the first compatibility fallback.
+  - Added regression coverage for ordered failover semantics, config load/save shape, and CLI wiring.
+- Files created/modified:
+  - `task_plan.md`
+  - `progress.md`
+  - `README.md`
+  - `docs/features/raffles-local-features-2026.md`
+  - `nanobot/config/schema.py`
+  - `nanobot/agent/loop.py`
+  - `nanobot/agent/subagent.py`
+  - `nanobot/cli/commands.py`
+  - `tests/agent/test_fallback_models.py`
+  - `tests/config/test_config_migration.py`
+  - `tests/cli/test_commands.py`
+
+### Phase 5: Configured subagents
+- **Status:** in_progress
+- Actions taken:
+  - Promoted the next planned phase after completing the fallback-model batch.
+- Files created/modified:
+  - `task_plan.md`
+  - `progress.md`
+
 ## Test Results
 | Test | Input | Expected | Actual | Status |
 |------|-------|----------|--------|--------|
 | Planning cross-check | Requested PR list vs local branch | Filtered actionable set | Actionable set identified | ✓ |
 | Phase 3 focused suite (first run) | `pytest tests/agent/test_evaluator.py tests/agent/test_heartbeat_service.py tests/agent/test_loop_consolidation_tokens.py tests/cli/test_commands.py -q` | All targeted tests pass | 68 passed, 1 failed due to missing `asyncio` import in new CLI test | ✗ |
 | Phase 3 focused suite (rerun) | `pytest tests/agent/test_evaluator.py tests/agent/test_heartbeat_service.py tests/agent/test_loop_consolidation_tokens.py tests/cli/test_commands.py -q` | All targeted tests pass | 69 passed | ✓ |
+| Phase 4 red suite | `pytest tests/agent/test_fallback_models.py tests/config/test_config_migration.py tests/cli/test_commands.py -q` | New fallback tests fail for missing feature pieces | 5 expected failures covering schema, constructor wiring, and runtime support | ✓ |
+| Phase 4 focused suite | `pytest tests/agent/test_fallback_models.py tests/config/test_config_migration.py tests/cli/test_commands.py -q` | All targeted tests pass | 58 passed | ✓ |
+| Phase 4 broader suite | `pytest tests/agent/test_fallback_models.py tests/agent/test_loop_save_turn.py tests/config/test_config_migration.py tests/cli/test_commands.py -q` | All targeted tests pass | 64 passed | ✓ |
 
 ## Error Log
 | Timestamp | Error | Attempt | Resolution |

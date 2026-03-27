@@ -13,7 +13,7 @@ understand intended behavior quickly.
 | Telegram Topic support in groups            | ✅     | channels/telegram.py, cron/*, agent/tools/cron.py      | tests/test_cron_topic_delivery.py      | session_key includes `:topic:{thread_id}`     |
 | Telegram groups → mention-only mode         | ✅     | channels/telegram.py                                   | manual + group_policy test             | `group_policy = "mention"` (default)          |
 | Group commands via @mention                 | ✅     | channels/telegram.py → _on_message                     | manual                                 | `@BotName /command` → text message path       |
-| Automatic fallback model on provider errors | ✅     | agent/loop.py, config/schema.py, cli/commands.py, agent/subagent.py | manual testing with quota exhaustion | `fallback_model: null` (default)              |
+| Ordered fallback models on provider errors  | ✅     | agent/loop.py, config/schema.py, cli/commands.py, agent/subagent.py | tests/agent/test_fallback_models.py, tests/config/test_config_migration.py | `fallback_model: null`, `fallback_models: []` |
 | "Thinking…" placeholder (PM only)           | ✅     | channels/telegram.py → _send_thinking_message          | tests/test_thinking_message.py         | skipped when `is_group == True`               |
 | Typing indicator & ACK reaction             | ✅     | channels/telegram.py                                   | tests/test_typing_ack.py               | typing per chat+thread, reaction per msg      |
 | Heartbeat results → DM / private only       | ✅     | cli/commands.py, heartbeat/service.py                  | test_heartbeat_service.py + targeted tests | skips negative IDs and topic sub-sessions  |
@@ -85,11 +85,13 @@ Default should stay `"mention"`.
 Keep `_model_overrides` dict + `effective_model = model_override or self.model`.
 Reset keyword is `reset` (not `default`).
 
-### 4. Automatic fallback model on provider errors
+### 4. Ordered fallback models on provider errors
 
 **Core behavior**
-- Configure `fallback_model` in agent defaults to specify backup model when primary fails
-- Automatically activates when primary model encounters provider errors including:
+- Configure `fallback_model` in agent defaults to specify the legacy first fallback when the primary fails
+- Configure `fallback_models` to add more fallback models that are tried in order after `fallback_model`
+- The runtime de-duplicates the chain, so repeated model names are skipped automatically
+- Automatically activates when the primary model encounters provider errors including:
   - 502/503 errors (service temporarily unavailable)
   - 404 errors (model not found or unavailable)
   - 403 errors (quota exhaustion, rate limiting, access denied)
@@ -97,17 +99,17 @@ Reset keyword is `reset` (not `default`).
   - Invalid model errors (incorrect model specifications)
   - Provider-specific errors like "free tier exhausted" or "AllocationQuota" limits
 - Transparent operation - users don't need to manually switch models
-- Falls back to configured model only when specific provider errors detected
-- Preserves original error if both primary and fallback models fail
+- Falls back only when specific provider errors are detected
+- Preserves the original primary error if the whole fallback chain fails
 
 **Files**
-- nanobot/config/schema.py → AgentDefaults.fallback_model field
-- nanobot/agent/loop.py → _run_agent_loop with enhanced try/catch logic and fallback mechanism
-- nanobot/cli/commands.py → Wiring of fallback_model parameter to AgentLoop
-- nanobot/agent/subagent.py → SubagentManager also supports fallback model propagation
+- nanobot/config/schema.py → AgentDefaults.fallback_model + AgentDefaults.fallback_models
+- nanobot/agent/loop.py → ordered fallback chain helper + loop-level failover execution
+- nanobot/cli/commands.py → wiring of fallback_model and fallback_models to AgentLoop
+- nanobot/agent/subagent.py → SubagentManager keeps the same fallback config surface
 
 **Resolution priority**
-Preserve the enhanced try/catch wrapper around provider.chat_with_retry that checks for provider errors and attempts fallback model. The fallback logic now includes comprehensive error detection covering:
+Preserve the loop-level fallback helper that tries the ordered chain and keeps the branch’s broader provider-error detection. The fallback trigger list includes:
 - 'provider returned error'
 - '502' in error_msg
 - '503' in error_msg
@@ -120,8 +122,15 @@ Preserve the enhanced try/catch wrapper around provider.chat_with_retry that che
 - 'free tier' in error_msg (specific to your error)
 - 'exhausted' in error_msg (specific to quota exhaustion)
 
+When both config fields are present, keep the compatibility rule:
+- Try `fallback_model` first
+- Then try entries from `fallback_models` in order
+- Skip duplicates and skip the already-selected primary model
+
 **Quick validation**
-Configure fallback_model in config and test with a temporarily unavailable primary provider or quota-exhausted model.
+```bash
+pytest tests/agent/test_fallback_models.py tests/config/test_config_migration.py tests/cli/test_commands.py -q
+```
 
 ### 5. Provider retry plumbing and OpenAI compat request shape
 

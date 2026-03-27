@@ -69,6 +69,7 @@ class AgentLoop:
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
         fallback_model: str | None = None,
+        fallback_models: list[str] | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 
@@ -87,6 +88,7 @@ class AgentLoop:
         self.extra_read = extra_read or []
         self.extra_write = extra_write or []
         self.fallback_model = fallback_model
+        self.fallback_models = fallback_models or []
         self._start_time = time.time()
         self._last_usage: dict[str, int] = {}
 
@@ -100,6 +102,7 @@ class AgentLoop:
             bus=bus,
             model=self.model,
             fallback_model=self.fallback_model,
+            fallback_models=self.fallback_models,
             web_search_config=self.web_search_config,
             web_proxy=web_proxy,
             exec_config=self.exec_config,
@@ -179,6 +182,80 @@ class AgentLoop:
                 self._mcp_stack = None
         finally:
             self._mcp_connecting = False
+
+    @staticmethod
+    def _is_fallback_eligible_error(error: Exception) -> bool:
+        """Return True when the primary model failure should trigger fallback."""
+        error_msg = str(error).lower()
+        return (
+            "provider returned error" in error_msg
+            or "502" in error_msg
+            or "503" in error_msg
+            or "timeout" in error_msg
+            or "404" in error_msg
+            or "403" in error_msg
+            or "not found" in error_msg
+            or "invalid model" in error_msg
+            or "allocationquota" in error_msg
+            or "free tier" in error_msg
+            or "exhausted" in error_msg
+        )
+
+    def _ordered_fallback_models(self, primary_model: str) -> list[str]:
+        """Return de-duplicated fallback models in the order they should be tried."""
+        ordered: list[str] = []
+        seen = {primary_model}
+        for candidate in [self.fallback_model, *self.fallback_models]:
+            if not candidate or candidate in seen:
+                continue
+            seen.add(candidate)
+            ordered.append(candidate)
+        return ordered
+
+    async def _call_provider_with_fallbacks(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        model: str,
+        on_stream: Callable[[str], Awaitable[None]] | None,
+        on_retry: Callable[[int, int], None] | None,
+        filtered_stream: Callable[[str], Awaitable[None]],
+    ):
+        """Call the provider, trying configured fallback models in order on eligible failures."""
+        models_to_try = [model, *self._ordered_fallback_models(model)]
+        primary_error: Exception | None = None
+
+        for index, model_name in enumerate(models_to_try):
+            try:
+                if index > 0:
+                    logger.warning("Previous model failed, trying fallback model: {}", model_name)
+                if on_stream:
+                    return await self.provider.chat_stream_with_retry(
+                        messages=messages,
+                        tools=tools,
+                        model=model_name,
+                        on_content_delta=filtered_stream,
+                        on_retry=on_retry,
+                    )
+                return await self.provider.chat_with_retry(
+                    messages=messages,
+                    tools=tools,
+                    model=model_name,
+                    on_retry=on_retry,
+                )
+            except Exception as error:
+                if index == 0:
+                    primary_error = error
+                if not self._is_fallback_eligible_error(error) or index == len(models_to_try) - 1:
+                    if index > 0 and primary_error is not None:
+                        logger.error("Primary and fallback models failed; raising original error: {}", primary_error)
+                        raise primary_error
+                    raise
+
+        if primary_error is not None:
+            raise primary_error
+        raise RuntimeError("Fallback model resolution failed without a primary error")
 
     def _set_tool_context(
         self,
@@ -311,58 +388,16 @@ class AgentLoop:
             tool_defs = self.tools.get_definitions()
 
             try:
-                if on_stream:
-                    response = await self.provider.chat_stream_with_retry(
-                        messages=messages,
-                        tools=tool_defs,
-                        model=effective_model,
-                        on_content_delta=_filtered_stream,
-                        on_retry=_on_retry,
-                    )
-                else:
-                    response = await self.provider.chat_with_retry(
-                        messages=messages,
-                        tools=tool_defs,
-                        model=effective_model,
-                        on_retry=_on_retry,
-                    )
-            except Exception as e:
-                # Check if there's a fallback model and this is a provider error
-                error_msg = str(e).lower()
-                if (self.fallback_model and
-                    ('provider returned error' in error_msg or
-                     '502' in error_msg or
-                     '503' in error_msg or
-                     'timeout' in error_msg or
-                     '404' in error_msg or
-                     '403' in error_msg or
-                     'not found' in error_msg or
-                     'invalid model' in error_msg or
-                     'allocationquota' in error_msg or
-                     'free tier' in error_msg or
-                     'exhausted' in error_msg)):
-                    logger.warning("Primary model failed, trying fallback model: {}", self.fallback_model)
-                    try:
-                        if on_stream:
-                            response = await self.provider.chat_stream_with_retry(
-                                messages=messages,
-                                tools=tool_defs,
-                                model=self.fallback_model,
-                                on_content_delta=_filtered_stream,
-                                on_retry=_on_retry,
-                            )
-                        else:
-                            response = await self.provider.chat_with_retry(
-                                messages=messages,
-                                tools=tool_defs,
-                                model=self.fallback_model,
-                                on_retry=_on_retry,
-                            )
-                    except Exception as fallback_error:
-                        logger.error("Both primary and fallback models failed: {}", fallback_error)
-                        raise e  # Re-raise the original error if fallback also fails
-                else:
-                    raise e  # Re-raise the original error if no fallback or different error type
+                response = await self._call_provider_with_fallbacks(
+                    messages=messages,
+                    tools=tool_defs,
+                    model=effective_model,
+                    on_stream=on_stream,
+                    on_retry=_on_retry,
+                    filtered_stream=_filtered_stream,
+                )
+            except Exception:
+                raise
 
             usage = response.usage or {}
             self._last_usage = {

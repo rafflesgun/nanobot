@@ -433,6 +433,19 @@ def test_agent_passes_nested_workspace_restriction_config(mock_agent_runtime):
     assert kwargs["extra_write"] == ["/tmp/rw"]
 
 
+def test_agent_passes_ordered_fallback_models(mock_agent_runtime):
+    config = mock_agent_runtime["config"]
+    config.agents.defaults.fallback_model = "legacy-fallback"
+    config.agents.defaults.fallback_models = ["backup-a", "backup-b"]
+
+    result = runner.invoke(app, ["agent", "-m", "hello"])
+
+    assert result.exit_code == 0
+    kwargs = mock_agent_runtime["agent_loop_cls"].call_args.kwargs
+    assert kwargs["fallback_model"] == "legacy-fallback"
+    assert kwargs["fallback_models"] == ["backup-a", "backup-b"]
+
+
 def test_agent_config_sets_active_path(monkeypatch, tmp_path: Path) -> None:
     config_file = tmp_path / "instance" / "config.json"
     config_file.parent.mkdir(parents=True)
