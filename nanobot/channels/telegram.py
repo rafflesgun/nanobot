@@ -170,6 +170,20 @@ def _markdown_to_telegram_html(text: str) -> str:
 
 _SEND_MAX_RETRIES = 3
 _SEND_RETRY_BASE_DELAY = 0.5  # seconds, doubled each retry
+_STREAM_ROLLOVER_THRESHOLD = 200  # chars before limit to trigger rollover
+
+
+def _is_retryable_telegram_error(e: Exception) -> bool:
+    """Check if Telegram error should be retried.
+
+    Message_too_long is permanent - retrying won't help.
+    Network timeouts and transient errors should be retried.
+    """
+    from telegram.error import BadRequest
+
+    if not isinstance(e, BadRequest):
+        return True
+    return "Message_too_long" not in str(e)
 
 
 @dataclass
@@ -179,6 +193,7 @@ class _StreamBuf:
     message_id: int | None = None
     last_edit: float = 0.0
     thread_id: int | None = None
+    prev_message_ids: list[int] = field(default_factory=list)
 
 
 class TelegramConfig(Base):
@@ -612,6 +627,8 @@ class TelegramChannel(BaseChannel):
 
     async def _call_with_retry(self, fn, *args, **kwargs):
         """Call an async Telegram API function with retry on pool/network timeout and flood control."""
+        from telegram.error import BadRequest
+
         for attempt in range(1, _SEND_MAX_RETRIES + 1):
             try:
                 return await fn(*args, **kwargs)
@@ -635,6 +652,17 @@ class TelegramChannel(BaseChannel):
                 logger.warning(
                     "Telegram timeout (attempt {}/{}), retrying in {:.1f}s",
                     attempt, _SEND_MAX_RETRIES, delay,
+                )
+                await asyncio.sleep(delay)
+            except BadRequest as e:
+                if not _is_retryable_telegram_error(e):
+                    raise
+                if attempt == _SEND_MAX_RETRIES:
+                    raise
+                delay = _SEND_RETRY_BASE_DELAY * (2 ** (attempt - 1))
+                logger.warning(
+                    "Telegram BadRequest (attempt {}/{}), retrying in {:.1f}s: {}",
+                    attempt, _SEND_MAX_RETRIES, delay, e,
                 )
                 await asyncio.sleep(delay)
 
@@ -774,7 +802,10 @@ class TelegramChannel(BaseChannel):
             logger.exception("TTS generation or sending failed → falling back to text only")
 
     async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
-        """Progressive message editing: send on first delta, edit on subsequent ones."""
+        """Progressive message editing: send on first delta, edit on subsequent ones.
+
+        Handles message rollover when content exceeds Telegram's length limit.
+        """
         if not self._app:
             return
         meta = metadata or {}
@@ -794,11 +825,12 @@ class TelegramChannel(BaseChannel):
                     await self._app.bot.delete_message(chat_id=int_chat_id, message_id=thinking_msg_id)
                 except Exception as e:
                     logger.debug("Failed to delete thinking message after stream: {}", e)
+            target_message_id = buf.message_id
             try:
                 html = _markdown_to_telegram_html(buf.text)
                 await self._call_with_retry(
                     self._app.bot.edit_message_text,
-                    chat_id=int_chat_id, message_id=buf.message_id,
+                    chat_id=int_chat_id, message_id=target_message_id,
                     text=html, parse_mode="HTML",
                 )
             except Exception as e:
@@ -806,11 +838,11 @@ class TelegramChannel(BaseChannel):
                 try:
                     await self._call_with_retry(
                         self._app.bot.edit_message_text,
-                        chat_id=int_chat_id, message_id=buf.message_id,
+                        chat_id=int_chat_id, message_id=target_message_id,
                         text=buf.text,
                     )
-                except Exception:
-                    pass
+                except Exception as e2:
+                    logger.warning("Final stream edit failed: {}", e2)
             await self._maybe_send_tts(
                 chat_id=int_chat_id,
                 text=buf.text,
@@ -828,6 +860,9 @@ class TelegramChannel(BaseChannel):
 
         if not buf.text.strip():
             return
+
+        rollover_threshold = TELEGRAM_MAX_MESSAGE_LEN - _STREAM_ROLLOVER_THRESHOLD
+        needs_rollover = len(buf.text) > rollover_threshold and buf.message_id is not None
 
         now = time.monotonic()
         if buf.message_id is None:
@@ -852,16 +887,58 @@ class TelegramChannel(BaseChannel):
                 )
 
             try:
-                sent = await self._call_with_retry(
-                    self._app.bot.send_message,
-                    chat_id=int_chat_id, text=buf.text,
-                    reply_parameters=reply_params,
-                    **thread_kwargs,
-                )
-                buf.message_id = sent.message_id
-                buf.last_edit = now
+                if len(buf.text) > rollover_threshold:
+                    first_chunk = buf.text[:TELEGRAM_MAX_MESSAGE_LEN]
+                    remaining = buf.text[TELEGRAM_MAX_MESSAGE_LEN:]
+                    sent = await self._call_with_retry(
+                        self._app.bot.send_message,
+                        chat_id=int_chat_id,
+                        text=first_chunk,
+                        reply_parameters=reply_params,
+                        **thread_kwargs,
+                    )
+                    buf.prev_message_ids.append(sent.message_id)
+                    buf.text = remaining
+                    buf.message_id = sent.message_id
+                    buf.last_edit = now
+                else:
+                    sent = await self._call_with_retry(
+                        self._app.bot.send_message,
+                        chat_id=int_chat_id, text=buf.text,
+                        reply_parameters=reply_params,
+                        **thread_kwargs,
+                    )
+                    buf.message_id = sent.message_id
+                    buf.last_edit = now
             except Exception as e:
                 logger.warning("Stream initial send failed: {}", e)
+        elif needs_rollover:
+            try:
+                if len(buf.text) > TELEGRAM_MAX_MESSAGE_LEN:
+                    first_chunk = buf.text[:TELEGRAM_MAX_MESSAGE_LEN]
+                    remaining = buf.text[TELEGRAM_MAX_MESSAGE_LEN:]
+                    sent = await self._call_with_retry(
+                        self._app.bot.send_message,
+                        chat_id=int_chat_id,
+                        text=first_chunk,
+                        **thread_kwargs,
+                    )
+                    buf.prev_message_ids.append(buf.message_id)
+                    buf.prev_message_ids.append(sent.message_id)
+                    buf.text = remaining
+                    buf.message_id = sent.message_id
+                else:
+                    sent = await self._call_with_retry(
+                        self._app.bot.send_message,
+                        chat_id=int_chat_id,
+                        text=buf.text,
+                        **thread_kwargs,
+                    )
+                    buf.prev_message_ids.append(buf.message_id)
+                    buf.message_id = sent.message_id
+                buf.last_edit = now
+            except Exception as e:
+                logger.warning("Stream rollover send failed: {}", e)
         elif (now - buf.last_edit) >= self._STREAM_EDIT_INTERVAL:
             try:
                 await self._call_with_retry(
@@ -872,7 +949,7 @@ class TelegramChannel(BaseChannel):
                 buf.last_edit = now
             except Exception as e:
                 if not self._is_not_modified_error(e):
-                    pass
+                    logger.debug("Stream edit failed: {}", e)
 
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
