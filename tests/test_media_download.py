@@ -13,6 +13,7 @@ async def test_media_saved_in_workspace():
     config = AsyncMock()
     config.group_policy = "mention"
     config.token = "fake_token"
+    config.react_emoji = "👀"
     bus = AsyncMock()
     channel = TelegramChannel(config=config, bus=bus)
     channel._workspace_path = workspace
@@ -55,6 +56,7 @@ async def test_media_fallback_to_home():
     config = AsyncMock()
     config.group_policy = "mention"
     config.token = "fake_token"
+    config.react_emoji = "👀"
     bus = AsyncMock()
     channel = TelegramChannel(config=config, bus=bus)
     channel._workspace_path = None

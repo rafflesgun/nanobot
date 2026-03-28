@@ -59,7 +59,9 @@ class TelegramConfig(Base):
         None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
     )
     reply_to_message: bool = False  # If true, bot replies quote the original message
-    react_emoji: str = "👀"
+    react_emoji: str | list[str] = Field(
+        default_factory=lambda: ["⚡️", "👌", "👀", "🔥", "👍"]
+    )
     group_policy: Literal["open", "mention"] = "mention"  # "mention" responds when @mentioned or replied to, "open" responds to all
     connection_pool_size: int = 32
     pool_timeout: float = 5.0

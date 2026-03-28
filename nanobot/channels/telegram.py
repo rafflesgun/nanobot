@@ -39,15 +39,6 @@ TELEGRAM_REPLY_CONTEXT_MAX_LEN = TELEGRAM_MAX_MESSAGE_LEN  # Max length for repl
 FORWARD_DEBOUNCE_MS = 80
 
 
-# ACK reaction emojis pool
-TELEGRAM_ACK_REACTIONS = ["⚡️", "👌", "👀", "🔥", "👍"]
-
-
-def _random_ack_reaction() -> str:
-    """Return a random emoji from the ACK reactions pool."""
-    return random.choice(TELEGRAM_ACK_REACTIONS)
-
-
 def _strip_md(s: str) -> str:
     """Strip markdown inline formatting from text."""
     s = re.sub(r'\*\*(.+?)\*\*', r'\1', s)
@@ -198,7 +189,9 @@ class TelegramConfig(Base):
     allow_from: list[str] = Field(default_factory=list)
     proxy: str | None = None
     reply_to_message: bool = False
-    react_emoji: str = "👀"
+    react_emoji: str | list[str] = Field(
+        default_factory=lambda: ["⚡️", "👌", "👀", "🔥", "👍"]
+    )
     group_policy: Literal["open", "mention"] = "mention"
     connection_pool_size: int = 32
     pool_timeout: float = 5.0
@@ -1534,7 +1527,7 @@ class TelegramChannel(BaseChannel):
                     self._start_typing(comp_key, thread_id)
                 except TypeError:
                     self._start_typing(comp_key)
-                await self._add_reaction(str_chat_id, message.message_id, self.config.react_emoji)
+                await self._add_reaction(str_chat_id, message.message_id, self._pick_react_emoji())
             buf = self._media_group_buffers[key]
             if content and content != "[empty message]":
                 buf["contents"].append(content)
@@ -1548,7 +1541,7 @@ class TelegramChannel(BaseChannel):
             self._start_typing(comp_key, thread_id)
         except TypeError:
             self._start_typing(comp_key)
-        await self._add_reaction(str_chat_id, message.message_id, self.config.react_emoji)
+        await self._add_reaction(str_chat_id, message.message_id, self._pick_react_emoji())
 
         # Scope session per topic to isolate conversation context
         session_key = self._derive_topic_session_key(message)
@@ -1638,12 +1631,15 @@ class TelegramChannel(BaseChannel):
             self._media_group_tasks.pop(key, None)
 
     async def _add_ack_reaction(self, chat_id: int, message_id: int) -> None:
-        """Add a random emoji reaction to acknowledge message receipt (non-blocking)."""
+        """Add an emoji reaction to acknowledge message receipt (non-blocking)."""
         if not self._app:
             return
 
+        emoji = self._pick_react_emoji()
+        if not emoji:
+            return
+
         try:
-            emoji = _random_ack_reaction()
             if HAS_REACTION_TYPE:
                 await self._app.bot.set_message_reaction(
                     chat_id=chat_id,
@@ -1652,7 +1648,6 @@ class TelegramChannel(BaseChannel):
                     is_big=False
                 )
             else:
-                # Fallback for older versions
                 await self._app.bot.set_message_reaction(
                     chat_id=chat_id,
                     message_id=message_id,
@@ -1661,7 +1656,6 @@ class TelegramChannel(BaseChannel):
                 )
             logger.debug("Added ACK reaction {} to message {}", emoji, message_id)
         except Exception as e:
-            # Reactions might not be supported in all chats, so just log at debug level
             logger.debug("Failed to add ACK reaction to message {}: {}", message_id, e)
 
     async def _send_thinking_message(
@@ -1700,7 +1694,18 @@ class TelegramChannel(BaseChannel):
         if task and not task.done():
             task.cancel()
 
-    async def _add_reaction(self, chat_id: str, message_id: int, emoji: str) -> None:
+    def _pick_react_emoji(self) -> str | None:
+        """Pick an emoji from react_emoji config (random if list, None if empty/disabled)."""
+        react_emoji = self.config.react_emoji
+        if isinstance(react_emoji, str):
+            return react_emoji if react_emoji else None
+        if not react_emoji:
+            return None
+        if len(react_emoji) == 1:
+            return react_emoji[0]
+        return random.choice(react_emoji)
+
+    async def _add_reaction(self, chat_id: str, message_id: int, emoji: str | None) -> None:
         """Add emoji reaction to a message (best-effort, non-blocking)."""
         if not self._app or not emoji:
             return

@@ -16,7 +16,7 @@ understand intended behavior quickly.
 | Configured subagents via `spawn(subagent_id)` | ✅   | config/schema.py, cli/commands.py, agent/loop.py, agent/subagent.py, agent/tools/spawn.py | tests/agent/test_configured_subagents.py, tests/agent/test_task_cancel.py | named `agents.*` profiles inherit from `agents.defaults` |
 | Ordered fallback models on provider errors  | ✅     | agent/loop.py, config/schema.py, cli/commands.py, agent/subagent.py | tests/agent/test_fallback_models.py, tests/config/test_config_migration.py | `fallback_models: []` (list, tried in order) |
 | "Thinking…" placeholder (PM only)           | ✅     | channels/telegram.py → _send_thinking_message          | tests/test_thinking_message.py         | skipped when `is_group == True`               |
-| Typing indicator & ACK reaction             | ✅     | channels/telegram.py                                   | tests/test_typing_ack.py               | typing per chat+thread, reaction per msg      |
+| Typing indicator & ACK reaction             | ✅     | channels/telegram.py                                   | tests/test_typing_ack.py               | typing per chat+thread, `react_emoji` can be str or list |
 | Heartbeat results → DM / private only       | ✅     | cli/commands.py, heartbeat/service.py                  | test_heartbeat_service.py + targeted tests | skips negative IDs and topic sub-sessions  |
 | Heartbeat runs stateless by default         | ✅     | cli/commands.py, config/schema.py, agent/loop.py, heartbeat/service.py | tests/agent/test_heartbeat_service.py, tests/cli/test_commands.py | `heartbeat.keep_recent_messages = 0` |
 | Heartbeat session bounded by content+tail   | ✅     | cli/commands.py, session/manager.py                    | session history regressions            | `prune_by_content_length(4000)` + keep_recent |
@@ -171,7 +171,7 @@ Keep the list-based fallback config:
 pytest tests/agent/test_fallback_models.py tests/config/test_config_migration.py tests/cli/test_commands.py -q
 ```
 
-### 5. Provider retry plumbing and OpenAI compat request shape
+### 6. Provider retry plumbing and OpenAI compat request shape
 
 **Core behavior**
 - `OpenAICompatProvider` now sends only `max_completion_tokens` for OpenAI-compatible backends that reject simultaneous `max_tokens` + `max_completion_tokens`
@@ -195,7 +195,7 @@ Preserve the additive `on_retry` callback wiring in both retry helpers and the l
 pytest tests/providers/test_custom_provider.py tests/providers/test_litellm_kwargs.py tests/providers/test_provider_retry.py -q
 ```
 
-### 6. Heartbeat session bounding
+### 7. Heartbeat session bounding
 
 **Core behavior**
 - Gateway heartbeat now reuses the stable `heartbeat` session key
@@ -285,7 +285,41 @@ Do not regress local Telegram features such as topic routing, mention-only mode,
 pytest tests/channels/test_telegram_channel.py -q
 ```
 
-### 11. Fine-grained workspace allowlist for tools
+### 11. Configurable ACK reaction emoji
+
+**Core behavior**
+- `react_emoji` config now accepts both string and list formats
+- String `"👀"` → always use that fixed emoji
+- List `["⚡️", "👌", "👀"]` → randomly pick from list on each message
+- Single-item list `["🔥"]` → always use that emoji
+- Empty string `""` or empty list `[]` → disable ACK reaction entirely
+- Default: `["⚡️", "👌", "👀", "🔥", "👍"]` (matches previous random behavior)
+
+**Files to protect during conflicts**
+- `nanobot/config/schema.py` → TelegramConfig.react_emoji field
+- `nanobot/channels/telegram.py` → `_pick_react_emoji()`, `_add_ack_reaction()`
+
+**Resolution priority**
+Keep the union type `str | list[str]` for backward compatibility.  
+Preserve the helper method that normalizes string vs list selection.
+
+**Config example**
+```json
+{
+  "channels": {
+    "telegram": {
+      "reactEmoji": ["⚡️", "👌", "👀"]
+    }
+  }
+}
+```
+
+**Quick validation**
+```bash
+pytest tests/test_typing_ack.py tests/channels/test_telegram_config_loading.py -q
+```
+
+### 12. Fine-grained workspace allowlist for tools
 
 **Core behavior**
 - `tools.restrictToWorkspace` is now a nested object, not just a boolean
@@ -318,7 +352,7 @@ Do not drop the exec-side enforcement for allowed working directories, or shell 
 pytest tests/config/test_config_migration.py tests/tools/test_exec_security.py tests/tools/test_tool_validation.py tests/cli/test_commands.py -q
 ```
 
-### 12. Built-in ipinfo skill
+### 13. Built-in ipinfo skill
 
 **Core behavior**
 - Adds a built-in `ipinfo` skill for public IP and coarse geolocation lookup
@@ -338,7 +372,7 @@ Do not expand this phase into runtime code changes or new tool integrations.
 pytest tests/agent/test_builtin_skills.py -q
 ```
 
-### 13. /status shows session model override
+### 14. /status shows session model override
 
 **Core behavior**
 - `/status` command now displays the effective model for the current session
@@ -358,16 +392,17 @@ Keep the model_override parameter flowing from `loop._model_overrides.get(sessio
 pytest tests/cli/test_restart_command.py::TestRestartCommand::test_status_shows_model_override -v
 ```
 
-### 14–18. Other smaller features (summary)
+### 15–19. Other smaller features (summary)
 
 - Thinking draft message → PM only (`if is_group: return`)
 - Typing + ACK reaction → per composite key (chat+thread)
+- `react_emoji` config → string for fixed emoji, list for random selection from pool, empty string/list to disable
 - Heartbeat DM-only logic lives in `_pick_heartbeat_target()` inside `nanobot/cli/commands.py` (not `heartbeat/service.py`)
 - Skips topic sub-sessions and negative Telegram chat IDs
 - Heartbeat history is bounded pre/post run by content length and recent legal suffix
 - Media → `workspace/media/` when workspace configured
 
-### 15. Tool definitions caching (#2205)
+### 16. Tool definitions caching (#2205)
 
 **Core behavior**
 - Added caching to `ToolRegistry.get_definitions()` to prevent repeated traversal of tool sets and JSON schema construction during each iteration of the agent loop
@@ -387,7 +422,7 @@ Preserve the caching mechanism that improves performance by avoiding redundant s
 pytest tests/test_tool_registry_caching.py -v
 ```
 
-### 16. Incremental session saving (#2219)
+### 17. Incremental session saving (#2219)
 
 **Core behavior**
 - Implements incremental session saving for agent loops to prevent data loss when operations crash or get cancelled mid-process
@@ -408,7 +443,7 @@ Keep the incremental save functionality that protects against data loss during m
 pytest tests/test_loop_incremental_save.py -v
 ```
 
-### 17. Web search status after merge
+### 18. Web search status after merge
 
 **Core behavior**
 - The old local-only DuckDuckGo enhancement is no longer branch-specific

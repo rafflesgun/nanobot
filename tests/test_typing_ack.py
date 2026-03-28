@@ -13,6 +13,7 @@ async def test_ack_reaction_sent():
     config = AsyncMock()
     config.group_policy = "mention"
     config.token = "fake_token"
+    config.react_emoji = "👀"
     bus = AsyncMock()
     channel = TelegramChannel(config=config, bus=bus)
     channel._app = AsyncMock()
@@ -30,6 +31,7 @@ async def test_ack_reaction_with_thread():
     config = AsyncMock()
     config.group_policy = "mention"
     config.token = "fake_token"
+    config.react_emoji = "👀"
     bus = AsyncMock()
     channel = TelegramChannel(config=config, bus=bus)
     channel._app = AsyncMock()
@@ -49,22 +51,37 @@ async def test_ack_reaction_error_handling():
     config = AsyncMock()
     config.group_policy = "mention"
     config.token = "fake_token"
+    config.react_emoji = "👀"
     bus = AsyncMock()
     channel = TelegramChannel(config=config, bus=bus)
     channel._app = AsyncMock()
     channel._app.bot = AsyncMock()
     channel._app.bot.set_message_reaction = AsyncMock(side_effect=Exception("API Error"))
 
-    # Should not raise an exception even if API fails
     await channel._add_ack_reaction(chat_id=123456, message_id=789)
     
-    # Should have been called once despite error
     channel._app.bot.set_message_reaction.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_ack_reaction_still_random_when_fixed_emoji_is_empty():
-    """Explicit react_emoji='' should still allow the random ACK reaction path."""
+async def test_ack_reaction_disabled_when_empty_list():
+    """Empty react_emoji list should disable ACK reaction."""
+    channel = TelegramChannel(
+        config={"group_policy": "mention", "token": "fake_token", "allowFrom": ["*"], "react_emoji": []},
+        bus=AsyncMock(),
+    )
+    channel._app = AsyncMock()
+    channel._app.bot = AsyncMock()
+    channel._app.bot.set_message_reaction = AsyncMock()
+
+    await channel._add_ack_reaction(chat_id=123456, message_id=789)
+
+    channel._app.bot.set_message_reaction.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ack_reaction_disabled_when_empty_string():
+    """Empty react_emoji string should disable ACK reaction."""
     channel = TelegramChannel(
         config={"group_policy": "mention", "token": "fake_token", "allowFrom": ["*"], "react_emoji": ""},
         bus=AsyncMock(),
@@ -75,7 +92,46 @@ async def test_ack_reaction_still_random_when_fixed_emoji_is_empty():
 
     await channel._add_ack_reaction(chat_id=123456, message_id=789)
 
-    channel._app.bot.set_message_reaction.assert_called_once()
+    channel._app.bot.set_message_reaction.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ack_reaction_single_emoji():
+    """Single emoji in list should always use that emoji."""
+    channel = TelegramChannel(
+        config={"group_policy": "mention", "token": "fake_token", "allowFrom": ["*"], "react_emoji": ["🔥"]},
+        bus=AsyncMock(),
+    )
+    channel._app = AsyncMock()
+    channel._app.bot = AsyncMock()
+    channel._app.bot.set_message_reaction = AsyncMock()
+
+    await channel._add_ack_reaction(chat_id=123456, message_id=789)
+
+    call_args = channel._app.bot.set_message_reaction.call_args
+    reaction = call_args.kwargs.get('reaction')
+    assert reaction is not None
+    assert reaction[0].emoji == "🔥"
+
+
+@pytest.mark.asyncio
+async def test_ack_reaction_random_from_list():
+    """Multiple emojis should pick randomly from the list."""
+    emojis = ["⚡️", "👌", "👀"]
+    channel = TelegramChannel(
+        config={"group_policy": "mention", "token": "fake_token", "allowFrom": ["*"], "react_emoji": emojis},
+        bus=AsyncMock(),
+    )
+    channel._app = AsyncMock()
+    channel._app.bot = AsyncMock()
+    channel._app.bot.set_message_reaction = AsyncMock()
+
+    await channel._add_ack_reaction(chat_id=123456, message_id=789)
+
+    call_args = channel._app.bot.set_message_reaction.call_args
+    reaction = call_args.kwargs.get('reaction')
+    assert reaction is not None
+    assert reaction[0].emoji in emojis
 
 
 @pytest.mark.asyncio
