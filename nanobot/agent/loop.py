@@ -333,7 +333,17 @@ class AgentLoop:
         """Format tool calls as concise hint, e.g. 'web_search("query")'."""
         def _fmt(tc):
             args = (tc.arguments[0] if isinstance(tc.arguments, list) else tc.arguments) or {}
-            val = next(iter(args.values()), None) if isinstance(args, dict) else None
+            val = None
+            if isinstance(args, dict):
+                for key in ["command", "query", "task", "path", "url"]:
+                    if key in args and isinstance(args[key], str):
+                        val = args[key]
+                        break
+                if val is None:
+                    for v in args.values():
+                        if isinstance(v, str):
+                            val = v
+                            break
             if not isinstance(val, str):
                 return tc.name
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
@@ -545,11 +555,13 @@ class AgentLoop:
             try:
                 on_stream = on_stream_end = None
                 if msg.metadata.get("_wants_stream"):
+                    import uuid
+                    _stream_id = str(uuid.uuid4())
                     async def on_stream(delta: str) -> None:
                         meta = {
+                            **dict(msg.metadata or {}),
                             "_stream_delta": True,
-                            "message_thread_id": msg.metadata.get("message_thread_id"),
-                            "message_id": msg.metadata.get("message_id"),
+                            "_stream_id": _stream_id,
                         }
                         await self.bus.publish_outbound(OutboundMessage(
                             channel=msg.channel, chat_id=msg.chat_id,
@@ -558,10 +570,10 @@ class AgentLoop:
 
                     async def on_stream_end(*, resuming: bool = False) -> None:
                         meta = {
+                            **dict(msg.metadata or {}),
                             "_stream_end": True,
                             "_resuming": resuming,
-                            "message_thread_id": msg.metadata.get("message_thread_id"),
-                            "message_id": msg.metadata.get("message_id"),
+                            "_stream_id": _stream_id,
                         }
                         await self.bus.publish_outbound(OutboundMessage(
                             channel=msg.channel, chat_id=msg.chat_id,
