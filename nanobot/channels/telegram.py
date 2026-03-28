@@ -1179,7 +1179,7 @@ class TelegramChannel(BaseChannel):
                 getattr(media_file, "mime_type", None),
                 getattr(media_file, "file_name", None),
             )
-            media_dir = get_media_dir("telegram")
+            media_dir = get_media_dir("telegram", workspace=self._workspace_path)
             unique_id = getattr(media_file, "file_unique_id", media_file.file_id)
             file_path = media_dir / f"{unique_id}{ext}"
             await file.download_to_drive(str(file_path))

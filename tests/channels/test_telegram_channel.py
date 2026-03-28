@@ -649,7 +649,7 @@ async def test_download_message_media_returns_path_when_download_succeeds(
     media_dir.mkdir(parents=True)
     monkeypatch.setattr(
         "nanobot.channels.telegram.get_media_dir",
-        lambda channel=None: media_dir if channel else tmp_path / "media",
+        lambda channel=None, workspace=None: media_dir if channel else tmp_path / "media",
     )
 
     channel = TelegramChannel(
@@ -685,7 +685,7 @@ async def test_download_message_media_uses_file_unique_id_when_available(
     media_dir.mkdir(parents=True)
     monkeypatch.setattr(
         "nanobot.channels.telegram.get_media_dir",
-        lambda channel=None: media_dir if channel else tmp_path / "media",
+        lambda channel=None, workspace=None: media_dir if channel else tmp_path / "media",
     )
 
     downloaded: dict[str, str] = {}
@@ -734,7 +734,7 @@ async def test_on_message_attaches_reply_to_media_when_available(monkeypatch, tm
     media_dir.mkdir(parents=True)
     monkeypatch.setattr(
         "nanobot.channels.telegram.get_media_dir",
-        lambda channel=None: media_dir if channel else tmp_path / "media",
+        lambda channel=None, workspace=None: media_dir if channel else tmp_path / "media",
     )
 
     channel = TelegramChannel(
@@ -819,7 +819,7 @@ async def test_on_message_reply_to_caption_and_media(monkeypatch, tmp_path) -> N
     media_dir.mkdir(parents=True)
     monkeypatch.setattr(
         "nanobot.channels.telegram.get_media_dir",
-        lambda channel=None: media_dir if channel else tmp_path / "media",
+        lambda channel=None, workspace=None: media_dir if channel else tmp_path / "media",
     )
 
     channel = TelegramChannel(
@@ -1137,7 +1137,7 @@ async def test_text_joins_pending_media_group_buffer() -> None:
     media_dir = Path(tempfile.mkdtemp())
 
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr("nanobot.channels.telegram.get_media_dir", lambda channel=None: media_dir)
+        mp.setattr("nanobot.channels.telegram.get_media_dir", lambda channel=None, workspace=None: media_dir)
         await channel._on_message(
             _make_telegram_update(
                 caption="album",

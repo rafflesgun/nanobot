@@ -21,7 +21,7 @@ understand intended behavior quickly.
 | Heartbeat runs stateless by default         | ✅     | cli/commands.py, config/schema.py, agent/loop.py, heartbeat/service.py | tests/agent/test_heartbeat_service.py, tests/cli/test_commands.py | `heartbeat.keep_recent_messages = 0` |
 | Heartbeat session bounded by content+tail   | ✅     | cli/commands.py, session/manager.py                    | session history regressions            | `prune_by_content_length(4000)` + keep_recent |
 | Cron reminders are evaluator-biased to notify | ✅   | cli/commands.py, utils/evaluator.py                    | tests/cli/test_commands.py, tests/agent/test_evaluator.py | scheduled reminder context passed to evaluator |
-| Media downloads → workspace/media/          | ✅     | channels/telegram.py                                   | tests/test_media_download.py           | falls back to `~/.nanobot/media`              |
+| Media downloads → workspace/media/          | ✅     | channels/telegram.py, config/paths.py                  | tests/test_media_download.py, tests/test_simple_features.py | falls back to `~/.nanobot/media` when no workspace |
 | Built-in `ipinfo` skill                     | ✅     | skills/ipinfo/SKILL.md, skills/README.md               | tests/agent/test_builtin_skills.py     | requires `curl`, no API key                   |
 | OpenAI compat uses `max_completion_tokens` only | ✅  | providers/openai_compat_provider.py                    | tests/providers/test_litellm_kwargs.py | no duplicate `max_tokens` field               |
 | SDK retries disabled + surfaced to progress | ✅     | providers/base.py, providers/*, agent/loop.py         | tests/providers/test_provider_retry.py | provider SDK retries forced to `0`            |
@@ -397,10 +397,10 @@ pytest tests/cli/test_restart_command.py::TestRestartCommand::test_status_shows_
 - Thinking draft message → PM only (`if is_group: return`)
 - Typing + ACK reaction → per composite key (chat+thread)
 - `react_emoji` config → string for fixed emoji, list for random selection from pool, empty string/list to disable
+- Media downloads → `workspace/media/telegram/` when workspace is configured (accessible within workspace restrictions)
 - Heartbeat DM-only logic lives in `_pick_heartbeat_target()` inside `nanobot/cli/commands.py` (not `heartbeat/service.py`)
 - Skips topic sub-sessions and negative Telegram chat IDs
 - Heartbeat history is bounded pre/post run by content length and recent legal suffix
-- Media → `workspace/media/` when workspace configured
 
 ### 16. Tool definitions caching (#2205)
 

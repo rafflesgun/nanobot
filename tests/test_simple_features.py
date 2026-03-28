@@ -38,18 +38,23 @@ def test_topic_session_key_format():
 
 def test_media_path_selection():
     """Test media path selection logic"""
-    def get_media_path(workspace_path: Optional[Path]) -> Path:
-        if workspace_path:
-            return workspace_path / "media"
-        else:
-            return Path.home() / ".nanobot" / "media"
+    from nanobot.config.paths import get_media_dir, is_default_workspace
     
-    # With workspace
-    workspace = Path("/tmp/test_workspace")
-    assert get_media_path(workspace) == Path("/tmp/test_workspace/media")
+    # With workspace (non-default)
+    workspace = "/tmp/test_workspace"
+    assert not is_default_workspace(workspace)
+    media_path = get_media_dir(channel="telegram", workspace=workspace)
+    assert media_path == Path("/tmp/test_workspace/media/telegram")
     
-    # Without workspace
-    assert get_media_path(None) == Path.home() / ".nanobot" / "media"
+    # Without workspace (falls back to default)
+    default_media = get_media_dir(channel="telegram")
+    assert default_media == Path.home() / ".nanobot" / "media" / "telegram"
+    
+    # With default workspace (same as no workspace)
+    default_workspace = Path.home() / ".nanobot" / "workspace"
+    assert is_default_workspace(default_workspace)
+    media_with_default = get_media_dir(channel="telegram", workspace=str(default_workspace))
+    assert media_with_default == Path.home() / ".nanobot" / "media" / "telegram"
 
 
 def test_heartbeat_dm_filtering():

@@ -28,9 +28,17 @@ def get_logs_dir() -> Path:
     return get_runtime_subdir("logs")
 
 
-def get_media_dir(channel: str | None = None) -> Path:
-    """Get the media directory, optionally for a specific channel."""
-    base_dir = get_runtime_subdir("media")
+def get_media_dir(channel: str | None = None, workspace: str | Path | None = None) -> Path:
+    """Get the media directory, optionally for a specific channel.
+    
+    When workspace is provided and is not the default workspace, media goes to
+    workspace/media/ to ensure files are accessible within workspace restrictions.
+    Otherwise, falls back to ~/.nanobot/media/
+    """
+    if workspace is not None and not is_default_workspace(workspace):
+        base_dir = ensure_dir(Path(workspace).expanduser() / "media")
+    else:
+        base_dir = get_runtime_subdir("media")
     if channel:
         return ensure_dir(base_dir / channel)
     return base_dir
