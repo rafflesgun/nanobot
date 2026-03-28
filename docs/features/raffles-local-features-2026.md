@@ -398,6 +398,7 @@ pytest tests/cli/test_restart_command.py::TestRestartCommand::test_status_shows_
 - Typing + ACK reaction → per composite key (chat+thread)
 - `react_emoji` config → string for fixed emoji, list for random selection from pool, empty string/list to disable
 - Media downloads → `workspace/media/telegram/` when workspace is configured (accessible within workspace restrictions)
+- Telegram flood control retry → handles `RetryAfter` errors with automatic retry
 - Heartbeat DM-only logic lives in `_pick_heartbeat_target()` inside `nanobot/cli/commands.py` (not `heartbeat/service.py`)
 - Skips topic sub-sessions and negative Telegram chat IDs
 - Heartbeat history is bounded pre/post run by content length and recent legal suffix

@@ -18,7 +18,7 @@ try:
     HAS_REACTION_TYPE = True
 except ImportError:
     HAS_REACTION_TYPE = False
-from telegram.error import TimedOut
+from telegram.error import RetryAfter, TimedOut
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
@@ -606,10 +606,23 @@ class TelegramChannel(BaseChannel):
                 await self._send_text(chat_id, chunk, reply_params, thread_kwargs)
 
     async def _call_with_retry(self, fn, *args, **kwargs):
-        """Call an async Telegram API function with retry on pool/network timeout."""
+        """Call an async Telegram API function with retry on pool/network timeout and flood control."""
         for attempt in range(1, _SEND_MAX_RETRIES + 1):
             try:
                 return await fn(*args, **kwargs)
+            except RetryAfter as e:
+                if attempt == _SEND_MAX_RETRIES:
+                    raise
+                retry_after = e.retry_after
+                if isinstance(retry_after, int):
+                    delay = float(retry_after)
+                else:
+                    delay = retry_after.total_seconds() if retry_after else _SEND_RETRY_BASE_DELAY * (2 ** attempt)
+                logger.warning(
+                    "Telegram flood control (attempt {}/{}), retrying in {:.1f}s",
+                    attempt, _SEND_MAX_RETRIES, delay,
+                )
+                await asyncio.sleep(delay)
             except TimedOut:
                 if attempt == _SEND_MAX_RETRIES:
                     raise
