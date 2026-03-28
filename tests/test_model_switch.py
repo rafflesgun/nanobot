@@ -2,7 +2,7 @@
 
 import pytest
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.providers.base import LLMProvider, LLMResponse
@@ -17,12 +17,13 @@ async def test_model_show_current():
     provider.get_default_model.return_value = "gpt-4o"
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="OK", tool_calls=[], finish_reason="stop"))
 
-    loop = AgentLoop(
-        bus=bus,
-        provider=provider,
-        workspace=Path("/tmp/test"),
-        model="gpt-4o",
-    )
+    with patch("nanobot.agent.loop.load_model_overrides", return_value={}):
+        loop = AgentLoop(
+            bus=bus,
+            provider=provider,
+            workspace=Path("/tmp/test"),
+            model="gpt-4o",
+        )
     
     # Test the _handle_model_command method directly
     msg = AsyncMock()
@@ -30,7 +31,8 @@ async def test_model_show_current():
     msg.chat_id = "123"
     msg.metadata = {}
     
-    response = loop._handle_model_command(msg, "test:session", "/model")
+    with patch("nanobot.agent.loop.save_model_overrides"):
+        response = loop._handle_model_command(msg, "test:session", "/model")
     
     assert "Current model: `gpt-4o`" in response.content
     assert "session override" not in response.content  # Should not be an override
@@ -45,12 +47,13 @@ async def test_model_switch_and_use():
     provider.get_default_model.return_value = "gpt-4o"
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="OK", tool_calls=[], finish_reason="stop"))
 
-    loop = AgentLoop(
-        bus=bus,
-        provider=provider,
-        workspace=Path("/tmp/test"),
-        model="gpt-4o",
-    )
+    with patch("nanobot.agent.loop.load_model_overrides", return_value={}):
+        loop = AgentLoop(
+            bus=bus,
+            provider=provider,
+            workspace=Path("/tmp/test"),
+            model="gpt-4o",
+        )
     
     session_key = "test:session"
 
@@ -60,7 +63,8 @@ async def test_model_switch_and_use():
     msg.chat_id = "123"
     msg.metadata = {}
     
-    loop._handle_model_command(msg, session_key, "/model claude-3.5-sonnet")
+    with patch("nanobot.agent.loop.save_model_overrides"):
+        loop._handle_model_command(msg, session_key, "/model claude-3.5-sonnet")
 
     assert loop._model_overrides[session_key] == "claude-3.5-sonnet"
 
@@ -85,12 +89,13 @@ async def test_model_revert_to_default():
     provider.get_default_model.return_value = "gpt-4o"
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="OK", tool_calls=[], finish_reason="stop"))
 
-    loop = AgentLoop(
-        bus=bus,
-        provider=provider,
-        workspace=Path("/tmp/test"),
-        model="gpt-4o",
-    )
+    with patch("nanobot.agent.loop.load_model_overrides", return_value={}):
+        loop = AgentLoop(
+            bus=bus,
+            provider=provider,
+            workspace=Path("/tmp/test"),
+            model="gpt-4o",
+        )
     
     session_key = "test:session"
 
@@ -103,7 +108,8 @@ async def test_model_revert_to_default():
     msg.chat_id = "123"
     msg.metadata = {}
     
-    loop._handle_model_command(msg, session_key, "/model reset")
+    with patch("nanobot.agent.loop.save_model_overrides"):
+        loop._handle_model_command(msg, session_key, "/model reset")
 
     assert session_key not in loop._model_overrides
 
@@ -117,12 +123,13 @@ async def test_model_override_with_backticks():
     provider.get_default_model.return_value = "gpt-4o"
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="OK", tool_calls=[], finish_reason="stop"))
 
-    loop = AgentLoop(
-        bus=bus,
-        provider=provider,
-        workspace=Path("/tmp/test"),
-        model="gpt-4o",
-    )
+    with patch("nanobot.agent.loop.load_model_overrides", return_value={}):
+        loop = AgentLoop(
+            bus=bus,
+            provider=provider,
+            workspace=Path("/tmp/test"),
+            model="gpt-4o",
+        )
     
     session_key = "test:session"
 
@@ -132,7 +139,8 @@ async def test_model_override_with_backticks():
     msg.chat_id = "123"
     msg.metadata = {}
     
-    loop._handle_model_command(msg, session_key, "/model `claude-3.5-sonnet`")
+    with patch("nanobot.agent.loop.save_model_overrides"):
+        loop._handle_model_command(msg, session_key, "/model `claude-3.5-sonnet`")
 
     assert loop._model_overrides[session_key] == "claude-3.5-sonnet"
 
@@ -146,12 +154,13 @@ async def test_model_override_in_process_message():
     provider.get_default_model.return_value = "gpt-4o"
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="OK", tool_calls=[], finish_reason="stop"))
 
-    loop = AgentLoop(
-        bus=bus,
-        provider=provider,
-        workspace=Path("/tmp/test"),
-        model="gpt-4o",
-    )
+    with patch("nanobot.agent.loop.load_model_overrides", return_value={}):
+        loop = AgentLoop(
+            bus=bus,
+            provider=provider,
+            workspace=Path("/tmp/test"),
+            model="gpt-4o",
+        )
     
     # Simulate processing a /model command message
     msg = AsyncMock()
@@ -163,7 +172,8 @@ async def test_model_override_in_process_message():
     
     # This should trigger the model command handling logic
     # We'll test the actual _process_message flow
-    response = await loop._process_message(msg, session_key="test:session")
+    with patch("nanobot.agent.loop.save_model_overrides"):
+        response = await loop._process_message(msg, session_key="test:session")
     
     # The response should contain confirmation of the model switch
     assert response is not None

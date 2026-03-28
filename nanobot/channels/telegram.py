@@ -27,7 +27,7 @@ from io import BytesIO
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.paths import get_media_dir
+from nanobot.config.paths import get_media_dir, load_tts_overrides, save_tts_overrides
 from nanobot.config.schema import Base, TTSConfig as SchemaTTSConfig
 from nanobot.security.network import validate_url_target
 from nanobot.tts.manager import TTSManager
@@ -255,8 +255,8 @@ class TelegramChannel(BaseChannel):
         # TTS manager initialization
         self.tts_manager = TTSManager(config.tts)
 
-        # Per-chat TTS overrides (for /tts command)
-        self._chat_tts_overrides: dict[str, dict] = {}
+        # Per-chat TTS overrides (for /tts command) - persisted across restarts
+        self._chat_tts_overrides: dict[str, dict] = load_tts_overrides()
 
         # Per-chat trace toggle (runtime-only, resets on restart).
         # When True, intermediate thinking/tool-hint progress messages are
@@ -921,12 +921,14 @@ class TelegramChannel(BaseChannel):
             if scope_key not in self._chat_tts_overrides:
                 self._chat_tts_overrides[scope_key] = {}
             self._chat_tts_overrides[scope_key]["enabled"] = True
+            save_tts_overrides(self._chat_tts_overrides)
             await update.message.reply_text("🔊 TTS enabled for this chat/topic.")
             
         elif command == "off":
             if scope_key not in self._chat_tts_overrides:
                 self._chat_tts_overrides[scope_key] = {}
             self._chat_tts_overrides[scope_key]["enabled"] = False
+            save_tts_overrides(self._chat_tts_overrides)
             await update.message.reply_text("🔇 TTS disabled for this chat/topic.")
             
         elif command == "status":
@@ -1044,6 +1046,7 @@ class TelegramChannel(BaseChannel):
             if scope_key not in self._chat_tts_overrides:
                 self._chat_tts_overrides[scope_key] = {}
             self._chat_tts_overrides[scope_key]["voice"] = new_voice
+            save_tts_overrides(self._chat_tts_overrides)
             await update.message.reply_text(f"🎙️ Voice changed to: {new_voice}")
             
         elif command == "provider" and len(args) > 1:
@@ -1053,6 +1056,7 @@ class TelegramChannel(BaseChannel):
                 if scope_key not in self._chat_tts_overrides:
                     self._chat_tts_overrides[scope_key] = {}
                 self._chat_tts_overrides[scope_key]["provider"] = new_provider
+                save_tts_overrides(self._chat_tts_overrides)
                 await update.message.reply_text(f"🔄 TTS provider changed to: {new_provider}")
             else:
                 await update.message.reply_text("❌ Invalid provider. Use 'edge', 'openai', or 'riva'.")

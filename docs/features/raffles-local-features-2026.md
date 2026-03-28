@@ -80,13 +80,16 @@ Default should stay `"mention"`.
 - `/model gpt-4o` → set for this session
 - `/model reset` → revert to default (also accepts `/model default` as alias)
 - Stored in `AgentLoop._model_overrides[session_key]`
+- **Persisted** to `~/.nanobot/overrides.json` and loaded on startup
 
 **Files**
 - agent/loop.py → _model_overrides, _handle_model_command, _run_agent_loop
+- config/paths.py → load_model_overrides, save_model_overrides
 
 **Resolution priority**
 Keep `_model_overrides` dict + `effective_model = model_override or self.model`.
 Reset keyword is `reset` (not `default`).
+Overrides persist across restarts.
 
 ### 4. Configured subagents via spawn
 
@@ -399,6 +402,7 @@ pytest tests/cli/test_restart_command.py::TestRestartCommand::test_status_shows_
 - `react_emoji` config → string for fixed emoji, list for random selection from pool, empty string/list to disable
 - Media downloads → `workspace/media/telegram/` when workspace is configured (accessible within workspace restrictions)
 - Telegram flood control retry → handles `RetryAfter` errors with automatic retry
+- Model/TTS overrides → persisted to `~/.nanobot/overrides.json`, loaded on startup
 - Heartbeat DM-only logic lives in `_pick_heartbeat_target()` inside `nanobot/cli/commands.py` (not `heartbeat/service.py`)
 - Skips topic sub-sessions and negative Telegram chat IDs
 - Heartbeat history is bounded pre/post run by content length and recent legal suffix

@@ -28,6 +28,7 @@ from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.bus.queue import MessageBus
+from nanobot.config.paths import load_model_overrides, save_model_overrides
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.stats import StatsManager
@@ -121,7 +122,7 @@ class AgentLoop:
         self._mcp_connected = False
         self._mcp_connecting = False
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
-        self._model_overrides: dict[str, str] = {}  # session_key -> model override
+        self._model_overrides: dict[str, str] = load_model_overrides()  # session_key -> model override (persisted)
         self._background_tasks: list[asyncio.Task] = []
         self._session_locks: dict[str, asyncio.Lock] = {}
         # NANOBOT_MAX_CONCURRENT_REQUESTS: <=0 means unlimited; default 3.
@@ -780,6 +781,7 @@ class AgentLoop:
         if model_arg.lower() == "reset":
             removed = self._model_overrides.pop(session_key, None)
             if removed:
+                save_model_overrides(self._model_overrides)
                 return OutboundMessage(
                     channel=msg.channel, chat_id=msg.chat_id,
                     content=f"🔄 Model reset to default: `{self.model}`",
@@ -794,6 +796,7 @@ class AgentLoop:
         # /model <model-id> — switch model
         new_model = model_arg.strip("`")
         self._model_overrides[session_key] = new_model
+        save_model_overrides(self._model_overrides)
         logger.info("Model switched to '{}' for session {}", new_model, session_key)
         return OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id,

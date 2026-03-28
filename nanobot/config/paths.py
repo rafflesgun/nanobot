@@ -1,11 +1,15 @@
 """Path utilities for nanobot configuration and data directories."""
 
+import json
+import logging
 from pathlib import Path
 
 from nanobot.config.loader import get_config_path
 from nanobot.utils.helpers import ensure_dir, get_workspace_path
 
 __all__ = ["get_workspace_path"]
+
+logger = logging.getLogger(__name__)
 
 
 def get_data_dir() -> Path:
@@ -42,6 +46,62 @@ def get_media_dir(channel: str | None = None, workspace: str | Path | None = Non
     if channel:
         return ensure_dir(base_dir / channel)
     return base_dir
+
+
+def get_overrides_file() -> Path:
+    """Get the overrides persistence file path."""
+    return get_data_dir() / "overrides.json"
+
+
+def load_overrides() -> dict:
+    """Load persisted overrides from disk."""
+    overrides_file = get_overrides_file()
+    if not overrides_file.exists():
+        return {"model_overrides": {}, "tts_overrides": {}}
+    try:
+        data = json.loads(overrides_file.read_text(encoding="utf-8"))
+        return {
+            "model_overrides": data.get("model_overrides", {}),
+            "tts_overrides": data.get("tts_overrides", {}),
+        }
+    except Exception:
+        return {"model_overrides": {}, "tts_overrides": {}}
+
+
+def save_overrides(overrides: dict) -> None:
+    """Persist overrides to disk."""
+    overrides_file = get_overrides_file()
+    try:
+        overrides_file.write_text(
+            json.dumps(overrides, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception as e:
+        logger.warning("Failed to save overrides: {}", e)
+
+
+def load_model_overrides() -> dict[str, str]:
+    """Load model overrides from disk."""
+    return load_overrides().get("model_overrides", {})
+
+
+def save_model_overrides(model_overrides: dict[str, str]) -> None:
+    """Save model overrides to disk."""
+    overrides = load_overrides()
+    overrides["model_overrides"] = model_overrides
+    save_overrides(overrides)
+
+
+def load_tts_overrides() -> dict[str, dict]:
+    """Load TTS overrides from disk."""
+    return load_overrides().get("tts_overrides", {})
+
+
+def save_tts_overrides(tts_overrides: dict[str, dict]) -> None:
+    """Save TTS overrides to disk."""
+    overrides = load_overrides()
+    overrides["tts_overrides"] = tts_overrides
+    save_overrides(overrides)
 
 
 def is_default_workspace(workspace: str | Path | None) -> bool:
