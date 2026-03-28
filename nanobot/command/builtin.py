@@ -26,7 +26,9 @@ async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
     sub_cancelled = await loop.subagents.cancel_by_session(msg.session_key)
     total = cancelled + sub_cancelled
     content = f"Stopped {total} task(s)." if total else "No active task to stop."
-    return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=content)
+    # Preserve topic thread context so the reply stays in the correct topic
+    metadata = {"message_thread_id": msg.metadata.get("message_thread_id")}
+    return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=metadata)
 
 
 async def cmd_restart(ctx: CommandContext) -> OutboundMessage:
@@ -38,7 +40,9 @@ async def cmd_restart(ctx: CommandContext) -> OutboundMessage:
         os.execv(sys.executable, [sys.executable, "-m", "nanobot"] + sys.argv[1:])
 
     asyncio.create_task(_do_restart())
-    return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="Restarting...")
+    # Preserve topic thread context so the reply stays in the correct topic
+    metadata = {"message_thread_id": msg.metadata.get("message_thread_id")}
+    return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="Restarting...", metadata=metadata)
 
 
 async def cmd_status(ctx: CommandContext) -> OutboundMessage:
@@ -53,6 +57,8 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
     if ctx_est <= 0:
         ctx_est = loop._last_usage.get("prompt_tokens", 0)
     model_override = loop._model_overrides.get(ctx.key)
+    # Preserve topic thread context so the reply stays in the correct topic
+    metadata = {"render_as": "text", "message_thread_id": ctx.msg.metadata.get("message_thread_id")}
     return OutboundMessage(
         channel=ctx.msg.channel,
         chat_id=ctx.msg.chat_id,
@@ -66,7 +72,7 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
             context_tokens_estimate=ctx_est,
             model_override=model_override,
         ),
-        metadata={"render_as": "text"},
+        metadata=metadata,
     )
 
 
@@ -80,9 +86,11 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     loop.sessions.invalidate(session.key)
     if snapshot:
         loop._schedule_background(loop.memory_consolidator.archive_messages(snapshot))
+    # Preserve topic thread context so the reply stays in the correct topic
+    metadata = {"message_thread_id": ctx.msg.metadata.get("message_thread_id")}
     return OutboundMessage(
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
-        content="New session started.",
+        content="New session started.", metadata=metadata,
     )
 
 
@@ -96,11 +104,13 @@ async def cmd_help(ctx: CommandContext) -> OutboundMessage:
         "/status — Show bot status",
         "/help — Show available commands",
     ]
+    # Preserve topic thread context so the reply stays in the correct topic
+    metadata = {"render_as": "text", "message_thread_id": ctx.msg.metadata.get("message_thread_id")}
     return OutboundMessage(
         channel=ctx.msg.channel,
         chat_id=ctx.msg.chat_id,
         content="\n".join(lines),
-        metadata={"render_as": "text"},
+        metadata=metadata,
     )
 
 
