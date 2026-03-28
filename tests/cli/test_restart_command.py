@@ -188,3 +188,21 @@ class TestRestartCommand:
 
         assert response is not None
         assert response.metadata == {"render_as": "text"}
+
+    @pytest.mark.asyncio
+    async def test_status_shows_model_override(self):
+        """Verify /status shows session model override when set."""
+        loop, _bus = _make_loop()
+        session = MagicMock()
+        session.get_history.return_value = []
+        loop.sessions.get_or_create.return_value = session
+        loop.subagents.get_running_count.return_value = 0
+        loop._model_overrides["telegram:c1"] = "gpt-4o"
+
+        response = await loop._process_message(
+            InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/status")
+        )
+
+        assert response is not None
+        assert "gpt-4o" in response.content
+        assert "default: test-model" in response.content

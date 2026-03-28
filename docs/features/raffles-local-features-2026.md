@@ -30,6 +30,7 @@ understand intended behavior quickly.
 | **TTS voice notes (Edge + OpenAI + Riva)**  | ✅     | providers/tts.py, tts/manager.py, channels/telegram.py | tests/test_tts.py (new)                | `tts.enabled = false` (default)               |
 | **/trace command - AI thinking visibility** | ✅     | channels/telegram.py                                   | tests/test_trace_command_additional.py | `_trace_enabled[chat_id] = false` (default)   |
 | **/stats command - token usage visibility** | ✅     | channels/telegram.py, utils/stats.py                   | tests/test_telegram_stats_command.py   | `/stats`, `/stats topic`, `/stats all`          |
+| **/status shows session model override**   | ✅     | command/builtin.py, utils/helpers.py                   | tests/cli/test_restart_command.py      | shows `gpt-4o (default: claude-opus-4)` when overridden |
 | **Commands enhanced for topic support**     | ✅     | channels/telegram.py, agent/loop.py                    | manual                                 | `/new`, `/stop`, `/model`, `/stats`, `/tts`, `/trace` |
 | **Tool definitions caching (#2205)**        | ✅     | agent/tools/registry.py                                | tests/test_tool_registry_caching.py    | `_definitions_cache` invalidated on reg/unreg |
 | **Incremental session saving (#2219)**      | ✅     | agent/loop.py, agent/subagent.py                       | tests/test_loop_incremental_save.py    | save offset tracks persisted content          |
@@ -337,7 +338,27 @@ Do not expand this phase into runtime code changes or new tool integrations.
 pytest tests/agent/test_builtin_skills.py -q
 ```
 
-### 13–17. Other smaller features (summary)
+### 13. /status shows session model override
+
+**Core behavior**
+- `/status` command now displays the effective model for the current session
+- When a model override is set via `/model <model-id>`, status shows both the override and the default
+- Format: `🧠 Model: gpt-4o (default: anthropic/claude-opus-4-5)` when overridden
+- Format: `🧠 Model: anthropic/claude-opus-4-5` when using default
+
+**Files to protect during conflicts**
+- nanobot/command/builtin.py → cmd_status passes model_override to build_status_content
+- nanobot/utils/helpers.py → build_status_content accepts and displays model_override parameter
+
+**Resolution priority**
+Keep the model_override parameter flowing from `loop._model_overrides.get(session_key)` through to the status output.
+
+**Quick validation**
+```bash
+pytest tests/cli/test_restart_command.py::TestRestartCommand::test_status_shows_model_override -v
+```
+
+### 14–18. Other smaller features (summary)
 
 - Thinking draft message → PM only (`if is_group: return`)
 - Typing + ACK reaction → per composite key (chat+thread)
@@ -346,7 +367,7 @@ pytest tests/agent/test_builtin_skills.py -q
 - Heartbeat history is bounded pre/post run by content length and recent legal suffix
 - Media → `workspace/media/` when workspace configured
 
-### 14. Tool definitions caching (#2205)
+### 15. Tool definitions caching (#2205)
 
 **Core behavior**
 - Added caching to `ToolRegistry.get_definitions()` to prevent repeated traversal of tool sets and JSON schema construction during each iteration of the agent loop
@@ -366,7 +387,7 @@ Preserve the caching mechanism that improves performance by avoiding redundant s
 pytest tests/test_tool_registry_caching.py -v
 ```
 
-### 15. Incremental session saving (#2219)
+### 16. Incremental session saving (#2219)
 
 **Core behavior**
 - Implements incremental session saving for agent loops to prevent data loss when operations crash or get cancelled mid-process
@@ -387,7 +408,7 @@ Keep the incremental save functionality that protects against data loss during m
 pytest tests/test_loop_incremental_save.py -v
 ```
 
-### 12. Web search status after merge
+### 17. Web search status after merge
 
 **Core behavior**
 - The old local-only DuckDuckGo enhancement is no longer branch-specific

@@ -52,15 +52,19 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
         pass
     if ctx_est <= 0:
         ctx_est = loop._last_usage.get("prompt_tokens", 0)
+    model_override = loop._model_overrides.get(ctx.key)
     return OutboundMessage(
         channel=ctx.msg.channel,
         chat_id=ctx.msg.chat_id,
         content=build_status_content(
-            version=__version__, model=loop.model,
-            start_time=loop._start_time, last_usage=loop._last_usage,
+            version=__version__,
+            model=loop.model,
+            start_time=loop._start_time,
+            last_usage=loop._last_usage,
             context_window_tokens=loop.context_window_tokens,
             session_msg_count=len(session.get_history(max_messages=0)),
             context_tokens_estimate=ctx_est,
+            model_override=model_override,
         ),
         metadata={"render_as": "text"},
     )

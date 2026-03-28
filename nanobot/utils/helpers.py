@@ -243,6 +243,7 @@ def build_status_content(
     context_window_tokens: int,
     session_msg_count: int,
     context_tokens_estimate: int,
+    model_override: str | None = None,
 ) -> str:
     """Build a human-readable runtime status snapshot."""
     uptime_s = int(time.time() - start_time)
@@ -257,9 +258,12 @@ def build_status_content(
     ctx_pct = int((context_tokens_estimate / ctx_total) * 100) if ctx_total > 0 else 0
     ctx_used_str = f"{context_tokens_estimate // 1000}k" if context_tokens_estimate >= 1000 else str(context_tokens_estimate)
     ctx_total_str = f"{ctx_total // 1024}k" if ctx_total > 0 else "n/a"
+    model_line = f"\U0001f9e0 Model: {model_override or model}"
+    if model_override and model_override != model:
+        model_line += f" (default: {model})"
     return "\n".join([
         f"\U0001f408 nanobot v{version}",
-        f"\U0001f9e0 Model: {model}",
+        model_line,
         f"\U0001f4ca Tokens: {last_in} in / {last_out} out",
         f"\U0001f4da Context: {ctx_used_str}/{ctx_total_str} ({ctx_pct}%)",
         f"\U0001f4ac Session: {session_msg_count} messages",
