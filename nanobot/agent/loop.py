@@ -69,7 +69,6 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
-        fallback_model: str | None = None,
         fallback_models: list[str] | None = None,
         agents_config: "Any" = None,
         provider_factory: AbcCallable[[Any], LLMProvider] | None = None,
@@ -90,7 +89,6 @@ class AgentLoop:
         self.restrict_to_workspace = restrict_to_workspace
         self.extra_read = extra_read or []
         self.extra_write = extra_write or []
-        self.fallback_model = fallback_model
         self.fallback_models = fallback_models or []
         self.agents_config = agents_config
         self.provider_factory = provider_factory
@@ -106,7 +104,6 @@ class AgentLoop:
             workspace=workspace,
             bus=bus,
             model=self.model,
-            fallback_model=self.fallback_model,
             fallback_models=self.fallback_models,
             agents_config=self.agents_config,
             provider_factory=self.provider_factory,
@@ -212,7 +209,7 @@ class AgentLoop:
         """Return de-duplicated fallback models in the order they should be tried."""
         ordered: list[str] = []
         seen = {primary_model}
-        for candidate in [self.fallback_model, *self.fallback_models]:
+        for candidate in self.fallback_models:
             if not candidate or candidate in seen:
                 continue
             seen.add(candidate)

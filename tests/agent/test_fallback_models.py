@@ -7,7 +7,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import GenerationSettings, LLMResponse
 
 
-def _make_loop(tmp_path, *, fallback_model=None, fallback_models=None) -> AgentLoop:
+def _make_loop(tmp_path, *, fallback_models=None) -> AgentLoop:
     provider = MagicMock()
     provider.get_default_model.return_value = "primary-model"
     provider.generation = GenerationSettings(max_tokens=0)
@@ -17,7 +17,6 @@ def _make_loop(tmp_path, *, fallback_model=None, fallback_models=None) -> AgentL
         provider=provider,
         workspace=tmp_path,
         model="primary-model",
-        fallback_model=fallback_model,
         fallback_models=fallback_models,
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
@@ -28,8 +27,7 @@ def _make_loop(tmp_path, *, fallback_model=None, fallback_models=None) -> AgentL
 async def test_process_direct_tries_ordered_fallback_models_until_one_succeeds(tmp_path) -> None:
     loop = _make_loop(
         tmp_path,
-        fallback_model="legacy-fallback",
-        fallback_models=["second-fallback", "third-fallback"],
+        fallback_models=["legacy-fallback", "second-fallback", "third-fallback"],
     )
 
     seen_models: list[str] = []
@@ -60,8 +58,7 @@ async def test_process_direct_tries_ordered_fallback_models_until_one_succeeds(t
 async def test_process_direct_does_not_fallback_on_non_provider_error(tmp_path) -> None:
     loop = _make_loop(
         tmp_path,
-        fallback_model="legacy-fallback",
-        fallback_models=["second-fallback"],
+        fallback_models=["legacy-fallback", "second-fallback"],
     )
 
     seen_models: list[str] = []

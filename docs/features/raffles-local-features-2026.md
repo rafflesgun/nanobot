@@ -14,7 +14,7 @@ understand intended behavior quickly.
 | Telegram groups → mention-only mode         | ✅     | channels/telegram.py                                   | manual + group_policy test             | `group_policy = "mention"` (default)          |
 | Group commands via @mention                 | ✅     | channels/telegram.py → _on_message                     | manual                                 | `@BotName /command` → text message path       |
 | Configured subagents via `spawn(subagent_id)` | ✅   | config/schema.py, cli/commands.py, agent/loop.py, agent/subagent.py, agent/tools/spawn.py | tests/agent/test_configured_subagents.py, tests/agent/test_task_cancel.py | named `agents.*` profiles inherit from `agents.defaults` |
-| Ordered fallback models on provider errors  | ✅     | agent/loop.py, config/schema.py, cli/commands.py, agent/subagent.py | tests/agent/test_fallback_models.py, tests/config/test_config_migration.py | `fallback_model: null`, `fallback_models: []` |
+| Ordered fallback models on provider errors  | ✅     | agent/loop.py, config/schema.py, cli/commands.py, agent/subagent.py | tests/agent/test_fallback_models.py, tests/config/test_config_migration.py | `fallback_models: []` (list, tried in order) |
 | "Thinking…" placeholder (PM only)           | ✅     | channels/telegram.py → _send_thinking_message          | tests/test_thinking_message.py         | skipped when `is_group == True`               |
 | Typing indicator & ACK reaction             | ✅     | channels/telegram.py                                   | tests/test_typing_ack.py               | typing per chat+thread, reaction per msg      |
 | Heartbeat results → DM / private only       | ✅     | cli/commands.py, heartbeat/service.py                  | test_heartbeat_service.py + targeted tests | skips negative IDs and topic sub-sessions  |
@@ -116,8 +116,8 @@ pytest tests/agent/test_configured_subagents.py tests/agent/test_task_cancel.py 
 ### 5. Ordered fallback models on provider errors
 
 **Core behavior**
-- Configure `fallback_model` in agent defaults to specify the legacy first fallback when the primary fails
-- Configure `fallback_models` to add more fallback models that are tried in order after `fallback_model`
+- Configure `fallback_models` as an ordered list of models to try when the primary fails
+- Models are tried in the order they appear in the list
 - The runtime de-duplicates the chain, so repeated model names are skipped automatically
 - Automatically activates when the primary model encounters provider errors including:
   - 502/503 errors (service temporarily unavailable)
@@ -131,13 +131,13 @@ pytest tests/agent/test_configured_subagents.py tests/agent/test_task_cancel.py 
 - Preserves the original primary error if the whole fallback chain fails
 
 **Files**
-- nanobot/config/schema.py → AgentDefaults.fallback_model + AgentDefaults.fallback_models
+- nanobot/config/schema.py → AgentDefaults.fallback_models (list[str])
 - nanobot/agent/loop.py → ordered fallback chain helper + loop-level failover execution
-- nanobot/cli/commands.py → wiring of fallback_model and fallback_models to AgentLoop
+- nanobot/cli/commands.py → wiring of fallback_models to AgentLoop
 - nanobot/agent/subagent.py → SubagentManager keeps the same fallback config surface
 
 **Resolution priority**
-Preserve the loop-level fallback helper that tries the ordered chain and keeps the branch’s broader provider-error detection. The fallback trigger list includes:
+Preserve the loop-level fallback helper that tries the ordered chain and keeps the branch's broader provider-error detection. The fallback trigger list includes:
 - 'provider returned error'
 - '502' in error_msg
 - '503' in error_msg
@@ -150,10 +150,20 @@ Preserve the loop-level fallback helper that tries the ordered chain and keeps t
 - 'free tier' in error_msg (specific to your error)
 - 'exhausted' in error_msg (specific to quota exhaustion)
 
-When both config fields are present, keep the compatibility rule:
-- Try `fallback_model` first
-- Then try entries from `fallback_models` in order
+Keep the list-based fallback config:
+- `fallback_models` is a list of model names tried in order
 - Skip duplicates and skip the already-selected primary model
+
+**Config example**
+```json
+{
+  "agents": {
+    "defaults": {
+      "fallbackModels": ["openai/gpt-4o", "anthropic/claude-3-sonnet"]
+    }
+  }
+}
+```
 
 **Quick validation**
 ```bash

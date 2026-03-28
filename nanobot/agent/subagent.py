@@ -31,7 +31,6 @@ class SubagentManager:
         workspace: Path,
         bus: MessageBus,
         model: str | None = None,
-        fallback_model: str | None = None,
         fallback_models: list[str] | None = None,
         agents_config: "AgentsConfig | None" = None,
         provider_factory: Callable[["AgentDefaults"], LLMProvider] | None = None,
@@ -48,7 +47,6 @@ class SubagentManager:
         self.workspace = workspace
         self.bus = bus
         self.model = model or provider.get_default_model()
-        self.fallback_model = fallback_model
         self.fallback_models = fallback_models or []
         self.agents_config = agents_config or AgentsConfig()
         self.provider_factory = provider_factory

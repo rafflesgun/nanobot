@@ -261,8 +261,7 @@ class AgentDefaults(Base):
 
     workspace: str = "~/.nanobot/workspace"
     model: str = "anthropic/claude-opus-4-5"
-    fallback_model: str | None = None  # Fallback model when primary is down (e.g. "openai/gpt-4o")
-    fallback_models: list[str] = Field(default_factory=list)  # Additional fallback models, tried in order
+    fallback_models: list[str] = Field(default_factory=list)  # Fallback models tried in order on failure
     provider: str = (
         "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
     )

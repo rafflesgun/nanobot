@@ -194,8 +194,7 @@ def test_load_config_accepts_ordered_fallback_models(tmp_path) -> None:
             {
                 "agents": {
                     "defaults": {
-                        "fallbackModel": "legacy-fallback",
-                        "fallbackModels": ["backup-a", "backup-b"],
+                        "fallbackModels": ["legacy-fallback", "backup-a", "backup-b"],
                     }
                 }
             }
@@ -205,22 +204,19 @@ def test_load_config_accepts_ordered_fallback_models(tmp_path) -> None:
 
     config = load_config(config_path)
 
-    assert config.agents.defaults.fallback_model == "legacy-fallback"
-    assert config.agents.defaults.fallback_models == ["backup-a", "backup-b"]
+    assert config.agents.defaults.fallback_models == ["legacy-fallback", "backup-a", "backup-b"]
 
 
 def test_save_config_writes_ordered_fallback_models(tmp_path) -> None:
     config_path = tmp_path / "config.json"
     config = load_config(config_path)
-    config.agents.defaults.fallback_model = "legacy-fallback"
-    config.agents.defaults.fallback_models = ["backup-a", "backup-b"]
+    config.agents.defaults.fallback_models = ["legacy-fallback", "backup-a", "backup-b"]
 
     save_config(config, config_path)
     saved = json.loads(config_path.read_text(encoding="utf-8"))
     defaults = saved["agents"]["defaults"]
 
-    assert defaults["fallbackModel"] == "legacy-fallback"
-    assert defaults["fallbackModels"] == ["backup-a", "backup-b"]
+    assert defaults["fallbackModels"] == ["legacy-fallback", "backup-a", "backup-b"]
 
 
 def test_load_config_preserves_named_agent_profiles(tmp_path) -> None:
