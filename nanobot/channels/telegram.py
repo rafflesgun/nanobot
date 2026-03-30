@@ -13,8 +13,10 @@ from typing import Any, Literal
 from loguru import logger
 from pydantic import Field
 from telegram import BotCommand, ReplyParameters, Update
+
 try:
     from telegram import ReactionTypeEmoji
+
     HAS_REACTION_TYPE = True
 except ImportError:
     HAS_REACTION_TYPE = False
@@ -35,16 +37,18 @@ from nanobot.utils.audio import convert_to_ogg_opus, get_audio_duration
 from nanobot.utils.helpers import split_message
 
 TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
-TELEGRAM_REPLY_CONTEXT_MAX_LEN = TELEGRAM_MAX_MESSAGE_LEN  # Max length for reply context in user message
+TELEGRAM_REPLY_CONTEXT_MAX_LEN = (
+    TELEGRAM_MAX_MESSAGE_LEN  # Max length for reply context in user message
+)
 FORWARD_DEBOUNCE_MS = 80
 
 
 def _strip_md(s: str) -> str:
     """Strip markdown inline formatting from text."""
-    s = re.sub(r'\*\*(.+?)\*\*', r'\1', s)
-    s = re.sub(r'__(.+?)__', r'\1', s)
-    s = re.sub(r'~~(.+?)~~', r'\1', s)
-    s = re.sub(r'`([^`]+)`', r'\1', s)
+    s = re.sub(r"\*\*(.+?)\*\*", r"\1", s)
+    s = re.sub(r"__(.+?)__", r"\1", s)
+    s = re.sub(r"~~(.+?)~~", r"\1", s)
+    s = re.sub(r"`([^`]+)`", r"\1", s)
     return s.strip()
 
 
@@ -52,32 +56,32 @@ def _render_table_box(table_lines: list[str]) -> str:
     """Convert markdown pipe-table to compact aligned text for <pre> display."""
 
     def dw(s: str) -> int:
-        return sum(2 if unicodedata.east_asian_width(c) in ('W', 'F') else 1 for c in s)
+        return sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in s)
 
     rows: list[list[str]] = []
     has_sep = False
     for line in table_lines:
-        cells = [_strip_md(c) for c in line.strip().strip('|').split('|')]
-        if all(re.match(r'^:?-+:?$', c) for c in cells if c):
+        cells = [_strip_md(c) for c in line.strip().strip("|").split("|")]
+        if all(re.match(r"^:?-+:?$", c) for c in cells if c):
             has_sep = True
             continue
         rows.append(cells)
     if not rows or not has_sep:
-        return '\n'.join(table_lines)
+        return "\n".join(table_lines)
 
     ncols = max(len(r) for r in rows)
     for r in rows:
-        r.extend([''] * (ncols - len(r)))
+        r.extend([""] * (ncols - len(r)))
     widths = [max(dw(r[c]) for r in rows) for c in range(ncols)]
 
     def dr(cells: list[str]) -> str:
-        return '  '.join(f'{c}{" " * (w - dw(c))}' for c, w in zip(cells, widths))
+        return "  ".join(f"{c}{' ' * (w - dw(c))}" for c, w in zip(cells, widths))
 
     out = [dr(rows[0])]
-    out.append('  '.join('─' * w for w in widths))
+    out.append("  ".join("─" * w for w in widths))
     for row in rows[1:]:
         out.append(dr(row))
-    return '\n'.join(out)
+    return "\n".join(out)
 
 
 def _markdown_to_telegram_html(text: str) -> str:
@@ -89,24 +93,25 @@ def _markdown_to_telegram_html(text: str) -> str:
 
     # 1. Extract and protect code blocks (preserve content from other processing)
     code_blocks: list[str] = []
+
     def save_code_block(m: re.Match) -> str:
         code_blocks.append(m.group(1))
         return f"\x00CB{len(code_blocks) - 1}\x00"
 
-    text = re.sub(r'```[\w]*\n?([\s\S]*?)```', save_code_block, text)
+    text = re.sub(r"```[\w]*\n?([\s\S]*?)```", save_code_block, text)
 
     # 1.5. Convert markdown tables to box-drawing (reuse code_block placeholders)
-    lines = text.split('\n')
+    lines = text.split("\n")
     rebuilt: list[str] = []
     li = 0
     while li < len(lines):
-        if re.match(r'^\s*\|.+\|', lines[li]):
+        if re.match(r"^\s*\|.+\|", lines[li]):
             tbl: list[str] = []
-            while li < len(lines) and re.match(r'^\s*\|.+\|', lines[li]):
+            while li < len(lines) and re.match(r"^\s*\|.+\|", lines[li]):
                 tbl.append(lines[li])
                 li += 1
             box = _render_table_box(tbl)
-            if box != '\n'.join(tbl):
+            if box != "\n".join(tbl):
                 code_blocks.append(box)
                 rebuilt.append(f"\x00CB{len(code_blocks) - 1}\x00")
             else:
@@ -114,44 +119,45 @@ def _markdown_to_telegram_html(text: str) -> str:
         else:
             rebuilt.append(lines[li])
             li += 1
-    text = '\n'.join(rebuilt)
+    text = "\n".join(rebuilt)
 
     # 2. Extract and protect inline code
     inline_codes: list[str] = []
+
     def save_inline_code(m: re.Match) -> str:
         inline_codes.append(m.group(1))
         return f"\x00IC{len(inline_codes) - 1}\x00"
 
-    text = re.sub(r'`([^`]+)`', save_inline_code, text)
+    text = re.sub(r"`([^`]+)`", save_inline_code, text)
 
     # 3. Headers # Title -> just the title text
-    text = re.sub(r'^#{1,6}\s+(.+)$', r'\1', text, flags=re.MULTILINE)
+    text = re.sub(r"^#{1,6}\s+(.+)$", r"\1", text, flags=re.MULTILINE)
 
     # 4. Blockquotes > text -> just the text (before HTML escaping)
-    text = re.sub(r'^>\s*(.*)$', r'\1', text, flags=re.MULTILINE)
+    text = re.sub(r"^>\s*(.*)$", r"\1", text, flags=re.MULTILINE)
 
     # 5. Escape HTML special characters
     text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
     # 6. Links [text](url) - must be before bold/italic to handle nested cases
-    text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', text)
+    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', text)
 
     # 7. Bold **text** or __text__
-    text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
-    text = re.sub(r'__(.+?)__', r'<b>\1</b>', text)
+    text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
+    text = re.sub(r"__(.+?)__", r"<b>\1</b>", text)
 
     # 7b. Bold *text* (single asterisk) — after ** is consumed
     # Matches *word* and *multi word* but not "* bullet" (asterisk + space at start)
-    text = re.sub(r'\*(\S(?:[^*]*\S)?)\*(?!\*)', r'<b>\1</b>', text)
+    text = re.sub(r"\*(\S(?:[^*]*\S)?)\*(?!\*)", r"<b>\1</b>", text)
 
     # 8. Italic _text_ (avoid matching inside words like some_var_name)
-    text = re.sub(r'(?<![a-zA-Z0-9])_([^_]+)_(?![a-zA-Z0-9])', r'<i>\1</i>', text)
+    text = re.sub(r"(?<![a-zA-Z0-9])_([^_]+)_(?![a-zA-Z0-9])", r"<i>\1</i>", text)
 
     # 9. Strikethrough ~~text~~
-    text = re.sub(r'~~(.+?)~~', r'<s>\1</s>', text)
+    text = re.sub(r"~~(.+?)~~", r"<s>\1</s>", text)
 
     # 10. Bullet lists - item -> • item
-    text = re.sub(r'^[-*]\s+', '• ', text, flags=re.MULTILINE)
+    text = re.sub(r"^[-*]\s+", "• ", text, flags=re.MULTILINE)
 
     # 11. Restore inline code with HTML tags
     for i, code in enumerate(inline_codes):
@@ -189,6 +195,7 @@ def _is_retryable_telegram_error(e: Exception) -> bool:
 @dataclass
 class _StreamBuf:
     """Per-chat streaming accumulator for progressive message editing."""
+
     text: str = ""
     message_id: int | None = None
     last_edit: float = 0.0
@@ -204,9 +211,7 @@ class TelegramConfig(Base):
     allow_from: list[str] = Field(default_factory=list)
     proxy: str | None = None
     reply_to_message: bool = False
-    react_emoji: str | list[str] = Field(
-        default_factory=lambda: ["⚡️", "👌", "👀", "🔥", "👍"]
-    )
+    react_emoji: str | list[str] = Field(default_factory=lambda: ["⚡️", "👌", "👀", "🔥", "👍"])
     group_policy: Literal["open", "mention"] = "mention"
     connection_pool_size: int = 32
     pool_timeout: float = 5.0
@@ -292,11 +297,11 @@ class TelegramChannel(BaseChannel):
             return True
 
         sender_str = str(sender_id)
-        
+
         # Check if the entire sender string matches any entry in allow_from
         if sender_str in allow_list:
             return True
-            
+
         # Check legacy format: id|username
         parts = sender_str.split("|")
         if len(parts) != 2:  # Legacy format is strictly id|username
@@ -357,7 +362,9 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(CommandHandler("tts", self._on_tts_command, filters=private_only))
         self._app.add_handler(CommandHandler("trace", self._on_trace_command, filters=private_only))
         self._app.add_handler(CommandHandler("stats", self._on_stats_command, filters=private_only))
-        self._app.add_handler(CommandHandler("restart", self._forward_command, filters=private_only))
+        self._app.add_handler(
+            CommandHandler("restart", self._forward_command, filters=private_only)
+        )
         self._app.add_handler(CommandHandler("status", self._forward_command, filters=private_only))
 
         # Add message handler for text, photos, voice, documents.
@@ -367,8 +374,14 @@ class TelegramChannel(BaseChannel):
         # private chats where CommandHandlers above take precedence.
         self._app.add_handler(
             MessageHandler(
-                (filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL),
-                self._on_message
+                (
+                    filters.TEXT
+                    | filters.PHOTO
+                    | filters.VOICE
+                    | filters.AUDIO
+                    | filters.Document.ALL
+                ),
+                self._on_message,
             )
         )
 
@@ -393,7 +406,7 @@ class TelegramChannel(BaseChannel):
         # Start polling (this runs until stopped)
         await self._app.updater.start_polling(
             allowed_updates=["message"],
-            drop_pending_updates=True  # Ignore old messages on startup
+            drop_pending_updates=True,  # Ignore old messages on startup
         )
 
         # Keep running until stopped
@@ -441,12 +454,12 @@ class TelegramChannel(BaseChannel):
     @staticmethod
     def _composite_key(chat_id: str, thread_id: int | None = None) -> str:
         """Build a composite key for typing/thinking state dicts."""
-        return f"{chat_id}:{thread_id}" if thread_id else chat_id
+        return f"{chat_id}:{thread_id}" if thread_id is not None else chat_id
 
     @staticmethod
     def _tts_scope_key(chat_id: str, thread_id: int | None = None) -> str:
         """Scope TTS overrides to the current chat or topic thread."""
-        return f"{chat_id}:{thread_id}" if thread_id else chat_id
+        return f"{chat_id}:{thread_id}" if thread_id is not None else chat_id
 
     @staticmethod
     def _is_remote_media_url(path: str) -> bool:
@@ -505,8 +518,7 @@ class TelegramChannel(BaseChannel):
                 reply_to_message_id = msg.metadata.get("message_id")
                 if reply_to_message_id:
                     reply_params = ReplyParameters(
-                        message_id=reply_to_message_id,
-                        allow_sending_without_reply=True
+                        message_id=reply_to_message_id, allow_sending_without_reply=True
                     )
 
             # Send (split if too long)
@@ -541,9 +553,7 @@ class TelegramChannel(BaseChannel):
 
         # Infer topic from cached reply-to message_id if not already set
         if "message_id" in msg.metadata and "message_thread_id" not in thread_kwargs:
-            cached_thread_id = self._message_threads.get(
-                (msg.chat_id, msg.metadata["message_id"])
-            )
+            cached_thread_id = self._message_threads.get((msg.chat_id, msg.metadata["message_id"]))
             if cached_thread_id is not None:
                 thread_kwargs["message_thread_id"] = cached_thread_id
 
@@ -566,12 +576,11 @@ class TelegramChannel(BaseChannel):
                     pass
             if reply_to_message_id:
                 reply_params = ReplyParameters(
-                    message_id=reply_to_message_id,
-                    allow_sending_without_reply=True
+                    message_id=reply_to_message_id, allow_sending_without_reply=True
                 )
 
         # Send media files
-        for media_path in (msg.media or []):
+        for media_path in msg.media or []:
             try:
                 media_type = self._get_media_type(media_path)
                 sender = {
@@ -579,7 +588,13 @@ class TelegramChannel(BaseChannel):
                     "voice": self._app.bot.send_voice,
                     "audio": self._app.bot.send_audio,
                 }.get(media_type, self._app.bot.send_document)
-                param = "photo" if media_type == "photo" else media_type if media_type in ("voice", "audio") else "document"
+                param = (
+                    "photo"
+                    if media_type == "photo"
+                    else media_type
+                    if media_type in ("voice", "audio")
+                    else "document"
+                )
 
                 # Telegram Bot API accepts HTTP(S) URLs directly for media params.
                 if self._is_remote_media_url(media_path):
@@ -639,10 +654,16 @@ class TelegramChannel(BaseChannel):
                 if isinstance(retry_after, int):
                     delay = float(retry_after)
                 else:
-                    delay = retry_after.total_seconds() if retry_after else _SEND_RETRY_BASE_DELAY * (2 ** attempt)
+                    delay = (
+                        retry_after.total_seconds()
+                        if retry_after
+                        else _SEND_RETRY_BASE_DELAY * (2**attempt)
+                    )
                 logger.warning(
                     "Telegram flood control (attempt {}/{}), retrying in {:.1f}s",
-                    attempt, _SEND_MAX_RETRIES, delay,
+                    attempt,
+                    _SEND_MAX_RETRIES,
+                    delay,
                 )
                 await asyncio.sleep(delay)
             except TimedOut:
@@ -651,7 +672,9 @@ class TelegramChannel(BaseChannel):
                 delay = _SEND_RETRY_BASE_DELAY * (2 ** (attempt - 1))
                 logger.warning(
                     "Telegram timeout (attempt {}/{}), retrying in {:.1f}s",
-                    attempt, _SEND_MAX_RETRIES, delay,
+                    attempt,
+                    _SEND_MAX_RETRIES,
+                    delay,
                 )
                 await asyncio.sleep(delay)
             except BadRequest as e:
@@ -662,7 +685,10 @@ class TelegramChannel(BaseChannel):
                 delay = _SEND_RETRY_BASE_DELAY * (2 ** (attempt - 1))
                 logger.warning(
                     "Telegram BadRequest (attempt {}/{}), retrying in {:.1f}s: {}",
-                    attempt, _SEND_MAX_RETRIES, delay, e,
+                    attempt,
+                    _SEND_MAX_RETRIES,
+                    delay,
+                    e,
                 )
                 await asyncio.sleep(delay)
 
@@ -684,7 +710,9 @@ class TelegramChannel(BaseChannel):
             html = _markdown_to_telegram_html(text)
             await self._call_with_retry(
                 self._app.bot.send_message,
-                chat_id=chat_id, text=html, parse_mode="HTML",
+                chat_id=chat_id,
+                text=html,
+                parse_mode="HTML",
                 reply_parameters=reply_params,
                 **(thread_kwargs or {}),
             )
@@ -801,7 +829,9 @@ class TelegramChannel(BaseChannel):
         except Exception:
             logger.exception("TTS generation or sending failed → falling back to text only")
 
-    async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
+    async def send_delta(
+        self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None
+    ) -> None:
         """Progressive message editing: send on first delta, edit on subsequent ones.
 
         Handles message rollover when content exceeds Telegram's length limit.
@@ -822,7 +852,9 @@ class TelegramChannel(BaseChannel):
             thinking_msg_id = self._thinking_messages.pop(comp_key, None)
             if thinking_msg_id:
                 try:
-                    await self._app.bot.delete_message(chat_id=int_chat_id, message_id=thinking_msg_id)
+                    await self._app.bot.delete_message(
+                        chat_id=int_chat_id, message_id=thinking_msg_id
+                    )
                 except Exception as e:
                     logger.debug("Failed to delete thinking message after stream: {}", e)
             target_message_id = buf.message_id
@@ -830,15 +862,18 @@ class TelegramChannel(BaseChannel):
                 html = _markdown_to_telegram_html(buf.text)
                 await self._call_with_retry(
                     self._app.bot.edit_message_text,
-                    chat_id=int_chat_id, message_id=target_message_id,
-                    text=html, parse_mode="HTML",
+                    chat_id=int_chat_id,
+                    message_id=target_message_id,
+                    text=html,
+                    parse_mode="HTML",
                 )
             except Exception as e:
                 logger.debug("Final stream edit failed (HTML), trying plain: {}", e)
                 try:
                     await self._call_with_retry(
                         self._app.bot.edit_message_text,
-                        chat_id=int_chat_id, message_id=target_message_id,
+                        chat_id=int_chat_id,
+                        message_id=target_message_id,
                         text=buf.text,
                     )
                 except Exception as e2:
@@ -882,8 +917,7 @@ class TelegramChannel(BaseChannel):
             reply_params = None
             if self.config.reply_to_message and reply_to_message_id:
                 reply_params = ReplyParameters(
-                    message_id=reply_to_message_id,
-                    allow_sending_without_reply=True
+                    message_id=reply_to_message_id, allow_sending_without_reply=True
                 )
 
             try:
@@ -904,7 +938,8 @@ class TelegramChannel(BaseChannel):
                 else:
                     sent = await self._call_with_retry(
                         self._app.bot.send_message,
-                        chat_id=int_chat_id, text=buf.text,
+                        chat_id=int_chat_id,
+                        text=buf.text,
                         reply_parameters=reply_params,
                         **thread_kwargs,
                     )
@@ -943,7 +978,8 @@ class TelegramChannel(BaseChannel):
             try:
                 await self._call_with_retry(
                     self._app.bot.edit_message_text,
-                    chat_id=int_chat_id, message_id=buf.message_id,
+                    chat_id=int_chat_id,
+                    message_id=buf.message_id,
                     text=buf.text,
                 )
                 buf.last_edit = now
@@ -990,7 +1026,7 @@ class TelegramChannel(BaseChannel):
         thread_id = self._get_thread_id(update.effective_message)
         scope_key = self._tts_scope_key(chat_id, thread_id)
         user_id = str(update.effective_user.id)
-        
+
         # Check if user is allowed
         if not self.is_allowed(self._sender_id(update.effective_user)):
             await update.message.reply_text("❌ You are not authorized to use this bot.")
@@ -998,7 +1034,7 @@ class TelegramChannel(BaseChannel):
 
         # Parse command arguments
         args = context.args if context.args else []
-        
+
         def _tts_status_msg(scope_key: str, extra: str = "") -> str:
             override = self._chat_tts_overrides.get(scope_key, {})
             enabled = override.get("enabled", self.tts_manager.config.enabled)
@@ -1008,42 +1044,43 @@ class TelegramChannel(BaseChannel):
                 f"🔊 TTS Settings:\n"
                 f"Enabled: {'✅' if enabled else '❌'}\n"
                 f"Provider: {provider}\n"
-                f"Voice: {voice}"
-                + (f"\n\n{extra}" if extra else "")
+                f"Voice: {voice}" + (f"\n\n{extra}" if extra else "")
             )
 
         if not args:
-            await update.message.reply_text(_tts_status_msg(
-                scope_key,
-                "Usage:\n"
-                "/tts on — Enable TTS\n"
-                "/tts off — Disable TTS\n"
-                "/tts voices [locale] — List available voices\n"
-                "/tts voice [name] — Change voice\n"
-                "/tts provider [edge/openai/riva] — Change provider\n"
-                "/tts status — Show current settings"
-            ))
+            await update.message.reply_text(
+                _tts_status_msg(
+                    scope_key,
+                    "Usage:\n"
+                    "/tts on — Enable TTS\n"
+                    "/tts off — Disable TTS\n"
+                    "/tts voices [locale] — List available voices\n"
+                    "/tts voice [name] — Change voice\n"
+                    "/tts provider [edge/openai/riva] — Change provider\n"
+                    "/tts status — Show current settings",
+                )
+            )
             return
 
         command = args[0].lower()
-        
+
         if command == "on":
             if scope_key not in self._chat_tts_overrides:
                 self._chat_tts_overrides[scope_key] = {}
             self._chat_tts_overrides[scope_key]["enabled"] = True
             save_tts_overrides(self._chat_tts_overrides)
             await update.message.reply_text("🔊 TTS enabled for this chat/topic.")
-            
+
         elif command == "off":
             if scope_key not in self._chat_tts_overrides:
                 self._chat_tts_overrides[scope_key] = {}
             self._chat_tts_overrides[scope_key]["enabled"] = False
             save_tts_overrides(self._chat_tts_overrides)
             await update.message.reply_text("🔇 TTS disabled for this chat/topic.")
-            
+
         elif command == "status":
             await update.message.reply_text(_tts_status_msg(scope_key))
-            
+
         elif command == "voices":
             # List available voices for current provider, with optional locale filter
             # Usage: /tts voices [locale_filter]  e.g. /tts voices en-US
@@ -1059,7 +1096,9 @@ class TelegramChannel(BaseChannel):
                 voices = result.get("voices", [])
 
                 if not voices:
-                    await update.message.reply_text("❌ No voices available or provider unreachable.")
+                    await update.message.reply_text(
+                        "❌ No voices available or provider unreachable."
+                    )
                     return
 
                 if provider_name == "edge":
@@ -1069,8 +1108,12 @@ class TelegramChannel(BaseChannel):
                     else:
                         # Default: match locale of current voice (e.g. "en-US" from "en-US-AriaNeural")
                         parts = current_voice.split("-")
-                        default_locale = f"{parts[0]}-{parts[1]}".lower() if len(parts) >= 2 else "en-us"
-                        voices = [v for v in voices if default_locale in v.get("locale", "").lower()]
+                        default_locale = (
+                            f"{parts[0]}-{parts[1]}".lower() if len(parts) >= 2 else "en-us"
+                        )
+                        voices = [
+                            v for v in voices if default_locale in v.get("locale", "").lower()
+                        ]
 
                     if not voices:
                         await update.message.reply_text(
@@ -1086,7 +1129,9 @@ class TelegramChannel(BaseChannel):
                         icon = "👩" if "Female" in gender else "👨" if "Male" in gender else "🎤"
                         lines.append(f"{icon} {v['name']}{marker}")
                     if len(voices) > 20:
-                        lines.append(f"… and {len(voices) - 20} more. Narrow with /tts voices en-US")
+                        lines.append(
+                            f"… and {len(voices) - 20} more. Narrow with /tts voices en-US"
+                        )
                 else:
                     # Riva / OpenAI — filter and paginate if needed
                     if locale_filter:
@@ -1104,7 +1149,23 @@ class TelegramChannel(BaseChannel):
                                 name = name.replace("Magpie-Multilingual.", "")
 
                             name_parts = name.rsplit(".", 1)
-                            base_name = name_parts[0] if len(name_parts) > 1 and name_parts[1] in ["Neutral", "Calm", "Angry", "Happy", "Sad", "Fearful", "Disgust", "PleasantSurprised", "Disgusted"] else name
+                            base_name = (
+                                name_parts[0]
+                                if len(name_parts) > 1
+                                and name_parts[1]
+                                in [
+                                    "Neutral",
+                                    "Calm",
+                                    "Angry",
+                                    "Happy",
+                                    "Sad",
+                                    "Fearful",
+                                    "Disgust",
+                                    "PleasantSurprised",
+                                    "Disgusted",
+                                ]
+                                else name
+                            )
 
                             if base_name not in base_voices:
                                 base_voices[base_name] = []
@@ -1113,13 +1174,19 @@ class TelegramChannel(BaseChannel):
                         # Show base voices with available emotions
                         lines = [f"🎙️ Riva Magpie Voices"]
                         lines.append(f"💡 Filter: /tts voices en-us")
-                        lines.append(f"💡 Set voice: /tts voice Magpie-Multilingual.EN-US.Mia.Happy\n")
+                        lines.append(
+                            f"💡 Set voice: /tts voice Magpie-Multilingual.EN-US.Mia.Happy\n"
+                        )
 
                         for base_name in sorted(base_voices.keys())[:15]:
                             variants = base_voices[base_name]
-                            marker = " ✅" if any(v["name"] == current_voice for v in variants) else ""
+                            marker = (
+                                " ✅" if any(v["name"] == current_voice for v in variants) else ""
+                            )
                             gender = variants[0].get("gender", "")
-                            icon = "👩" if "Female" in gender else "👨" if "Male" in gender else "🎤"
+                            icon = (
+                                "👩" if "Female" in gender else "👨" if "Male" in gender else "🎤"
+                            )
 
                             # Collect emotions for this voice
                             emotions = [v.get("emotion") for v in variants if v.get("emotion")]
@@ -1136,9 +1203,11 @@ class TelegramChannel(BaseChannel):
                         for v in voices[:30]:  # Cap at 30
                             marker = " ✅" if v["name"] == current_voice else ""
                             gender = v.get("gender", "")
-                            icon = "👩" if "Female" in gender else "👨" if "Male" in gender else "🎤"
+                            icon = (
+                                "👩" if "Female" in gender else "👨" if "Male" in gender else "🎤"
+                            )
                             # Shorten name for display
-                            display_name = v['name'].replace("Magpie-Multilingual.", "")
+                            display_name = v["name"].replace("Magpie-Multilingual.", "")
                             lines.append(f"{icon} {display_name}{marker}")
 
                         if len(voices) > 30:
@@ -1158,7 +1227,7 @@ class TelegramChannel(BaseChannel):
             self._chat_tts_overrides[scope_key]["voice"] = new_voice
             save_tts_overrides(self._chat_tts_overrides)
             await update.message.reply_text(f"🎙️ Voice changed to: {new_voice}")
-            
+
         elif command == "provider" and len(args) > 1:
             # Change provider
             new_provider = args[1].lower()
@@ -1169,7 +1238,9 @@ class TelegramChannel(BaseChannel):
                 save_tts_overrides(self._chat_tts_overrides)
                 await update.message.reply_text(f"🔄 TTS provider changed to: {new_provider}")
             else:
-                await update.message.reply_text("❌ Invalid provider. Use 'edge', 'openai', or 'riva'.")
+                await update.message.reply_text(
+                    "❌ Invalid provider. Use 'edge', 'openai', or 'riva'."
+                )
         else:
             await update.message.reply_text(
                 "❓ Unknown command. Usage:\n"
@@ -1188,7 +1259,7 @@ class TelegramChannel(BaseChannel):
 
         chat_id_str = str(update.effective_message.chat_id)
         user_id = str(update.effective_user.id)
-        
+
         # Check if user is allowed
         if not self.is_allowed(self._sender_id(update.effective_user)):
             await update.message.reply_text("❌ You are not authorized to use this bot.")
@@ -1196,23 +1267,31 @@ class TelegramChannel(BaseChannel):
 
         # Parse command arguments
         args = context.args if context.args else []
-        
+
         if not args:
             status = "on" if self._trace_enabled.get(chat_id_str, False) else "off"
-            await update.message.reply_text(f"🔍 Trace mode: {status}\n\nUsage:\n/trace on — Show intermediate thoughts\n/trace off — Hide intermediate thoughts\n/trace status — Show current status")
+            await update.message.reply_text(
+                f"🔍 Trace mode: {status}\n\nUsage:\n/trace on — Show intermediate thoughts\n/trace off — Hide intermediate thoughts\n/trace status — Show current status"
+            )
             return
 
         command = args[0].lower()
-        
+
         if command == "on":
             self._trace_enabled[chat_id_str] = True
-            await update.message.reply_text("🔍 Trace mode **enabled** for this chat.\nIntermediate thoughts will now appear prefixed with 🤖")
+            await update.message.reply_text(
+                "🔍 Trace mode **enabled** for this chat.\nIntermediate thoughts will now appear prefixed with 🤖"
+            )
         elif command == "off":
             self._trace_enabled[chat_id_str] = False
-            await update.message.reply_text("🔍 Trace mode **disabled** for this chat.\nIntermediate thoughts will be hidden (only shown in logs).")
+            await update.message.reply_text(
+                "🔍 Trace mode **disabled** for this chat.\nIntermediate thoughts will be hidden (only shown in logs)."
+            )
         elif command == "status":
             status = "on" if self._trace_enabled.get(chat_id_str, False) else "off"
-            await update.message.reply_text(f"🔍 Trace mode is currently **{status}** for this chat.")
+            await update.message.reply_text(
+                f"🔍 Trace mode is currently **{status}** for this chat."
+            )
         else:
             await update.message.reply_text(
                 "❓ Unknown command. Usage:\n"
@@ -1407,12 +1486,12 @@ class TelegramChannel(BaseChannel):
 
     @staticmethod
     def _looks_like_command(content: str) -> bool:
-        stripped = re.sub(r'^@\S+\s*', '', (content or '').strip())
+        stripped = re.sub(r"^@\S+\s*", "", (content or "").strip())
         return stripped.startswith("/")
 
     def _extract_local_command(self, content: str) -> tuple[str, list[str]] | None:
         """Parse Telegram-local commands from raw text or @mention-prefixed text."""
-        stripped = re.sub(r'^@\S+\s*', '', (content or '').strip())
+        stripped = re.sub(r"^@\S+\s*", "", (content or "").strip())
         if not stripped.startswith("/"):
             return None
         parts = stripped.split()
@@ -1526,9 +1605,18 @@ class TelegramChannel(BaseChannel):
                 companion["content"] if companion else None,
                 forward["content"],
             )
-            media = list(dict.fromkeys((forward.get("media") or []) + (companion.get("media") or [] if companion else [])))
+            media = list(
+                dict.fromkeys(
+                    (forward.get("media") or [])
+                    + (companion.get("media") or [] if companion else [])
+                )
+            )
             metadata = {**forward["metadata"], **(companion["metadata"] if companion else {})}
-            session_key = companion["session_key"] if companion and companion.get("session_key") is not None else forward["session_key"]
+            session_key = (
+                companion["session_key"]
+                if companion and companion.get("session_key") is not None
+                else forward["session_key"]
+            )
             sender_id = companion["sender_id"] if companion else forward["sender_id"]
             chat_id = companion["chat_id"] if companion else forward["chat_id"]
 
@@ -1611,7 +1699,9 @@ class TelegramChannel(BaseChannel):
             if reply_media:
                 media_paths = reply_media + media_paths
                 logger.debug("Attached replied-to media: {}", reply_media[0])
-            tag = reply_ctx or (f"[Reply to: {reply_media_parts[0]}]" if reply_media_parts else None)
+            tag = reply_ctx or (
+                f"[Reply to: {reply_media_parts[0]}]" if reply_media_parts else None
+            )
             if tag:
                 content_parts.insert(0, tag)
         content = "\n".join(content_parts) if content_parts else "[empty message]"
@@ -1642,8 +1732,10 @@ class TelegramChannel(BaseChannel):
                     if companion and not pending.get("forward"):
                         companion_text = companion.get("content")
                 self._media_group_buffers[key] = {
-                    "sender_id": sender_id, "chat_id": str_chat_id,
-                    "contents": [], "media": [],
+                    "sender_id": sender_id,
+                    "chat_id": str_chat_id,
+                    "contents": [],
+                    "media": [],
                     "metadata": msg_metadata,
                     "lane": lane,
                     "is_forward": bool(getattr(message, "forward_origin", None)),
@@ -1749,8 +1841,10 @@ class TelegramChannel(BaseChannel):
             else:
                 content = self._merge_debounce_content(buf.get("companion_text"), content)
                 await self._handle_message(
-                    sender_id=buf["sender_id"], chat_id=buf["chat_id"],
-                    content=content, media=list(dict.fromkeys(buf["media"])),
+                    sender_id=buf["sender_id"],
+                    chat_id=buf["chat_id"],
+                    content=content,
+                    media=list(dict.fromkeys(buf["media"])),
                     metadata=buf["metadata"],
                     session_key=buf.get("session_key"),
                 )
@@ -1772,21 +1866,24 @@ class TelegramChannel(BaseChannel):
                     chat_id=chat_id,
                     message_id=message_id,
                     reaction=[ReactionTypeEmoji(emoji)],
-                    is_big=False
+                    is_big=False,
                 )
             else:
                 await self._app.bot.set_message_reaction(
                     chat_id=chat_id,
                     message_id=message_id,
                     reaction=[{"type": "emoji", "emoji": emoji}],
-                    is_big=False
+                    is_big=False,
                 )
             logger.debug("Added ACK reaction {} to message {}", emoji, message_id)
         except Exception as e:
             logger.debug("Failed to add ACK reaction to message {}: {}", message_id, e)
 
     async def _send_thinking_message(
-        self, chat_id: int, is_group: bool, thread_id: int | None = None,
+        self,
+        chat_id: int,
+        is_group: bool,
+        thread_id: int | None = None,
     ) -> None:
         """Send a 'Thinking...' placeholder message in private chats only."""
         if not self._app or is_group:
@@ -1796,7 +1893,7 @@ class TelegramChannel(BaseChannel):
             # Use composite key for both chat_id and thread_id
             comp_key = self._composite_key(str(chat_id), thread_id)
             thread_kwargs: dict = {}
-            if thread_id:
+            if thread_id is not None:
                 thread_kwargs["message_thread_id"] = thread_id
             thinking_msg = await self._app.bot.send_message(
                 chat_id=chat_id,
@@ -1811,9 +1908,7 @@ class TelegramChannel(BaseChannel):
     def _start_typing(self, comp_key: str, thread_id: int | None = None) -> None:
         """Start sending 'typing...' indicator for a chat (optionally in a topic)."""
         self._stop_typing(comp_key)
-        self._typing_tasks[comp_key] = asyncio.create_task(
-            self._typing_loop(comp_key, thread_id)
-        )
+        self._typing_tasks[comp_key] = asyncio.create_task(self._typing_loop(comp_key, thread_id))
 
     def _stop_typing(self, comp_key: str) -> None:
         """Stop the typing indicator for a chat/topic."""
@@ -1852,7 +1947,7 @@ class TelegramChannel(BaseChannel):
         try:
             while self._app:
                 kwargs: dict = {"chat_id": int(raw_chat_id), "action": "typing"}
-                if thread_id:
+                if thread_id is not None:
                     kwargs["message_thread_id"] = thread_id
                 await self._app.bot.send_chat_action(**kwargs)
                 await asyncio.sleep(4)
@@ -1883,7 +1978,11 @@ class TelegramChannel(BaseChannel):
             from pathlib import Path
 
             # Get workspace path
-            workspace_path = Path(self._workspace_path) if self._workspace_path else Path("~/.nanobot/workspace").expanduser()
+            workspace_path = (
+                Path(self._workspace_path)
+                if self._workspace_path
+                else Path("~/.nanobot/workspace").expanduser()
+            )
             stats_manager = StatsManager(workspace_path)
 
             # Check if topic-specific stats are requested
@@ -1891,7 +1990,9 @@ class TelegramChannel(BaseChannel):
                 # Show stats for this specific topic
                 message_thread_id = getattr(update.effective_message, "message_thread_id", None)
                 if message_thread_id:
-                    topic_stats = stats_manager.get_stats("telegram", f"{chat_id}:topic:{message_thread_id}")
+                    topic_stats = stats_manager.get_stats(
+                        "telegram", f"{chat_id}:topic:{message_thread_id}"
+                    )
                     if topic_stats:
                         total_input = topic_stats.get("total_input_tokens", 0)
                         total_output = topic_stats.get("total_output_tokens", 0)
@@ -1967,18 +2068,23 @@ class TelegramChannel(BaseChannel):
         """Get file extension based on media type and optional filename."""
         if mime_type:
             ext_map = {
-                "image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif",
-                "audio/ogg": ".ogg", "audio/mpeg": ".mp3", "audio/mp4": ".m4a",
+                "image/jpeg": ".jpg",
+                "image/png": ".png",
+                "image/gif": ".gif",
+                "audio/ogg": ".ogg",
+                "audio/mpeg": ".mp3",
+                "audio/mp4": ".m4a",
             }
             if mime_type in ext_map:
                 return ext_map[mime_type]
 
         if filename:
             from pathlib import Path
+
             p = Path(filename)
             if p.suffixes:
                 # Return full compound extension if present (e.g. .tar.gz)
-                return ''.join(p.suffixes).lower()
+                return "".join(p.suffixes).lower()
             if p.suffix:
                 return p.suffix.lower()
 

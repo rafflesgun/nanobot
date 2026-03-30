@@ -122,7 +122,9 @@ class AgentLoop:
         self._mcp_connected = False
         self._mcp_connecting = False
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
-        self._model_overrides: dict[str, str] = load_model_overrides()  # session_key -> model override (persisted)
+        self._model_overrides: dict[str, str] = (
+            load_model_overrides()
+        )  # session_key -> model override (persisted)
         self._background_tasks: list[asyncio.Task] = []
         self._session_locks: dict[str, asyncio.Lock] = {}
         # NANOBOT_MAX_CONCURRENT_REQUESTS: <=0 means unlimited; default 3.
@@ -138,7 +140,9 @@ class AgentLoop:
             context_window_tokens=context_window_tokens,
             build_messages=self.context.build_messages,
             get_tool_definitions=self.tools.get_definitions,
-            max_completion_tokens=getattr(getattr(provider, "generation", None), "max_tokens", 4096),
+            max_completion_tokens=getattr(
+                getattr(provider, "generation", None), "max_tokens", 4096
+            ),
         )
         self._register_default_tools()
         self.commands = CommandRouter()
@@ -146,19 +150,33 @@ class AgentLoop:
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
-        allowed_dir: list[Path] = ([self.workspace] + ([Path(p) for p in self.extra_write] if self.extra_write else [])) if self.restrict_to_workspace else None
-        extra_read: list[Path] = ([BUILTIN_SKILLS_DIR] + ([Path(p) for p in self.extra_read] if self.extra_read else [])) if allowed_dir else None
-        self.tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read))
+        allowed_dir: list[Path] = (
+            ([self.workspace] + ([Path(p) for p in self.extra_write] if self.extra_write else []))
+            if self.restrict_to_workspace
+            else None
+        )
+        extra_read: list[Path] = (
+            ([BUILTIN_SKILLS_DIR] + ([Path(p) for p in self.extra_read] if self.extra_read else []))
+            if allowed_dir
+            else None
+        )
+        self.tools.register(
+            ReadFileTool(
+                workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read
+            )
+        )
         for cls in (WriteFileTool, EditFileTool, ListDirTool):
             self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
         if self.exec_config.enable:
-            self.tools.register(ExecTool(
-                working_dir=str(self.workspace),
-                timeout=self.exec_config.timeout,
-                restrict_to_workspace=self.restrict_to_workspace,
-                allowed_dirs=allowed_dir,
-                path_append=self.exec_config.path_append,
-            ))
+            self.tools.register(
+                ExecTool(
+                    working_dir=str(self.workspace),
+                    timeout=self.exec_config.timeout,
+                    restrict_to_workspace=self.restrict_to_workspace,
+                    allowed_dirs=allowed_dir,
+                    path_append=self.exec_config.path_append,
+                )
+            )
         self.tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
         self.tools.register(WebFetchTool(proxy=self.web_proxy))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
@@ -172,6 +190,7 @@ class AgentLoop:
             return
         self._mcp_connecting = True
         from nanobot.agent.tools.mcp import connect_mcp_servers
+
         try:
             self._mcp_stack = AsyncExitStack()
             await self._mcp_stack.__aenter__()
@@ -254,7 +273,10 @@ class AgentLoop:
                     primary_error = error
                 if not self._is_fallback_eligible_error(error) or index == len(models_to_try) - 1:
                     if index > 0 and primary_error is not None:
-                        logger.error("Primary and fallback models failed; raising original error: {}", primary_error)
+                        logger.error(
+                            "Primary and fallback models failed; raising original error: {}",
+                            primary_error,
+                        )
                         raise primary_error
                     raise
 
@@ -286,6 +308,7 @@ class AgentLoop:
         if not text:
             return None
         from nanobot.utils.helpers import strip_think
+
         return strip_think(text) or None
 
     @staticmethod
@@ -331,6 +354,7 @@ class AgentLoop:
     @staticmethod
     def _tool_hint(tool_calls: list) -> str:
         """Format tool calls as concise hint, e.g. 'web_search("query")'."""
+
         def _fmt(tc):
             args = (tc.arguments[0] if isinstance(tc.arguments, list) else tc.arguments) or {}
             val = None
@@ -347,6 +371,7 @@ class AgentLoop:
             if not isinstance(val, str):
                 return tc.name
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
+
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
     async def _run_agent_loop(
@@ -386,10 +411,11 @@ class AgentLoop:
         async def _filtered_stream(delta: str) -> None:
             nonlocal _stream_buf
             from nanobot.utils.helpers import strip_think
+
             prev_clean = strip_think(_stream_buf)
             _stream_buf += delta
             new_clean = strip_think(_stream_buf)
-            incremental = new_clean[len(prev_clean):]
+            incremental = new_clean[len(prev_clean) :]
             if incremental and _raw_stream:
                 await _raw_stream(incremental)
 
@@ -435,12 +461,11 @@ class AgentLoop:
                     tool_hint = self._strip_think(tool_hint)
                     await on_progress(tool_hint, tool_hint=True)
 
-                tool_call_dicts = [
-                    tc.to_openai_tool_call()
-                    for tc in response.tool_calls
-                ]
+                tool_call_dicts = [tc.to_openai_tool_call() for tc in response.tool_calls]
                 messages = self.context.add_assistant_message(
-                    messages, response.content, tool_call_dicts,
+                    messages,
+                    response.content,
+                    tool_call_dicts,
                     reasoning_content=response.reasoning_content,
                     thinking_blocks=response.thinking_blocks,
                 )
@@ -458,10 +483,10 @@ class AgentLoop:
                 # independent calls in a single response on purpose.
                 # return_exceptions=True ensures all results are collected
                 # even if one tool is cancelled or raises BaseException.
-                results = await asyncio.gather(*(
-                    self.tools.execute(tc.name, tc.arguments)
-                    for tc in response.tool_calls
-                ), return_exceptions=True)
+                results = await asyncio.gather(
+                    *(self.tools.execute(tc.name, tc.arguments) for tc in response.tool_calls),
+                    return_exceptions=True,
+                )
 
                 for tool_call, result in zip(response.tool_calls, results):
                     if isinstance(result, BaseException):
@@ -485,7 +510,9 @@ class AgentLoop:
                     final_content = clean or "Sorry, I encountered an error calling the AI model."
                     break
                 messages = self.context.add_assistant_message(
-                    messages, clean, reasoning_content=response.reasoning_content,
+                    messages,
+                    clean,
+                    reasoning_content=response.reasoning_content,
                     thinking_blocks=response.thinking_blocks,
                 )
                 final_content = clean
@@ -530,7 +557,13 @@ class AgentLoop:
                 continue
             task = asyncio.create_task(self._dispatch(msg))
             self._active_tasks.setdefault(msg.session_key, []).append(task)
-            task.add_done_callback(lambda t, k=msg.session_key: self._active_tasks.get(k, []) and self._active_tasks[k].remove(t) if t in self._active_tasks.get(k, []) else None)
+            task.add_done_callback(
+                lambda t, k=msg.session_key: (
+                    self._active_tasks.get(k, []) and self._active_tasks[k].remove(t)
+                    if t in self._active_tasks.get(k, [])
+                    else None
+                )
+            )
 
     @staticmethod
     def _extract_cmd(content: str) -> str:
@@ -541,7 +574,7 @@ class AgentLoop:
         """
         text = content.strip()
         if text.startswith("@"):
-            text = re.sub(r'^@\S+\s*', '', text)
+            text = re.sub(r"^@\S+\s*", "", text)
         text = text.strip().lower()
         # Return only the command token (first word), without any @suffix or args
         token = text.split()[0] if text else ""
@@ -556,17 +589,23 @@ class AgentLoop:
                 on_stream = on_stream_end = None
                 if msg.metadata.get("_wants_stream"):
                     import uuid
+
                     _stream_id = str(uuid.uuid4())
+
                     async def on_stream(delta: str) -> None:
                         meta = {
                             **dict(msg.metadata or {}),
                             "_stream_delta": True,
                             "_stream_id": _stream_id,
                         }
-                        await self.bus.publish_outbound(OutboundMessage(
-                            channel=msg.channel, chat_id=msg.chat_id,
-                            content=delta, metadata=meta,
-                        ))
+                        await self.bus.publish_outbound(
+                            OutboundMessage(
+                                channel=msg.channel,
+                                chat_id=msg.chat_id,
+                                content=delta,
+                                metadata=meta,
+                            )
+                        )
 
                     async def on_stream_end(*, resuming: bool = False) -> None:
                         meta = {
@@ -575,30 +614,43 @@ class AgentLoop:
                             "_resuming": resuming,
                             "_stream_id": _stream_id,
                         }
-                        await self.bus.publish_outbound(OutboundMessage(
-                            channel=msg.channel, chat_id=msg.chat_id,
-                            content="", metadata=meta,
-                        ))
+                        await self.bus.publish_outbound(
+                            OutboundMessage(
+                                channel=msg.channel,
+                                chat_id=msg.chat_id,
+                                content="",
+                                metadata=meta,
+                            )
+                        )
 
                 response = await self._process_message(
-                    msg, on_stream=on_stream, on_stream_end=on_stream_end,
+                    msg,
+                    on_stream=on_stream,
+                    on_stream_end=on_stream_end,
                 )
                 if response is not None:
                     await self.bus.publish_outbound(response)
                 elif msg.channel == "cli":
-                    await self.bus.publish_outbound(OutboundMessage(
-                        channel=msg.channel, chat_id=msg.chat_id,
-                        content="", metadata=msg.metadata or {},
-                    ))
+                    await self.bus.publish_outbound(
+                        OutboundMessage(
+                            channel=msg.channel,
+                            chat_id=msg.chat_id,
+                            content="",
+                            metadata=msg.metadata or {},
+                        )
+                    )
             except asyncio.CancelledError:
                 logger.info("Task cancelled for session {}", msg.session_key)
                 raise
             except Exception:
                 logger.exception("Error processing message for session {}", msg.session_key)
-                await self.bus.publish_outbound(OutboundMessage(
-                    channel=msg.channel, chat_id=msg.chat_id,
-                    content="Sorry, I encountered an error.",
-                ))
+                await self.bus.publish_outbound(
+                    OutboundMessage(
+                        channel=msg.channel,
+                        chat_id=msg.chat_id,
+                        content="Sorry, I encountered an error.",
+                    )
+                )
 
     async def close_mcp(self) -> None:
         """Drain pending background archives, then close MCP connections."""
@@ -636,8 +688,9 @@ class AgentLoop:
         """Process a single inbound message and return the response."""
         # System messages: parse origin from chat_id ("channel:chat_id")
         if msg.channel == "system":
-            channel, chat_id = (msg.chat_id.split(":", 1) if ":" in msg.chat_id
-                                else ("cli", msg.chat_id))
+            channel, chat_id = (
+                msg.chat_id.split(":", 1) if ":" in msg.chat_id else ("cli", msg.chat_id)
+            )
             logger.info("Processing system message from {}", msg.sender_id)
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
@@ -647,18 +700,25 @@ class AgentLoop:
             current_role = "assistant" if msg.sender_id == "subagent" else "user"
             messages = self.context.build_messages(
                 history=history,
-                current_message=msg.content, channel=channel, chat_id=chat_id,
+                current_message=msg.content,
+                channel=channel,
+                chat_id=chat_id,
                 current_role=current_role,
             )
             final_content, _, all_msgs = await self._run_agent_loop(
-                messages, channel=channel, chat_id=chat_id,
+                messages,
+                channel=channel,
+                chat_id=chat_id,
                 message_id=msg.metadata.get("message_id"),
             )
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
             self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
-            return OutboundMessage(channel=channel, chat_id=chat_id,
-                                  content=final_content or "Background task completed.")
+            return OutboundMessage(
+                channel=channel,
+                chat_id=chat_id,
+                content=final_content or "Background task completed.",
+            )
 
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
@@ -672,7 +732,7 @@ class AgentLoop:
         # Strip a leading @mention (e.g. "@BotName /model gpt-4" -> "/model gpt-4")
         raw = msg.content.strip()
         if raw.startswith("@"):
-            raw = re.sub(r'^@\S+\s*', '', raw).strip()
+            raw = re.sub(r"^@\S+\s*", "", raw).strip()
         ctx = CommandContext(msg=msg, session=session, key=key, raw=raw, loop=self)
         if result := await self.commands.dispatch(ctx):
             return result
@@ -681,7 +741,8 @@ class AgentLoop:
             await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
         self._set_tool_context(
-            msg.channel, msg.chat_id,
+            msg.channel,
+            msg.chat_id,
             msg.metadata.get("message_id"),
             msg.metadata.get("message_thread_id"),
         )
@@ -694,16 +755,22 @@ class AgentLoop:
             history=history,
             current_message=msg.content,
             media=msg.media if msg.media else None,
-            channel=msg.channel, chat_id=msg.chat_id,
+            channel=msg.channel,
+            chat_id=msg.chat_id,
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
             meta = dict(msg.metadata or {})
             meta["_progress"] = True
             meta["_tool_hint"] = tool_hint
-            await self.bus.publish_outbound(OutboundMessage(
-                channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
-            ))
+            await self.bus.publish_outbound(
+                OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=content,
+                    metadata=meta,
+                )
+            )
 
         # Define the incremental save callback
         async def _on_turn_saved(messages: list[dict]) -> None:
@@ -712,17 +779,17 @@ class AgentLoop:
             self._save_turn(session, messages, 1 + len(history))
             self.sessions.save(session)
             # Record token usage if provider supports it
-            if hasattr(self.provider, 'get_usage'):
+            if hasattr(self.provider, "get_usage"):
                 usage = self.provider.get_usage()
                 if usage:
                     self.stats_manager.record_usage(
                         msg.channel,
                         msg.chat_id,
                         self.model,
-                        usage.get('input_tokens', 0),
-                        usage.get('output_tokens', 0),
-                        usage.get('total_tokens', 0),
-                        session.key
+                        usage.get("input_tokens", 0),
+                        usage.get("output_tokens", 0),
+                        usage.get("total_tokens", 0),
+                        session.key,
                     )
 
         final_content, _, all_msgs = await self._run_agent_loop(
@@ -732,7 +799,8 @@ class AgentLoop:
             on_turn_saved=_on_turn_saved,
             on_stream=on_stream,
             on_stream_end=on_stream_end,
-            channel=msg.channel, chat_id=msg.chat_id,
+            channel=msg.channel,
+            chat_id=msg.chat_id,
             message_id=msg.metadata.get("message_id"),
         )
 
@@ -751,8 +819,11 @@ class AgentLoop:
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
 
         # Add token usage hint if configured
-        if (self.channels_config and self.channels_config.show_usage and
-            hasattr(self.provider, 'get_usage')):
+        if (
+            self.channels_config
+            and self.channels_config.show_usage
+            and hasattr(self.provider, "get_usage")
+        ):
             usage = self.provider.get_usage()
             if usage:
                 usage_hint = f"\n\n💡 Token usage: {usage.get('input_tokens', 0)} in / {usage.get('output_tokens', 0)} out / {usage.get('total_tokens', 0)} total"
@@ -762,11 +833,15 @@ class AgentLoop:
         if on_stream is not None:
             meta["_streamed"] = True
         return OutboundMessage(
-            channel=msg.channel, chat_id=msg.chat_id, content=final_content,
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content=final_content,
             metadata=meta,
         )
 
-    def _handle_model_command(self, msg: InboundMessage, session_key: str, raw_content: str | None = None) -> OutboundMessage:
+    def _handle_model_command(
+        self, msg: InboundMessage, session_key: str, raw_content: str | None = None
+    ) -> OutboundMessage:
         """Handle /model command — show current model or switch to a new one."""
         # Use pre-stripped content (leading @mention already removed) if provided
         raw = (raw_content or msg.content).strip()
@@ -781,11 +856,17 @@ class AgentLoop:
             is_override = session_key in self._model_overrides
             status = (
                 f"🤖 Current model: `{effective}`"
-                + ("\n_(session override — use `/model reset` to revert to default)_" if is_override else "")
+                + (
+                    "\n_(session override — use `/model reset` to revert to default)_"
+                    if is_override
+                    else ""
+                )
                 + f"\n\nSwitch model with `/model <model-id>`."
             )
             return OutboundMessage(
-                channel=msg.channel, chat_id=msg.chat_id, content=status,
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=status,
                 metadata=_meta,
             )
 
@@ -795,12 +876,14 @@ class AgentLoop:
             if removed:
                 save_model_overrides(self._model_overrides)
                 return OutboundMessage(
-                    channel=msg.channel, chat_id=msg.chat_id,
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
                     content=f"🔄 Model reset to default: `{self.model}`",
                     metadata=_meta,
                 )
             return OutboundMessage(
-                channel=msg.channel, chat_id=msg.chat_id,
+                channel=msg.channel,
+                chat_id=msg.chat_id,
                 content=f"Already using the default model: `{self.model}`",
                 metadata=_meta,
             )
@@ -811,7 +894,8 @@ class AgentLoop:
         save_model_overrides(self._model_overrides)
         logger.info("Model switched to '{}' for session {}", new_model, session_key)
         return OutboundMessage(
-            channel=msg.channel, chat_id=msg.chat_id,
+            channel=msg.channel,
+            chat_id=msg.chat_id,
             content=f"✅ Model switched to `{new_model}` for this session.\nUse `/model reset` to revert to default.",
             metadata=_meta,
         )
@@ -821,7 +905,7 @@ class AgentLoop:
         _meta = msg.metadata or {}
 
         # Check if this is a topic request but not in a topic
-        if args and args[0].lower() == "topic" and not _meta.get("message_thread_id"):
+        if args and args[0].lower() == "topic" and _meta.get("message_thread_id") is None:
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
@@ -849,7 +933,9 @@ class AgentLoop:
             response += f"• Total tokens: {total_tokens:,}\n\n"
 
             for channel, stat in stats.items():
-                response += f"📡 {channel}: {stat['total_tokens']:,} tokens ({stat['count']} messages)\n"
+                response += (
+                    f"📡 {channel}: {stat['total_tokens']:,} tokens ({stat['count']} messages)\n"
+                )
 
             return OutboundMessage(
                 channel=msg.channel,
@@ -874,7 +960,7 @@ class AgentLoop:
         total_tokens = stats["total_tokens"]
 
         response = f"📊 Token Usage Statistics"
-        if _meta.get("message_thread_id"):
+        if _meta.get("message_thread_id") is not None:
             response += f" (Topic {_meta.get('message_thread_id')})"
         else:
             response += " (This Chat)"
@@ -940,17 +1026,16 @@ class AgentLoop:
             ):
                 continue
 
-            if (
-                block.get("type") == "image_url"
-                and block.get("image_url", {}).get("url", "").startswith("data:image/")
-            ):
+            if block.get("type") == "image_url" and block.get("image_url", {}).get(
+                "url", ""
+            ).startswith("data:image/"):
                 filtered.append(self._image_placeholder(block))
                 continue
 
             if block.get("type") == "text" and isinstance(block.get("text"), str):
                 text = block["text"]
                 if truncate_text and len(text) > self._TOOL_RESULT_MAX_CHARS:
-                    text = text[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
+                    text = text[: self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
                 filtered.append({**block, "text": text})
                 continue
 
@@ -961,6 +1046,7 @@ class AgentLoop:
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
         """Save new-turn messages into session, truncating large tool results."""
         from datetime import datetime
+
         for m in messages[skip:]:
             entry = dict(m)
             role, content = entry.get("role"), entry.get("content")
@@ -968,14 +1054,16 @@ class AgentLoop:
                 continue  # skip empty assistant messages — they poison session context
             if role == "tool":
                 if isinstance(content, str) and len(content) > self._TOOL_RESULT_MAX_CHARS:
-                    entry["content"] = content[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
+                    entry["content"] = content[: self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
                 elif isinstance(content, list):
                     filtered = self._sanitize_persisted_blocks(content, truncate_text=True)
                     if not filtered:
                         continue
                     entry["content"] = filtered
             elif role == "user":
-                if isinstance(content, str) and content.startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
+                if isinstance(content, str) and content.startswith(
+                    ContextBuilder._RUNTIME_CONTEXT_TAG
+                ):
                     # Strip the runtime-context prefix, keep only the user text.
                     parts = content.split("\n\n", 1)
                     if len(parts) > 1 and parts[1].strip():
@@ -993,9 +1081,8 @@ class AgentLoop:
                     # string so history never contains list-format user messages.
                     # List-content in history causes 400 errors on providers that
                     # expect content to be a dict/string, not a list.
-                    if (
-                        not had_non_text_blocks
-                        and all(isinstance(c, dict) and c.get("type") == "text" for c in filtered)
+                    if not had_non_text_blocks and all(
+                        isinstance(c, dict) and c.get("type") == "text" for c in filtered
                     ):
                         entry["content"] = "\n".join(c.get("text", "") for c in filtered)
                     else:
@@ -1020,11 +1107,16 @@ class AgentLoop:
         """Process a message directly and return the outbound payload."""
         await self._connect_mcp()
         meta: dict = {}
-        if thread_id:
+        if thread_id is not None:
             meta["message_thread_id"] = thread_id
-        msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content, metadata=meta)
+        msg = InboundMessage(
+            channel=channel, sender_id="user", chat_id=chat_id, content=content, metadata=meta
+        )
         return await self._process_message(
-            msg, session_key=session_key, on_progress=on_progress,
-            on_stream=on_stream, on_stream_end=on_stream_end,
+            msg,
+            session_key=session_key,
+            on_progress=on_progress,
+            on_stream=on_stream,
+            on_stream_end=on_stream_end,
             ephemeral_session=ephemeral_session,
         )
