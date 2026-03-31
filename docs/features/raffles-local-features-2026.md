@@ -31,6 +31,8 @@ understand intended behavior quickly.
 | **/trace command - AI thinking visibility** | ✅     | channels/telegram.py                                   | tests/test_trace_command_additional.py | `_trace_enabled[chat_id] = false` (default)   |
 | **/stats command - token usage visibility** | ✅     | channels/telegram.py, utils/stats.py                   | tests/test_telegram_stats_command.py   | `/stats`, `/stats topic`, `/stats all`          |
 | **/status shows session model override**   | ✅     | command/builtin.py, utils/helpers.py                   | tests/cli/test_restart_command.py      | shows `gpt-4o (default: claude-opus-4)` when overridden |
+| **Builtin commands preserve topic context** | ✅   | command/builtin.py, channels/telegram.py              | tests/test_telegram_builtin_commands_topic.py | `/new`, `/stop`, `/restart`, `/status`, `/help` |
+| **Cron jobs preserve topic thread_id**     | ✅     | agent/loop.py, agent/tools/cron.py                    | tests/test_cron_topic_delivery.py      | thread_id passed through _run_agent_loop |
 | **Commands enhanced for topic support**     | ✅     | channels/telegram.py, agent/loop.py                    | manual                                 | `/new`, `/stop`, `/model`, `/stats`, `/tts`, `/trace` |
 | **Tool definitions caching (#2205)**        | ✅     | agent/tools/registry.py                                | tests/test_tool_registry_caching.py    | `_definitions_cache` invalidated on reg/unreg |
 | **Incremental session saving (#2219)**      | ✅     | agent/loop.py, agent/subagent.py                       | tests/test_loop_incremental_save.py    | save offset tracks persisted content          |
@@ -44,15 +46,19 @@ understand intended behavior quickly.
 - Session key = `telegram:{chat_id}:topic:{message_thread_id}` (non-private + thread exists)
 - `message_thread_id` carried in message metadata
 - Cron jobs respect `threadId` field when delivering to group topics
+- **thread_id preserved** when creating cron jobs via `_run_agent_loop` → `_set_tool_context`
 
 **Files to protect during conflicts**
 - nanobot/channels/telegram.py  
   → _derive_topic_session_key(), _build_message_metadata(), _on_message(), _forward_command()
 - nanobot/cron/types.py, nanobot/cron/service.py
-- nanobot/agent/tools/cron.py
+- nanobot/agent/tools/cron.py → set_context(channel, chat_id, thread_id)
+- nanobot/agent/loop.py → _run_agent_loop(thread_id=...), _set_tool_context()
 
 **Resolution priority**
 Prefer version that keeps `message_thread_id` in metadata and derives session key from it.
+Ensure `thread_id` is passed through `_run_agent_loop` to `_set_tool_context` so cron jobs
+created from topics preserve the target thread.
 
 **Quick validation**
 ```bash
@@ -395,7 +401,26 @@ Keep the model_override parameter flowing from `loop._model_overrides.get(sessio
 pytest tests/cli/test_restart_command.py::TestRestartCommand::test_status_shows_model_override -v
 ```
 
-### 15–19. Other smaller features (summary)
+### 15. Builtin commands preserve topic context
+
+**Core behavior**
+- `/new`, `/stop`, `/restart`, `/status`, `/help` commands preserve `message_thread_id` in metadata
+- Ensures replies stay in the correct topic thread
+- Fixes bug where commands sent from topics would respond to main chat instead
+
+**Files to protect during conflicts**
+- nanobot/command/builtin.py → cmd_stop, cmd_restart, cmd_status, cmd_new, cmd_help
+- Each command includes `metadata = {"message_thread_id": ctx.msg.metadata.get("message_thread_id")}`
+
+**Resolution priority**
+Keep the `message_thread_id` extraction and inclusion in outbound metadata for all builtin commands.
+
+**Quick validation**
+```bash
+pytest tests/test_telegram_builtin_commands_topic.py -v
+```
+
+### 16–20. Other smaller features (summary)
 
 - Thinking draft message → PM only (`if is_group: return`)
 - Typing + ACK reaction → per composite key (chat+thread)
@@ -403,11 +428,12 @@ pytest tests/cli/test_restart_command.py::TestRestartCommand::test_status_shows_
 - Media downloads → `workspace/media/telegram/` when workspace is configured (accessible within workspace restrictions)
 - Telegram flood control retry → handles `RetryAfter` errors with automatic retry
 - Model/TTS overrides → persisted to `~/.nanobot/overrides.json`, loaded on startup
+- Cron thread_id → preserved through `_run_agent_loop` for topic-aware job creation
 - Heartbeat DM-only logic lives in `_pick_heartbeat_target()` inside `nanobot/cli/commands.py` (not `heartbeat/service.py`)
 - Skips topic sub-sessions and negative Telegram chat IDs
 - Heartbeat history is bounded pre/post run by content length and recent legal suffix
 
-### 16. Tool definitions caching (#2205)
+### 17. Tool definitions caching (#2205)
 
 **Core behavior**
 - Added caching to `ToolRegistry.get_definitions()` to prevent repeated traversal of tool sets and JSON schema construction during each iteration of the agent loop
@@ -427,7 +453,7 @@ Preserve the caching mechanism that improves performance by avoiding redundant s
 pytest tests/test_tool_registry_caching.py -v
 ```
 
-### 17. Incremental session saving (#2219)
+### 18. Incremental session saving (#2219)
 
 **Core behavior**
 - Implements incremental session saving for agent loops to prevent data loss when operations crash or get cancelled mid-process
@@ -448,7 +474,7 @@ Keep the incremental save functionality that protects against data loss during m
 pytest tests/test_loop_incremental_save.py -v
 ```
 
-### 18. Web search status after merge
+### 19. Web search status after merge
 
 **Core behavior**
 - The old local-only DuckDuckGo enhancement is no longer branch-specific
