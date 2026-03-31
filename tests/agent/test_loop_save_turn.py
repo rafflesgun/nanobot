@@ -36,16 +36,24 @@ def test_save_turn_keeps_image_placeholder_with_path_after_runtime_strip() -> No
 
     loop._save_turn(
         session,
-        [{
-            "role": "user",
-            "content": [
-                {"type": "text", "text": runtime},
-                {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}, "_meta": {"path": "/media/feishu/photo.jpg"}},
-            ],
-        }],
+        [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": runtime},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "data:image/png;base64,abc"},
+                        "_meta": {"path": "/media/feishu/photo.jpg"},
+                    },
+                ],
+            }
+        ],
         skip=0,
     )
-    assert session.messages[0]["content"] == [{"type": "text", "text": "[image: /media/feishu/photo.jpg]"}]
+    assert session.messages[0]["content"] == [
+        {"type": "text", "text": "[image: /media/feishu/photo.jpg]"}
+    ]
 
 
 def test_save_turn_keeps_image_placeholder_without_meta() -> None:
@@ -55,13 +63,15 @@ def test_save_turn_keeps_image_placeholder_without_meta() -> None:
 
     loop._save_turn(
         session,
-        [{
-            "role": "user",
-            "content": [
-                {"type": "text", "text": runtime},
-                {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
-            ],
-        }],
+        [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": runtime},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+                ],
+            }
+        ],
         skip=0,
     )
     assert session.messages[0]["content"] == [{"type": "text", "text": "[image]"}]
@@ -87,7 +97,9 @@ async def test_process_direct_persists_direct_user_message(tmp_path) -> None:
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings(max_tokens=0)
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
-    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
+    provider.chat_stream_with_retry = AsyncMock(
+        return_value=LLMResponse(content="ok", tool_calls=[])
+    )
 
     loop = AgentLoop(
         bus=MessageBus(),
@@ -117,7 +129,9 @@ async def test_process_direct_surfaces_retry_progress(tmp_path) -> None:
         return LLMResponse(content="ok", tool_calls=[])
 
     provider.chat_with_retry = _chat_with_retry
-    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
+    provider.chat_stream_with_retry = AsyncMock(
+        return_value=LLMResponse(content="ok", tool_calls=[])
+    )
 
     loop = AgentLoop(
         bus=MessageBus(),
@@ -136,3 +150,33 @@ async def test_process_direct_surfaces_retry_progress(tmp_path) -> None:
     await asyncio.sleep(0)
 
     assert "Retrying... (attempt 1/3)" in progress
+
+
+@pytest.mark.asyncio
+async def test_process_direct_keeps_zero_thread_id_in_metadata(tmp_path) -> None:
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.generation = GenerationSettings(max_tokens=0)
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
+    provider.chat_stream_with_retry = AsyncMock(
+        return_value=LLMResponse(content="ok", tool_calls=[])
+    )
+
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+    )
+    loop.tools.get_definitions = MagicMock(return_value=[])
+
+    result = await loop.process_direct(
+        "hello topic",
+        session_key="telegram:-100123:topic:0",
+        channel="telegram",
+        chat_id="-100123",
+        thread_id=0,
+    )
+
+    assert result is not None
+    assert result.metadata["message_thread_id"] == 0
