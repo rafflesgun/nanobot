@@ -645,11 +645,14 @@ class AgentLoop:
                 raise
             except Exception:
                 logger.exception("Error processing message for session {}", msg.session_key)
+                error_meta = dict(msg.metadata or {})
+                error_meta["message_thread_id"] = msg.metadata.get("message_thread_id")
                 await self.bus.publish_outbound(
                     OutboundMessage(
                         channel=msg.channel,
                         chat_id=msg.chat_id,
                         content="Sorry, I encountered an error.",
+                        metadata=error_meta,
                     )
                 )
 
