@@ -499,13 +499,11 @@ class TelegramChannel(BaseChannel):
             logger.info("[progress:{}] chat={} → {}", label, msg.chat_id, preview)
 
             trace_on = self._trace_enabled.get(str(chat_id), False)
-            if not trace_on and thread_id is None:
+            if not trace_on:
                 return  # suppressed - only logged
 
             # Trace enabled → send to chat with prefix
-            prefix = ""
-            if trace_on:
-                prefix = "🤖 " if is_tool_hint else "💭 "
+            prefix = "🤖 " if is_tool_hint else "💭 "
             trace_content = prefix + (msg.content or "").strip()
 
             # Prepare sending parameters (reuse existing thread/reply logic)
