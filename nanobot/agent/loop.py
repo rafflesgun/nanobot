@@ -387,7 +387,7 @@ class AgentLoop:
         chat_id: str = "direct",
         message_id: str | None = None,
         thread_id: int | None = None,
-    ) -> tuple[str | None, list[str], list[dict]]:
+    ) -> tuple[str | None, list[str], list[dict], bool]:
         """Run the agent iteration loop.
 
         Args:
@@ -403,6 +403,7 @@ class AgentLoop:
         final_content = None
         tools_used: list[str] = []
         effective_model = model_override or self.model
+        had_error = False
 
         # Wrap on_stream with stateful think-tag filter so downstream
         # consumers (CLI, channels) never see <think> blocks.
@@ -509,6 +510,7 @@ class AgentLoop:
                 if response.finish_reason == "error":
                     logger.error("LLM returned error: {}", (clean or "")[:200])
                     final_content = clean or "Sorry, I encountered an error calling the AI model."
+                    had_error = True
                     break
                 messages = self.context.add_assistant_message(
                     messages,
@@ -526,7 +528,7 @@ class AgentLoop:
                 "without completing the task. You can try breaking the task into smaller steps."
             )
 
-        return final_content, tools_used, messages
+        return final_content, tools_used, messages, had_error
 
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
@@ -709,7 +711,7 @@ class AgentLoop:
                 chat_id=chat_id,
                 current_role=current_role,
             )
-            final_content, _, all_msgs = await self._run_agent_loop(
+            final_content, _, all_msgs, had_error = await self._run_agent_loop(
                 messages,
                 channel=channel,
                 chat_id=chat_id,
@@ -797,7 +799,7 @@ class AgentLoop:
                         session.key,
                     )
 
-        final_content, _, all_msgs = await self._run_agent_loop(
+        final_content, _, all_msgs, had_error = await self._run_agent_loop(
             initial_messages,
             on_progress=on_progress or _bus_progress,
             model_override=self._model_overrides.get(key),
@@ -836,7 +838,7 @@ class AgentLoop:
                 final_content += usage_hint
 
         meta = dict(msg.metadata or {})
-        if on_stream is not None:
+        if on_stream is not None and not had_error:
             meta["_streamed"] = True
         return OutboundMessage(
             channel=msg.channel,

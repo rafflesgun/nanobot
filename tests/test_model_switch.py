@@ -69,7 +69,7 @@ async def test_model_switch_and_use():
     assert loop._model_overrides[session_key] == "claude-3.5-sonnet"
 
     # Verify that _run_agent_loop uses the override
-    final_content, tools_used, all_msgs = await loop._run_agent_loop(
+    final_content, tools_used, all_msgs, had_error = await loop._run_agent_loop(
         [{"role": "user", "content": "hello"}],
         model_override=loop._model_overrides.get(session_key),
     )
