@@ -27,6 +27,11 @@ _ALNUM = string.ascii_letters + string.digits
 
 _STANDARD_TC_KEYS = frozenset({"id", "type", "index", "function"})
 _STANDARD_FN_KEYS = frozenset({"name", "arguments"})
+_DEFAULT_OPENROUTER_HEADERS = {
+    "HTTP-Referer": "https://github.com/HKUDS/nanobot",
+    "X-OpenRouter-Title": "nanobot",
+    "X-OpenRouter-Categories": "cli-agent,personal-agent",
+}
 
 
 def _short_tool_id() -> str:
@@ -90,6 +95,13 @@ def _extract_tc_extras(tc: Any) -> tuple[
     return extra_content, prov, fn_prov
 
 
+def _uses_openrouter_attribution(spec: "ProviderSpec | None", api_base: str | None) -> bool:
+    """Apply Nanobot attribution headers to OpenRouter requests by default."""
+    if spec and spec.name == "openrouter":
+        return True
+    return bool(api_base and "openrouter" in api_base.lower())
+
+
 class OpenAICompatProvider(LLMProvider):
     """Unified provider for all OpenAI-compatible APIs.
 
@@ -114,16 +126,18 @@ class OpenAICompatProvider(LLMProvider):
             self._setup_env(api_key, api_base)
 
         effective_base = api_base or (spec.default_api_base if spec else None) or None
+        default_headers = {"x-session-affinity": uuid.uuid4().hex}
+        if _uses_openrouter_attribution(spec, effective_base):
+            default_headers.update(_DEFAULT_OPENROUTER_HEADERS)
+        if extra_headers:
+            default_headers.update(extra_headers)
 
         self._client = AsyncOpenAI(
             api_key=api_key or "no-key",
             base_url=effective_base,
             max_retries=0,
             timeout=httpx.Timeout(180.0, connect=10.0),
-            default_headers={
-                "x-session-affinity": uuid.uuid4().hex,
-                **(extra_headers or {}),
-            },
+            default_headers=default_headers,
         )
 
     def _setup_env(self, api_key: str, api_base: str | None) -> None:
@@ -224,7 +238,9 @@ class OpenAICompatProvider(LLMProvider):
         spec = self._spec
 
         if spec and spec.supports_prompt_caching:
-            messages, tools = self._apply_cache_control(messages, tools)
+            model_name = model or self.default_model
+            if any(model_name.lower().startswith(k) for k in ("anthropic/", "claude")):
+                messages, tools = self._apply_cache_control(messages, tools)
 
         if spec and spec.strip_model_prefix:
             model_name = model_name.split("/")[-1]
@@ -232,9 +248,13 @@ class OpenAICompatProvider(LLMProvider):
         kwargs: dict[str, Any] = {
             "model": model_name,
             "messages": self._sanitize_messages(self._sanitize_empty_content(messages)),
-            "max_completion_tokens": max(1, max_tokens),
             "temperature": temperature,
         }
+
+        if spec and getattr(spec, "supports_max_completion_tokens", False):
+            kwargs["max_completion_tokens"] = max(1, max_tokens)
+        else:
+            kwargs["max_tokens"] = max(1, max_tokens)
 
         if spec:
             model_lower = model_name.lower()

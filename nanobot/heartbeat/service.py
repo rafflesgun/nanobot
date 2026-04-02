@@ -60,6 +60,7 @@ class HeartbeatService:
         on_notify: Callable[[str], Coroutine[Any, Any, None]] | None = None,
         interval_s: int = 30 * 60,
         enabled: bool = True,
+        timezone: str | None = None,
     ):
         self.workspace = workspace
         self.provider = provider
@@ -68,6 +69,7 @@ class HeartbeatService:
         self.on_notify = on_notify
         self.interval_s = interval_s
         self.enabled = enabled
+        self.timezone = timezone
         self._running = False
         self._task: asyncio.Task | None = None
         self._execute_lock = asyncio.Lock()
@@ -143,7 +145,7 @@ class HeartbeatService:
             messages=[
                 {"role": "system", "content": "You are a heartbeat agent. Call the heartbeat tool to report your decision."},
                 {"role": "user", "content": (
-                    f"Current Time: {current_time_str()}\n\n"
+                    f"Current Time: {current_time_str(self.timezone)}\n\n"
                     "Review the following HEARTBEAT.md and decide whether there are active tasks.\n\n"
                     f"{content}"
                 )},

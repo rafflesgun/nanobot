@@ -13,5 +13,9 @@ warnings.filterwarnings(
     message=r".*invalid escape sequence.*",
 )
 
-__version__ = "0.1.4.post5"
+__version__ = "0.1.4.post6"
 __logo__ = "🐈"
+
+from nanobot.nanobot import Nanobot, RunResult
+
+__all__ = ["Nanobot", "RunResult"]
