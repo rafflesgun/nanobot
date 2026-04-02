@@ -618,15 +618,11 @@ class AgentLoop:
                 continue
 
             raw = msg.content.strip()
-            logger.debug("Checking priority command: raw={!r}, is_priority={}", raw, self.commands.is_priority(raw))
             if self.commands.is_priority(raw):
                 ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw=raw, loop=self)
                 result = await self.commands.dispatch_priority(ctx)
                 if result:
-                    logger.info("Priority command returned result, publishing to {}/{}", result.channel, result.chat_id)
                     await self.bus.publish_outbound(result)
-                else:
-                    logger.warning("Priority command returned None for raw={!r}", raw)
                 continue
             task = asyncio.create_task(self._dispatch(msg))
             self._active_tasks.setdefault(msg.session_key, []).append(task)
@@ -674,15 +670,12 @@ class AgentLoop:
                     msg, on_stream=on_stream, on_stream_end=on_stream_end,
                 )
                 if response is not None:
-                    logger.info("Publishing response to {}/{}", response.channel, response.chat_id)
                     await self.bus.publish_outbound(response)
                 elif msg.channel == "cli":
                     await self.bus.publish_outbound(OutboundMessage(
                         channel=msg.channel, chat_id=msg.chat_id,
                         content="", metadata=msg.metadata or {},
                     ))
-                else:
-                    logger.debug("No response from _process_message for {}/{}", msg.channel, msg.chat_id)
             except asyncio.CancelledError:
                 logger.info("Task cancelled for session {}", msg.session_key)
                 raise

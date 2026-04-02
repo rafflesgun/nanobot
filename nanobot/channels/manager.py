@@ -147,8 +147,6 @@ class ChannelManager:
 
                 channel = self.channels.get(msg.channel)
                 if channel:
-                    logger.info("Sending message to {} channel: chat_id={}, content={}", 
-                               msg.channel, msg.chat_id, (msg.content or "")[:100])
                     await self._send_with_retry(channel, msg)
                 else:
                     logger.warning("Unknown channel: {}", msg.channel)

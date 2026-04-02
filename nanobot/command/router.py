@@ -59,23 +59,16 @@ class CommandRouter:
 
     async def dispatch_priority(self, ctx: CommandContext) -> OutboundMessage | None:
         """Dispatch a priority command. Called from run() without the lock."""
-        from loguru import logger
-        logger.debug("dispatch_priority: ctx.raw={!r}, priority_keys={}", ctx.raw.lower(), list(self._priority.keys()))
         handler = self._priority.get(ctx.raw.lower())
         if handler:
-            logger.debug("Priority handler found for {!r}", ctx.raw.lower())
             return await handler(ctx)
-        logger.debug("No priority handler for {!r}", ctx.raw.lower())
         return None
 
     async def dispatch(self, ctx: CommandContext) -> OutboundMessage | None:
         """Try exact, prefix, then interceptors. Returns None if unhandled."""
-        from loguru import logger
         cmd = ctx.raw.lower()
-        logger.debug("Router dispatch: cmd={!r}, exact_keys={}", cmd, list(self._exact.keys()))
 
         if handler := self._exact.get(cmd):
-            logger.debug("Exact match found for {!r}", cmd)
             return await handler(ctx)
 
         for pfx, handler in self._prefix:
