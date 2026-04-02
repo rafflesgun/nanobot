@@ -27,7 +27,10 @@ async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
     total = cancelled + sub_cancelled
     content = f"Stopped {total} task(s)." if total else "No active task to stop."
     # Preserve topic thread context so the reply stays in the correct topic
-    metadata = {"message_thread_id": msg.metadata.get("message_thread_id")}
+    metadata = {
+        "message_thread_id": msg.metadata.get("message_thread_id"),
+        "command_response": True,  # Skip TTS for command responses
+    }
     return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=metadata)
 
 
@@ -41,7 +44,10 @@ async def cmd_restart(ctx: CommandContext) -> OutboundMessage:
 
     asyncio.create_task(_do_restart())
     # Preserve topic thread context so the reply stays in the correct topic
-    metadata = {"message_thread_id": msg.metadata.get("message_thread_id")}
+    metadata = {
+        "message_thread_id": msg.metadata.get("message_thread_id"),
+        "command_response": True,  # Skip TTS for command responses
+    }
     return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="Restarting...", metadata=metadata)
 
 
@@ -58,7 +64,11 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
         ctx_est = loop._last_usage.get("prompt_tokens", 0)
     model_override = loop._model_overrides.get(ctx.key)
     # Preserve topic thread context so the reply stays in the correct topic
-    metadata = {"render_as": "text", "message_thread_id": ctx.msg.metadata.get("message_thread_id")}
+    metadata = {
+        "render_as": "text",
+        "message_thread_id": ctx.msg.metadata.get("message_thread_id"),
+        "command_response": True,  # Skip TTS for command responses
+    }
     return OutboundMessage(
         channel=ctx.msg.channel,
         chat_id=ctx.msg.chat_id,
@@ -87,7 +97,10 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     if snapshot:
         loop._schedule_background(loop.memory_consolidator.archive_messages(snapshot))
     # Preserve topic thread context so the reply stays in the correct topic
-    metadata = {"message_thread_id": ctx.msg.metadata.get("message_thread_id")}
+    metadata = {
+        "message_thread_id": ctx.msg.metadata.get("message_thread_id"),
+        "command_response": True,  # Skip TTS for command responses
+    }
     return OutboundMessage(
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
         content="New session started.", metadata=metadata,
@@ -105,7 +118,11 @@ async def cmd_help(ctx: CommandContext) -> OutboundMessage:
         "/help — Show available commands",
     ]
     # Preserve topic thread context so the reply stays in the correct topic
-    metadata = {"render_as": "text", "message_thread_id": ctx.msg.metadata.get("message_thread_id")}
+    metadata = {
+        "render_as": "text",
+        "message_thread_id": ctx.msg.metadata.get("message_thread_id"),
+        "command_response": True,  # Skip TTS for command responses
+    }
     return OutboundMessage(
         channel=ctx.msg.channel,
         chat_id=ctx.msg.chat_id,

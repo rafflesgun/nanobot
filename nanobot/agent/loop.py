@@ -394,7 +394,8 @@ class AgentLoop:
         raw = (raw_content or msg.content).strip()
         parts = raw.split(None, 1)
         model_arg = parts[1].strip() if len(parts) > 1 else ""
-        _meta = msg.metadata or {}
+        _meta = dict(msg.metadata or {})
+        _meta["command_response"] = True  # Skip TTS for command responses
 
         if not model_arg:
             effective = self._model_overrides.get(session_key, self.model)
@@ -445,7 +446,8 @@ class AgentLoop:
 
     async def _handle_stats_command(self, msg: InboundMessage, args: list[str]) -> OutboundMessage:
         """Handle /stats command — show token usage statistics."""
-        _meta = msg.metadata or {}
+        _meta = dict(msg.metadata or {})
+        _meta["command_response"] = True  # Skip TTS for command responses
 
         if args and args[0].lower() == "topic" and _meta.get("message_thread_id") is None:
             return OutboundMessage(
