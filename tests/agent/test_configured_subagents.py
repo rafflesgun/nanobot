@@ -114,6 +114,7 @@ async def test_subagent_manager_uses_selected_agent_profile(tmp_path, monkeypatc
         provider=MagicMock(),
         workspace=tmp_path,
         bus=MessageBus(),
+        max_tool_result_chars=16000,
         agents_config=config.agents,
         provider_factory=provider_factory,
     )

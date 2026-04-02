@@ -636,11 +636,15 @@ def gateway(
         web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,
         cron_service=cron,
-        restrict_to_workspace=config.tools.restrict_to_workspace,
+        restrict_to_workspace=config.tools.restrict_to_workspace.enabled if hasattr(config.tools.restrict_to_workspace, 'enabled') else config.tools.restrict_to_workspace,
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
+        extra_read=config.tools.restrict_to_workspace.extra_read if hasattr(config.tools.restrict_to_workspace, 'extra_read') else None,
+        extra_write=config.tools.restrict_to_workspace.extra_write if hasattr(config.tools.restrict_to_workspace, 'extra_write') else None,
+        fallback_models=config.agents.defaults.fallback_models,
+        agents_config=config.agents,
     )
 
     # Set cron callback (needs agent)

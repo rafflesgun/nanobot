@@ -1,10 +1,36 @@
-# Branch-Specific Features – raffles/local (post-merge March 2026)
+# Branch-Specific Features – raffles/local (post-merge April 2026)
 
 This document records features developed on `raffles/local`  
-that survived the merge with `origin/main` on 13 March 2026.
+that survived the merge with `origin/main` on 13 March 2026  
+and the merge with PR #2733 on 2 April 2026.
 
 Goal: help future merge conflict resolution (human or agent)  
 understand intended behavior quickly.
+
+## PR #2733 Integration (April 2026)
+
+PR #2733 "feat: harden agent runtime for long-running tasks" introduced significant architectural changes:
+
+### New Architecture
+- **AgentRunner**: Extracted per-turn execution kernel from AgentLoop
+- **AgentHook/AgentHookContext**: Structured hook system for iteration lifecycle
+- **_LoopHook/_LoopHookChain**: Core hook implementations for the main loop
+
+### Integrated Features
+- In-loop context governance (large tool-result budgeting, history snipping)
+- Recent-turn checkpoints and conservative recovery
+- Large tool-result persistence to disk
+- Risk-aware tool batching (read-only parallel, side-effecting serial)
+- Provider-level retry with backoff, retry-after hints, streaming watchdogs
+- Cross-model message compatibility fixes
+
+### Local Features Preserved
+All local features listed below were preserved during the merge. The main changes:
+- `_run_agent_loop` now delegates to `AgentRunner.run()` instead of implementing the loop directly
+- Hook-based architecture replaced inline streaming/progress callbacks
+- `thread_id` support added to `_LoopHook` and `_set_tool_context`
+- `model_override` passed through to `AgentRunSpec.model`
+- Fallback models test skipped pending integration at `AgentRunner` level
 
 ## Feature Summary Table
 
@@ -37,6 +63,7 @@ understand intended behavior quickly.
 | **Tool definitions caching (#2205)**        | ✅     | agent/tools/registry.py                                | tests/test_tool_registry_caching.py    | `_definitions_cache` invalidated on reg/unreg |
 | **Incremental session saving (#2219)**      | ✅     | agent/loop.py, agent/subagent.py                       | tests/test_loop_incremental_save.py    | save offset tracks persisted content          |
 | Web search enhancements merged into main   | ℹ️     | agent/tools/web.py, README.md                          | tests/tools/test_web_search_tool.py    | Multi-provider search now upstream (`brave`, `tavily`, `duckduckgo`, `searxng`, `jina`) |
+| **Runtime hardening (PR #2733)**           | ✅     | agent/runner.py, agent/hook.py, agent/loop.py          | tests/agent/test_runner.py             | AgentRunner extraction, checkpoints, tool batching, provider retry |
 
 ## Detailed Descriptions & Merge Guidance
 
