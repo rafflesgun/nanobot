@@ -473,6 +473,9 @@ class TelegramChannel(BaseChannel):
 
         thread_id = msg.metadata.get("message_thread_id")
         comp_key = self._composite_key(msg.chat_id, thread_id)
+        
+        logger.info("Telegram.send: chat_id={}, thread_id={}, content={}", 
+                   msg.chat_id, thread_id, (msg.content or "")[:100])
 
         is_progress = msg.metadata.get("_progress", False)
 
