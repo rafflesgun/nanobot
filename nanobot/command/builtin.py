@@ -119,6 +119,19 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
     return ctx.loop._handle_model_command(ctx.msg, ctx.key, ctx.raw)
 
 
+def build_help_text() -> str:
+    """Build canonical help text shared across channels."""
+    lines = [
+        "🐈 nanobot commands:",
+        "/new — Start a new conversation",
+        "/stop — Stop the current task",
+        "/restart — Restart the bot",
+        "/status — Show bot status",
+        "/help — Show available commands",
+    ]
+    return "\n".join(lines)
+
+
 def register_builtin_commands(router: CommandRouter) -> None:
     """Register the default set of slash commands."""
     router.priority("/stop", cmd_stop)
