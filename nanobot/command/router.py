@@ -59,9 +59,13 @@ class CommandRouter:
 
     async def dispatch_priority(self, ctx: CommandContext) -> OutboundMessage | None:
         """Dispatch a priority command. Called from run() without the lock."""
+        from loguru import logger
+        logger.debug("dispatch_priority: ctx.raw={!r}, priority_keys={}", ctx.raw.lower(), list(self._priority.keys()))
         handler = self._priority.get(ctx.raw.lower())
         if handler:
+            logger.debug("Priority handler found for {!r}", ctx.raw.lower())
             return await handler(ctx)
+        logger.debug("No priority handler for {!r}", ctx.raw.lower())
         return None
 
     async def dispatch(self, ctx: CommandContext) -> OutboundMessage | None:

@@ -606,11 +606,15 @@ class AgentLoop:
                 continue
 
             raw = msg.content.strip()
+            logger.debug("Checking priority command: raw={!r}, is_priority={}", raw, self.commands.is_priority(raw))
             if self.commands.is_priority(raw):
                 ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw=raw, loop=self)
                 result = await self.commands.dispatch_priority(ctx)
                 if result:
+                    logger.info("Priority command returned result, publishing to {}/{}", result.channel, result.chat_id)
                     await self.bus.publish_outbound(result)
+                else:
+                    logger.warning("Priority command returned None for raw={!r}", raw)
                 continue
             task = asyncio.create_task(self._dispatch(msg))
             self._active_tasks.setdefault(msg.session_key, []).append(task)
