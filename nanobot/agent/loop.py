@@ -36,6 +36,7 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.helpers import image_placeholder_text, truncate_text
 from nanobot.utils.stats import StatsManager
+from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebSearchConfig
@@ -99,6 +100,15 @@ class _LoopHook(AgentHook):
             args_str = json.dumps(tc.arguments, ensure_ascii=False)
             logger.info("Tool call: {}({})", tc.name, args_str[:200])
         self._loop._set_tool_context(self._channel, self._chat_id, self._message_id, self._thread_id)
+
+    async def after_iteration(self, context: AgentHookContext) -> None:
+        u = context.usage or {}
+        logger.debug(
+            "LLM usage: prompt={} completion={} cached={}",
+            u.get("prompt_tokens", 0),
+            u.get("completion_tokens", 0),
+            u.get("cached_tokens", 0),
+        )
 
     def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
         return self._loop._strip_think(content)
@@ -803,8 +813,8 @@ class AgentLoop:
             model_override=self._model_overrides.get(key),
         )
 
-        if final_content is None:
-            final_content = "I've completed processing but have no response to give."
+        if final_content is None or not final_content.strip():
+            final_content = EMPTY_FINAL_RESPONSE_MESSAGE
 
         if session is not None:
             self._save_turn(session, all_msgs, 1 + len(history))

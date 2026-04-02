@@ -359,6 +359,70 @@ def test_persist_tool_result_leaves_no_temp_files(tmp_path):
     assert list((root / "current_session").glob("*.tmp")) == []
 
 
+def test_persist_tool_result_logs_cleanup_failures(monkeypatch, tmp_path):
+    from nanobot.utils.helpers import maybe_persist_tool_result
+
+    warnings: list[str] = []
+
+    monkeypatch.setattr(
+        "nanobot.utils.helpers._cleanup_tool_result_buckets",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("busy")),
+    )
+    monkeypatch.setattr(
+        "nanobot.utils.helpers.logger.warning",
+        lambda message, *args: warnings.append(message.format(*args)),
+    )
+
+    persisted = maybe_persist_tool_result(
+        tmp_path,
+        "current:session",
+        "call_big",
+        "x" * 5000,
+        max_chars=64,
+    )
+
+    assert "[tool output persisted]" in persisted
+    assert warnings and "Failed to clean stale tool result buckets" in warnings[0]
+
+
+@pytest.mark.asyncio
+async def test_runner_replaces_empty_tool_result_with_marker():
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    captured_second_call: list[dict] = []
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return LLMResponse(
+                content="working",
+                tool_calls=[ToolCallRequest(id="call_1", name="noop", arguments={})],
+                usage={},
+            )
+        captured_second_call[:] = messages
+        return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="")
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "do task"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=2,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.final_content == "done"
+    tool_message = next(msg for msg in captured_second_call if msg.get("role") == "tool")
+    assert tool_message["content"] == "(noop completed with no output)"
+
+
 @pytest.mark.asyncio
 async def test_runner_uses_raw_messages_when_context_governance_fails():
     from nanobot.agent.runner import AgentRunSpec, AgentRunner
@@ -390,6 +454,124 @@ async def test_runner_uses_raw_messages_when_context_governance_fails():
 
     assert result.final_content == "done"
     assert captured_messages == initial_messages
+
+
+@pytest.mark.asyncio
+async def test_runner_retries_empty_final_response_with_summary_prompt():
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    calls: list[dict] = []
+
+    async def chat_with_retry(*, messages, tools=None, **kwargs):
+        calls.append({"messages": messages, "tools": tools})
+        if len(calls) == 1:
+            return LLMResponse(
+                content=None,
+                tool_calls=[],
+                usage={"prompt_tokens": 10, "completion_tokens": 1},
+            )
+        return LLMResponse(
+            content="final answer",
+            tool_calls=[],
+            usage={"prompt_tokens": 3, "completion_tokens": 7},
+        )
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "do task"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.final_content == "final answer"
+    assert len(calls) == 2
+    assert calls[1]["tools"] is None
+    assert "Do not call any more tools" in calls[1]["messages"][-1]["content"]
+    assert result.usage["prompt_tokens"] == 13
+    assert result.usage["completion_tokens"] == 8
+
+
+@pytest.mark.asyncio
+async def test_runner_uses_specific_message_after_empty_finalization_retry():
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
+
+    provider = MagicMock()
+
+    async def chat_with_retry(*, messages, **kwargs):
+        return LLMResponse(content=None, tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "do task"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.final_content == EMPTY_FINAL_RESPONSE_MESSAGE
+    assert result.stop_reason == "empty_final_response"
+
+
+def test_snip_history_drops_orphaned_tool_results_from_trimmed_slice(monkeypatch):
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    runner = AgentRunner(provider)
+    messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "old user"},
+        {
+            "role": "assistant",
+            "content": "tool call",
+            "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "ls", "arguments": "{}"}}],
+        },
+        {"role": "tool", "tool_call_id": "call_1", "content": "tool output"},
+        {"role": "assistant", "content": "after tool"},
+    ]
+    spec = AgentRunSpec(
+        initial_messages=messages,
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        context_window_tokens=2000,
+        context_block_limit=100,
+    )
+
+    monkeypatch.setattr("nanobot.agent.runner.estimate_prompt_tokens_chain", lambda *_args, **_kwargs: (500, None))
+    token_sizes = {
+        "old user": 120,
+        "tool call": 120,
+        "tool output": 40,
+        "after tool": 40,
+        "system": 0,
+    }
+    monkeypatch.setattr(
+        "nanobot.agent.runner.estimate_message_tokens",
+        lambda msg: token_sizes.get(str(msg.get("content")), 40),
+    )
+
+    trimmed = runner._snip_history(spec, messages)
+
+    assert trimmed == [
+        {"role": "system", "content": "system"},
+        {"role": "assistant", "content": "after tool"},
+    ]
 
 
 @pytest.mark.asyncio
@@ -489,6 +671,7 @@ async def test_runner_batches_read_only_tools_before_exclusive_work():
             ToolCallRequest(id="ro2", name="read_b", arguments={}),
             ToolCallRequest(id="rw1", name="write_a", arguments={}),
         ],
+        {},
     )
 
     assert shared_events[0:2] == ["start:read_a", "start:read_b"]
@@ -496,6 +679,48 @@ async def test_runner_batches_read_only_tools_before_exclusive_work():
     assert shared_events.index("end:read_a") < shared_events.index("start:write_a")
     assert shared_events.index("end:read_b") < shared_events.index("start:write_a")
     assert shared_events[-2:] == ["start:write_a", "end:write_a"]
+
+
+@pytest.mark.asyncio
+async def test_runner_blocks_repeated_external_fetches():
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    captured_final_call: list[dict] = []
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] <= 3:
+            return LLMResponse(
+                content="working",
+                tool_calls=[ToolCallRequest(id=f"call_{call_count['n']}", name="web_fetch", arguments={"url": "https://example.com"})],
+                usage={},
+            )
+        captured_final_call[:] = messages
+        return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="page content")
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "research task"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=4,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.final_content == "done"
+    assert tools.execute.await_count == 2
+    blocked_tool_message = [
+        msg for msg in captured_final_call
+        if msg.get("role") == "tool" and msg.get("tool_call_id") == "call_3"
+    ][0]
+    assert "repeated external lookup blocked" in blocked_tool_message["content"]
 
 
 @pytest.mark.asyncio
@@ -548,6 +773,57 @@ async def test_loop_stream_filter_handles_think_only_prefix_without_crashing(tmp
 
 
 @pytest.mark.asyncio
+async def test_loop_retries_think_only_final_response(tmp_path):
+    loop = _make_loop(tmp_path)
+    call_count = {"n": 0}
+
+    async def chat_with_retry(**kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return LLMResponse(content="<think>hidden</think>", tool_calls=[], usage={})
+        return LLMResponse(content="Recovered answer", tool_calls=[], usage={})
+
+    loop.provider.chat_with_retry = chat_with_retry
+
+    final_content, _, _ = await loop._run_agent_loop([])
+
+    assert final_content == "Recovered answer"
+    assert call_count["n"] == 2
+
+
+@pytest.mark.asyncio
+async def test_runner_tool_error_sets_final_content():
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+
+    async def chat_with_retry(*, messages, **kwargs):
+        return LLMResponse(
+            content="working",
+            tool_calls=[ToolCallRequest(id="call_1", name="read_file", arguments={"path": "x"})],
+            usage={},
+        )
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(side_effect=RuntimeError("boom"))
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "do task"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        fail_on_tool_error=True,
+    ))
+
+    assert result.final_content == "Error: RuntimeError: boom"
+    assert result.stop_reason == "tool_error"
+
+
+@pytest.mark.asyncio
 async def test_subagent_max_iterations_announces_existing_fallback(tmp_path, monkeypatch):
     from nanobot.agent.subagent import SubagentManager
     from nanobot.bus.queue import MessageBus
@@ -578,3 +854,84 @@ async def test_subagent_max_iterations_announces_existing_fallback(tmp_path, mon
     args = mgr._announce_result.await_args.args
     assert args[3] == "Task completed but no final response was generated."
     assert args[5] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_runner_accumulates_usage_and_preserves_cached_tokens():
+    """Runner should accumulate prompt/completion tokens across iterations
+    and preserve cached_tokens from provider responses."""
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return LLMResponse(
+                content="thinking",
+                tool_calls=[ToolCallRequest(id="call_1", name="read_file", arguments={"path": "x"})],
+                usage={"prompt_tokens": 100, "completion_tokens": 10, "cached_tokens": 80},
+            )
+        return LLMResponse(
+            content="done",
+            tool_calls=[],
+            usage={"prompt_tokens": 200, "completion_tokens": 20, "cached_tokens": 150},
+        )
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="file content")
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "do task"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=3,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    # Usage should be accumulated across iterations
+    assert result.usage["prompt_tokens"] == 300  # 100 + 200
+    assert result.usage["completion_tokens"] == 30  # 10 + 20
+    assert result.usage["cached_tokens"] == 230  # 80 + 150
+
+
+@pytest.mark.asyncio
+async def test_runner_passes_cached_tokens_to_hook_context():
+    """Hook context.usage should contain cached_tokens."""
+    from nanobot.agent.hook import AgentHook, AgentHookContext
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    captured_usage: list[dict] = []
+
+    class UsageHook(AgentHook):
+        async def after_iteration(self, context: AgentHookContext) -> None:
+            captured_usage.append(dict(context.usage))
+
+    async def chat_with_retry(**kwargs):
+        return LLMResponse(
+            content="done",
+            tool_calls=[],
+            usage={"prompt_tokens": 200, "completion_tokens": 20, "cached_tokens": 150},
+        )
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    runner = AgentRunner(provider)
+    await runner.run(AgentRunSpec(
+        initial_messages=[],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        hook=UsageHook(),
+    ))
+
+    assert len(captured_usage) == 1
+    assert captured_usage[0]["cached_tokens"] == 150
