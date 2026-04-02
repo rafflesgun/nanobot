@@ -991,7 +991,7 @@ class TelegramChannel(BaseChannel):
             return
 
         user = update.effective_user
-        await update.message.reply_text(
+        await self._reply_in_topic(update.message,
             f"👋 Hi {user.first_name}! I'm nanobot.\n\n"
             "Send me a message and I'll respond!\n"
             "Type /help to see available commands."
@@ -1001,7 +1001,7 @@ class TelegramChannel(BaseChannel):
         """Handle /help command, bypassing ACL so all users can access it."""
         if not update.message:
             return
-        await update.message.reply_text(
+        await self._reply_in_topic(update.message,
             "🐈 nanobot commands:\n"
             "/new — Start a new conversation\n"
             "/stop — Stop the current task\n"
@@ -1027,7 +1027,7 @@ class TelegramChannel(BaseChannel):
 
         # Check if user is allowed
         if not self.is_allowed(self._sender_id(update.effective_user)):
-            await update.message.reply_text("❌ You are not authorized to use this bot.")
+            await self._reply_in_topic(update.message, "❌ You are not authorized to use this bot.")
             return
 
         # Parse command arguments
@@ -1046,7 +1046,8 @@ class TelegramChannel(BaseChannel):
             )
 
         if not args:
-            await update.message.reply_text(
+            await self._reply_in_topic(
+                update.message,
                 _tts_status_msg(
                     scope_key,
                     "Usage:\n"
@@ -1056,7 +1057,7 @@ class TelegramChannel(BaseChannel):
                     "/tts voice [name] — Change voice\n"
                     "/tts provider [edge/openai/riva] — Change provider\n"
                     "/tts status — Show current settings",
-                )
+                ),
             )
             return
 
@@ -1067,17 +1068,17 @@ class TelegramChannel(BaseChannel):
                 self._chat_tts_overrides[scope_key] = {}
             self._chat_tts_overrides[scope_key]["enabled"] = True
             save_tts_overrides(self._chat_tts_overrides)
-            await update.message.reply_text("🔊 TTS enabled for this chat/topic.")
+            await self._reply_in_topic(update.message, "🔊 TTS enabled for this chat/topic.")
 
         elif command == "off":
             if scope_key not in self._chat_tts_overrides:
                 self._chat_tts_overrides[scope_key] = {}
             self._chat_tts_overrides[scope_key]["enabled"] = False
             save_tts_overrides(self._chat_tts_overrides)
-            await update.message.reply_text("🔇 TTS disabled for this chat/topic.")
+            await self._reply_in_topic(update.message, "🔇 TTS disabled for this chat/topic.")
 
         elif command == "status":
-            await update.message.reply_text(_tts_status_msg(scope_key))
+            await self._reply_in_topic(update.message, _tts_status_msg(scope_key))
 
         elif command == "voices":
             # List available voices for current provider, with optional locale filter
@@ -1087,14 +1088,14 @@ class TelegramChannel(BaseChannel):
             current_voice = override.get("voice", self.tts_manager.config.voice)
             locale_filter = args[1].lower() if len(args) > 1 else None
 
-            await update.message.reply_text(f"⏳ Fetching voices for {provider_name}...")
+            await self._reply_in_topic(update.message,f"⏳ Fetching voices for {provider_name}...")
 
             try:
                 result = await self.tts_manager.get_supported_voices(provider_name)
                 voices = result.get("voices", [])
 
                 if not voices:
-                    await update.message.reply_text(
+                    await self._reply_in_topic(update.message,
                         "❌ No voices available or provider unreachable."
                     )
                     return
@@ -1114,7 +1115,7 @@ class TelegramChannel(BaseChannel):
                         ]
 
                     if not voices:
-                        await update.message.reply_text(
+                        await self._reply_in_topic(update.message,
                             f"No voices found for that locale.\n"
                             f"Try: /tts voices en-US  or  /tts voices zh-CN"
                         )
@@ -1211,11 +1212,11 @@ class TelegramChannel(BaseChannel):
                         if len(voices) > 30:
                             lines.append(f"\n+{len(voices) - 30} more")
 
-                await update.message.reply_text("\n".join(lines))
+                await self._reply_in_topic(update.message,"\n".join(lines))
 
             except Exception as e:
                 logger.error("Failed to list voices: {}", e)
-                await update.message.reply_text("❌ Failed to fetch voices.")
+                await self._reply_in_topic(update.message,"❌ Failed to fetch voices.")
 
         elif command == "voice" and len(args) > 1:
             # Change voice
@@ -1224,7 +1225,7 @@ class TelegramChannel(BaseChannel):
                 self._chat_tts_overrides[scope_key] = {}
             self._chat_tts_overrides[scope_key]["voice"] = new_voice
             save_tts_overrides(self._chat_tts_overrides)
-            await update.message.reply_text(f"🎙️ Voice changed to: {new_voice}")
+            await self._reply_in_topic(update.message,f"🎙️ Voice changed to: {new_voice}")
 
         elif command == "provider" and len(args) > 1:
             # Change provider
@@ -1234,13 +1235,13 @@ class TelegramChannel(BaseChannel):
                     self._chat_tts_overrides[scope_key] = {}
                 self._chat_tts_overrides[scope_key]["provider"] = new_provider
                 save_tts_overrides(self._chat_tts_overrides)
-                await update.message.reply_text(f"🔄 TTS provider changed to: {new_provider}")
+                await self._reply_in_topic(update.message,f"🔄 TTS provider changed to: {new_provider}")
             else:
-                await update.message.reply_text(
+                await self._reply_in_topic(update.message,
                     "❌ Invalid provider. Use 'edge', 'openai', or 'riva'."
                 )
         else:
-            await update.message.reply_text(
+            await self._reply_in_topic(update.message,
                 "❓ Unknown command. Usage:\n"
                 "/tts on — Enable TTS\n"
                 "/tts off — Disable TTS\n"
@@ -1260,7 +1261,7 @@ class TelegramChannel(BaseChannel):
 
         # Check if user is allowed
         if not self.is_allowed(self._sender_id(update.effective_user)):
-            await update.message.reply_text("❌ You are not authorized to use this bot.")
+            await self._reply_in_topic(update.message,"❌ You are not authorized to use this bot.")
             return
 
         # Parse command arguments
@@ -1268,7 +1269,7 @@ class TelegramChannel(BaseChannel):
 
         if not args:
             status = "on" if self._trace_enabled.get(chat_id_str, False) else "off"
-            await update.message.reply_text(
+            await self._reply_in_topic(update.message,
                 f"🔍 Trace mode: {status}\n\nUsage:\n/trace on — Show intermediate thoughts\n/trace off — Hide intermediate thoughts\n/trace status — Show current status"
             )
             return
@@ -1277,21 +1278,21 @@ class TelegramChannel(BaseChannel):
 
         if command == "on":
             self._trace_enabled[chat_id_str] = True
-            await update.message.reply_text(
+            await self._reply_in_topic(update.message,
                 "🔍 Trace mode **enabled** for this chat.\nIntermediate thoughts will now appear prefixed with 🤖"
             )
         elif command == "off":
             self._trace_enabled[chat_id_str] = False
-            await update.message.reply_text(
+            await self._reply_in_topic(update.message,
                 "🔍 Trace mode **disabled** for this chat.\nIntermediate thoughts will be hidden (only shown in logs)."
             )
         elif command == "status":
             status = "on" if self._trace_enabled.get(chat_id_str, False) else "off"
-            await update.message.reply_text(
+            await self._reply_in_topic(update.message,
                 f"🔍 Trace mode is currently **{status}** for this chat."
             )
         else:
-            await update.message.reply_text(
+            await self._reply_in_topic(update.message,
                 "❓ Unknown command. Usage:\n"
                 "/trace on — Show intermediate thoughts\n"
                 "/trace off — Hide intermediate thoughts\n"
@@ -1316,6 +1317,14 @@ class TelegramChannel(BaseChannel):
     def _get_thread_id(message) -> int | None:
         """Extract the Telegram topic thread id if present."""
         return getattr(message, "message_thread_id", None)
+
+    @staticmethod
+    async def _reply_in_topic(message, text: str, **kwargs) -> None:
+        """Reply to a message, preserving topic thread context if present."""
+        thread_id = getattr(message, "message_thread_id", None)
+        if thread_id:
+            kwargs["message_thread_id"] = thread_id
+        await message.reply_text(text, **kwargs)
 
     def _resolve_debounce_lane(self, message) -> str:
         """Scope debounce buffering by chat + topic."""
@@ -1964,7 +1973,7 @@ class TelegramChannel(BaseChannel):
 
         # Check if user is allowed
         if not self.is_allowed(self._sender_id(update.effective_user)):
-            await update.message.reply_text("❌ You are not authorized to use this bot.")
+            await self._reply_in_topic(update.message,"❌ You are not authorized to use this bot.")
             return
 
         # Parse command arguments
@@ -2047,11 +2056,11 @@ class TelegramChannel(BaseChannel):
                     else:
                         response = "📊 No token usage statistics found for this chat."
 
-            await update.message.reply_text(response, parse_mode="HTML")
+            await self._reply_in_topic(update.message,response, parse_mode="HTML")
 
         except Exception as e:
             logger.error("Failed to fetch stats: {}", e)
-            await update.message.reply_text("❌ Failed to fetch token usage statistics.")
+            await self._reply_in_topic(update.message,"❌ Failed to fetch token usage statistics.")
 
     async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Log polling / handler errors instead of silently swallowing them."""
