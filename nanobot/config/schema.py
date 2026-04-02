@@ -275,6 +275,8 @@ class AgentDefaults(Base):
     max_tool_result_chars: int = 16_000
     provider_retry_mode: Literal["standard", "persistent"] = "standard"
     reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
+    timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
+    reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
 
 
 class AgentsConfig(Base):
