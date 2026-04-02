@@ -658,12 +658,15 @@ class AgentLoop:
                     msg, on_stream=on_stream, on_stream_end=on_stream_end,
                 )
                 if response is not None:
+                    logger.info("Publishing response to {}/{}", response.channel, response.chat_id)
                     await self.bus.publish_outbound(response)
                 elif msg.channel == "cli":
                     await self.bus.publish_outbound(OutboundMessage(
                         channel=msg.channel, chat_id=msg.chat_id,
                         content="", metadata=msg.metadata or {},
                     ))
+                else:
+                    logger.debug("No response from _process_message for {}/{}", msg.channel, msg.chat_id)
             except asyncio.CancelledError:
                 logger.info("Task cancelled for session {}", msg.session_key)
                 raise
@@ -753,7 +756,9 @@ class AgentLoop:
         if raw.startswith("@"):
             raw = re.sub(r"^@\S+\s*", "", raw).strip()
         ctx = CommandContext(msg=msg, session=session, key=key, raw=raw, loop=self)
+        logger.debug("Dispatching command: raw={!r}", raw)
         if result := await self.commands.dispatch(ctx):
+            logger.debug("Command returned result: channel={}, chat_id={}", result.channel, result.chat_id)
             return result
 
         if session:

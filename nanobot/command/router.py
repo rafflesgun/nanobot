@@ -66,9 +66,12 @@ class CommandRouter:
 
     async def dispatch(self, ctx: CommandContext) -> OutboundMessage | None:
         """Try exact, prefix, then interceptors. Returns None if unhandled."""
+        from loguru import logger
         cmd = ctx.raw.lower()
+        logger.debug("Router dispatch: cmd={!r}, exact_keys={}", cmd, list(self._exact.keys()))
 
         if handler := self._exact.get(cmd):
+            logger.debug("Exact match found for {!r}", cmd)
             return await handler(ctx)
 
         for pfx, handler in self._prefix:
