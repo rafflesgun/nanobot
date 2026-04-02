@@ -59,6 +59,10 @@ class ExecTool(Tool):
         return "Execute a shell command and return its output. Use with caution."
 
     @property
+    def exclusive(self) -> bool:
+        return True
+
+    @property
     def parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
