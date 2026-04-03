@@ -87,6 +87,7 @@ class SubagentManager:
         origin_chat_id: str = "direct",
         session_key: str | None = None,
         subagent_id: str | None = None,
+        model_override: str | None = None,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
         task_id = str(uuid.uuid4())[:8]
@@ -94,7 +95,11 @@ class SubagentManager:
         origin = {"channel": origin_channel, "chat_id": origin_chat_id}
 
         bg_task = asyncio.create_task(
-            self._run_subagent(task_id, task, display_label, origin, subagent_id=subagent_id)
+            self._run_subagent(
+                task_id, task, display_label, origin, 
+                subagent_id=subagent_id, 
+                model_override=model_override
+            )
         )
         self._running_tasks[task_id] = bg_task
         if session_key:
@@ -143,12 +148,16 @@ class SubagentManager:
         label: str,
         origin: dict[str, str],
         subagent_id: str | None = None,
+        model_override: str | None = None,
     ) -> None:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
 
         try:
             agent_config, provider = self._resolve_subagent_backend(subagent_id)
+            
+            # Use model override if provided, otherwise use agent config model
+            effective_model = model_override or agent_config.model
 
             # Build subagent tools (no message tool, no spawn tool)
             tools = ToolRegistry()
@@ -175,28 +184,65 @@ class SubagentManager:
                 {"role": "user", "content": task},
             ]
 
-            result = await self.runner.run(AgentRunSpec(
-                initial_messages=messages,
-                tools=tools,
-                model=agent_config.model,
-                max_iterations=15,
-                max_tool_result_chars=self.max_tool_result_chars,
-                hook=_SubagentHook(task_id),
-                max_iterations_message="Task completed but no final response was generated.",
-                error_message=None,
-                fail_on_tool_error=True,
-            ))
-            if result.stop_reason == "tool_error":
-                await self._announce_result(
-                    task_id,
-                    label,
-                    task,
-                    self._format_partial_progress(result),
-                    origin,
-                    "error",
-                )
-                return
-            if result.stop_reason == "error":
+            # Try with fallback models if configured
+            models_to_try = [effective_model] + self.fallback_models
+            last_error = None
+            
+            for model in models_to_try:
+                try:
+                    result = await self.runner.run(AgentRunSpec(
+                        initial_messages=messages,
+                        tools=tools,
+                        model=model,
+                        max_iterations=15,
+                        max_tool_result_chars=self.max_tool_result_chars,
+                        hook=_SubagentHook(task_id),
+                        max_iterations_message="Task completed but no final response was generated.",
+                        error_message=None,
+                        fail_on_tool_error=True,
+                    ))
+                    
+                    if result.stop_reason == "tool_error":
+                        await self._announce_result(
+                            task_id,
+                            label,
+                            task,
+                            self._format_partial_progress(result),
+                            origin,
+                            "error",
+                        )
+                        return
+                    
+                    if result.stop_reason == "error":
+                        raise Exception(result.final_content or "Subagent error")
+                    
+                    # Success
+                    break
+                    
+                except Exception as e:
+                    last_error = e
+                    error_msg = str(e).lower()
+                    
+                    # Check if this is a fallback-eligible error
+                    is_fallback_eligible = (
+                        "provider returned error" in error_msg
+                        or "502" in error_msg
+                        or "503" in error_msg
+                        or "400" in error_msg
+                        or "timeout" in error_msg
+                        or "database is locked" in error_msg
+                        or "bad_response" in error_msg
+                        or "unknown error" in error_msg
+                    )
+                    
+                    if is_fallback_eligible and model != models_to_try[-1]:
+                        logger.warning(
+                            "Subagent [{}] model {} failed with: {}, trying fallback",
+                            task_id, model, str(e)[:100]
+                        )
+                        continue
+                    else:
+                        raise
                 await self._announce_result(
                     task_id,
                     label,

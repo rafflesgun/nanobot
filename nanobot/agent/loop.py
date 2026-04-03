@@ -57,6 +57,7 @@ class _LoopHook(AgentHook):
         chat_id: str = "direct",
         message_id: str | None = None,
         thread_id: int | None = None,
+        session_key: str | None = None,
     ) -> None:
         self._loop = agent_loop
         self._on_progress = on_progress
@@ -66,6 +67,7 @@ class _LoopHook(AgentHook):
         self._chat_id = chat_id
         self._message_id = message_id
         self._thread_id = thread_id
+        self._session_key = session_key
         self._stream_buf = ""
 
     def wants_streaming(self) -> bool:
@@ -99,7 +101,9 @@ class _LoopHook(AgentHook):
         for tc in context.tool_calls:
             args_str = json.dumps(tc.arguments, ensure_ascii=False)
             logger.info("Tool call: {}({})", tc.name, args_str[:200])
-        self._loop._set_tool_context(self._channel, self._chat_id, self._message_id, self._thread_id)
+        self._loop._set_tool_context(
+            self._channel, self._chat_id, self._message_id, self._thread_id, self._session_key
+        )
 
     async def after_iteration(self, context: AgentHookContext) -> None:
         u = context.usage or {}
@@ -337,8 +341,11 @@ class AgentLoop:
         chat_id: str,
         message_id: str | None = None,
         thread_id: int | None = None,
+        session_key: str | None = None,
     ) -> None:
         """Update context for all tools that need routing info."""
+        model_override = self._model_overrides.get(session_key) if session_key else None
+        
         for name in ("message", "spawn", "cron"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
@@ -346,8 +353,8 @@ class AgentLoop:
                         tool.set_context(channel, chat_id, message_id, thread_id)
                     elif name == "cron":
                         tool.set_context(channel, chat_id, thread_id)
-                    else:
-                        tool.set_context(channel, chat_id)
+                    elif name == "spawn":
+                        tool.set_context(channel, chat_id, model_override)
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
@@ -376,6 +383,7 @@ class AgentLoop:
             "provider returned error" in error_msg
             or "502" in error_msg
             or "503" in error_msg
+            or "400" in error_msg  # Bad request - may be model-specific format issue
             or "timeout" in error_msg
             or "404" in error_msg
             or "403" in error_msg
@@ -384,6 +392,9 @@ class AgentLoop:
             or "allocationquota" in error_msg
             or "free tier" in error_msg
             or "exhausted" in error_msg
+            or "database is locked" in error_msg  # SQLite concurrency issue
+            or "bad_response" in error_msg
+            or "unknown error" in error_msg
         )
 
     def _ordered_fallback_models(self, primary_model: str) -> list[str]:
@@ -551,6 +562,14 @@ class AgentLoop:
         ``resuming=False`` means this is the final response.
         """
         effective_model = model_override or self.model
+        # Derive session_key for tool context
+        if session:
+            session_key = session.key
+        elif thread_id:
+            session_key = f"{channel}:{chat_id}:topic:{thread_id}"
+        else:
+            session_key = f"{channel}:{chat_id}"
+        
         loop_hook = _LoopHook(
             self,
             on_progress=on_progress,
@@ -560,6 +579,7 @@ class AgentLoop:
             chat_id=chat_id,
             message_id=message_id,
             thread_id=thread_id,
+            session_key=session_key,
         )
         hook: AgentHook = (
             _LoopHookChain(loop_hook, self._extra_hooks)
@@ -733,7 +753,12 @@ class AgentLoop:
             if self._restore_runtime_checkpoint(session):
                 self.sessions.save(session)
             await self.memory_consolidator.maybe_consolidate_by_tokens(session)
-            self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"), msg.metadata.get("message_thread_id"))
+            self._set_tool_context(
+                channel, chat_id, 
+                msg.metadata.get("message_id"), 
+                msg.metadata.get("message_thread_id"),
+                session_key=key,
+            )
             history = session.get_history(max_messages=0)
             current_role = "assistant" if msg.sender_id == "subagent" else "user"
             messages = self.context.build_messages(
@@ -780,7 +805,12 @@ class AgentLoop:
         if session:
             await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
-        self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"), msg.metadata.get("message_thread_id"))
+        self._set_tool_context(
+            msg.channel, msg.chat_id, 
+            msg.metadata.get("message_id"), 
+            msg.metadata.get("message_thread_id"),
+            session_key=key,
+        )
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()

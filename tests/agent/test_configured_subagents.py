@@ -69,6 +69,7 @@ async def test_spawn_tool_passes_subagent_id_to_manager() -> None:
         origin_chat_id="123",
         session_key="telegram:123",
         subagent_id="research",
+        model_override=None,
     )
 
 
