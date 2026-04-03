@@ -354,7 +354,7 @@ class AgentLoop:
                     elif name == "cron":
                         tool.set_context(channel, chat_id, thread_id)
                     elif name == "spawn":
-                        tool.set_context(channel, chat_id, model_override)
+                        tool.set_context(channel, chat_id, model_override, thread_id)
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:

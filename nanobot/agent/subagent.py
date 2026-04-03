@@ -85,6 +85,7 @@ class SubagentManager:
         label: str | None = None,
         origin_channel: str = "cli",
         origin_chat_id: str = "direct",
+        origin_thread_id: int | None = None,
         session_key: str | None = None,
         subagent_id: str | None = None,
         model_override: str | None = None,
@@ -92,7 +93,7 @@ class SubagentManager:
         """Spawn a subagent to execute a task in the background."""
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
-        origin = {"channel": origin_channel, "chat_id": origin_chat_id}
+        origin = {"channel": origin_channel, "chat_id": origin_chat_id, "thread_id": origin_thread_id}
 
         bg_task = asyncio.create_task(
             self._run_subagent(
@@ -298,15 +299,21 @@ Result:
 Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not mention technical details like "subagent" or task IDs."""
 
         # Inject as system message to trigger main agent
+        metadata = {}
+        if origin.get("thread_id"):
+            metadata["message_thread_id"] = origin["thread_id"]
+        
         msg = InboundMessage(
             channel="system",
             sender_id="subagent",
             chat_id=f"{origin['channel']}:{origin['chat_id']}",
             content=announce_content,
+            metadata=metadata,
         )
 
         await self.bus.publish_inbound(msg)
-        logger.debug("Subagent [{}] announced result to {}:{}", task_id, origin['channel'], origin['chat_id'])
+        thread_info = f":topic:{origin['thread_id']}" if origin.get("thread_id") else ""
+        logger.debug("Subagent [{}] announced result to {}:{}{}", task_id, origin['channel'], origin['chat_id'], thread_info)
 
     @staticmethod
     def _format_partial_progress(result) -> str:
