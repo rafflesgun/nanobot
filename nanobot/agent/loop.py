@@ -36,7 +36,7 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.helpers import image_placeholder_text, truncate_text
 from nanobot.utils.stats import StatsManager
-from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE, format_provider_error
+from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE, format_provider_error, is_provider_error_message
 
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebSearchConfig
@@ -831,6 +831,9 @@ class AgentLoop:
         meta = dict(msg.metadata or {})
         if on_stream is not None:
             meta["_streamed"] = True
+            # Mark if this is an error message (should be sent even if streamed)
+            if is_provider_error_message(final_content):
+                meta["_streamed_error"] = True
         return OutboundMessage(
             channel=msg.channel, 
             chat_id=msg.chat_id, 
