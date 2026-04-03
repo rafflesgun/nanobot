@@ -569,25 +569,35 @@ class AgentRunner:
             if user_idx is not None:
                 # Start from first user message
                 kept = kept[user_idx:]
+                # Re-validate after trimming
+                start = find_legal_message_start(kept)
+                if start and start < len(kept):
+                    kept = kept[start:]
             else:
                 # No user message in kept - this means we only have tool results
-                # We need to keep at least the last user message from original
+                # We need to keep a valid message chain: user -> assistant -> tool_results
                 logger.warning(
-                    "History snip would remove all user messages; keeping last user message"
+                    "History snip would remove all user messages; keeping last valid chain"
                 )
-                for i, message in enumerate(non_system):
-                    if message.get("role") == "user":
-                        kept = [message] + kept
+                # Find the last user message and following assistant with tool_calls
+                for i in range(len(non_system) - 1, -1, -1):
+                    if non_system[i].get("role") == "user":
+                        # Found user, rebuild from here
+                        kept = []
+                        for j in range(i, len(non_system)):
+                            kept.append(non_system[j])
                         break
-            
-            start = find_legal_message_start(kept)
-            if start:
-                kept = kept[start:]
-        if not kept:
-            kept = non_system[-min(len(non_system), 4) :]
-            start = find_legal_message_start(kept)
-            if start:
-                kept = kept[start:]
+                
+                # Verify the rebuilt chain has a user message
+                has_user = any(m.get("role") == "user" for m in kept)
+                if not has_user:
+                    # Fallback: just use the last few messages from non_system
+                    logger.warning("Could not rebuild valid chain, using last 4 messages")
+                    kept = non_system[-min(len(non_system), 4):]
+        else:
+            # Nothing kept, use last few messages
+            kept = non_system[-min(len(non_system), 4):]
+        
         return system_messages + kept
 
     def _partition_tool_batches(
