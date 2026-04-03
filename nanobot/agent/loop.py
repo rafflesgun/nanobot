@@ -670,12 +670,15 @@ class AgentLoop:
                     msg, on_stream=on_stream, on_stream_end=on_stream_end,
                 )
                 if response is not None:
+                    logger.debug("Publishing response to {}/{}", response.channel, response.chat_id)
                     await self.bus.publish_outbound(response)
                 elif msg.channel == "cli":
                     await self.bus.publish_outbound(OutboundMessage(
                         channel=msg.channel, chat_id=msg.chat_id,
                         content="", metadata=msg.metadata or {},
                     ))
+                else:
+                    logger.warning("No response to publish for {}/{}", msg.channel, msg.chat_id)
             except asyncio.CancelledError:
                 logger.info("Task cancelled for session {}", msg.session_key)
                 raise

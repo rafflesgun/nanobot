@@ -163,6 +163,11 @@ class ChannelManager:
             await channel.send_delta(msg.chat_id, msg.content, msg.metadata)
         elif not msg.metadata.get("_streamed"):
             await channel.send(msg)
+        elif msg.content and msg.content.strip():
+            # Streamed responses should be empty, but if there's content
+            # (e.g., an error message), send it anyway
+            logger.info("Sending streamed response with content (likely error fallback)")
+            await channel.send(msg)
 
     def _coalesce_stream_deltas(
         self, first_msg: OutboundMessage
