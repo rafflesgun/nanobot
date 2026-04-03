@@ -32,6 +32,14 @@ class MessageTool(Tool):
         thread_id: int | None = None,
     ) -> None:
         """Set the current message context."""
+        from loguru import logger
+
+        logger.debug(
+            "MessageTool.set_context: channel={}, chat_id={}, thread_id={}",
+            channel,
+            chat_id,
+            thread_id,
+        )
         self._default_channel = channel
         self._default_chat_id = chat_id
         self._default_message_id = message_id
@@ -87,15 +95,33 @@ class MessageTool(Tool):
         media: list[str] | None = None,
         **kwargs: Any,
     ) -> str:
+        from loguru import logger
+
+        logger.debug(
+            "MessageTool.execute: channel={}, chat_id={}, _default_channel={}, _default_chat_id={}, _default_thread_id={}",
+            channel,
+            chat_id,
+            self._default_channel,
+            self._default_chat_id,
+            self._default_thread_id,
+        )
+
         channel = channel or self._default_channel
         chat_id = chat_id or self._default_chat_id
-        
+
         # Only inherit default message_id when targeting the same channel+chat.
         # Cross-chat sends must not carry the original message_id, because
         # some channels (e.g. Feishu) use it to determine the target
         # conversation via their Reply API, which would route the message
         # to the wrong chat entirely.
-        same_target = (channel == self._default_channel and chat_id == self._default_chat_id)
+        same_target = channel == self._default_channel and chat_id == self._default_chat_id
+        logger.debug(
+            "MessageTool.execute: same_target={}, final channel={}, chat_id={}",
+            same_target,
+            channel,
+            chat_id,
+        )
+
         if same_target:
             message_id = message_id or self._default_message_id
         else:
@@ -111,6 +137,10 @@ class MessageTool(Tool):
         # Include thread_id when sending to the same target (preserves topic context)
         if same_target and self._default_thread_id is not None:
             meta["message_thread_id"] = self._default_thread_id
+            logger.debug(
+                "MessageTool.execute: adding message_thread_id={} to metadata",
+                self._default_thread_id,
+            )
         msg = OutboundMessage(
             channel=channel,
             chat_id=chat_id,
