@@ -559,10 +559,27 @@ class AgentRunner:
         kept.reverse()
 
         if kept:
+            # Find first user message
+            user_idx = None
             for i, message in enumerate(kept):
                 if message.get("role") == "user":
-                    kept = kept[i:]
+                    user_idx = i
                     break
+            
+            if user_idx is not None:
+                # Start from first user message
+                kept = kept[user_idx:]
+            else:
+                # No user message in kept - this means we only have tool results
+                # We need to keep at least the last user message from original
+                logger.warning(
+                    "History snip would remove all user messages; keeping last user message"
+                )
+                for i, message in enumerate(non_system):
+                    if message.get("role") == "user":
+                        kept = [message] + kept
+                        break
+            
             start = find_legal_message_start(kept)
             if start:
                 kept = kept[start:]
