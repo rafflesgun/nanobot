@@ -265,14 +265,33 @@ class CronService:
         self._arm_timer()
 
     async def _execute_job(self, job: CronJob) -> None:
-        """Execute a single job."""
+        """Execute a single job with retry on transient provider errors."""
         start_ms = _now_ms()
         logger.info("Cron: executing job '{}' ({})", job.name, job.id)
 
+        max_retries = 3
+        retry_delay_s = 5
+
         try:
             if self.on_job:
-                await self.on_job(job)
+                result = await self.on_job(job)
+                
+                # Check for provider error and retry
+                from nanobot.utils.runtime import is_provider_error_message
+                retry_count = 0
+                while is_provider_error_message(result) and retry_count < max_retries:
+                    retry_count += 1
+                    job.state.retry_count = retry_count
+                    logger.warning(
+                        "Cron: job '{}' hit provider error, retrying ({}/{}) in {}s",
+                        job.name, retry_count, max_retries, retry_delay_s
+                    )
+                    import asyncio
+                    await asyncio.sleep(retry_delay_s)
+                    if self.on_job:
+                        result = await self.on_job(job)
 
+            job.state.retry_count = 0  # Reset on success
             job.state.last_status = "ok"
             job.state.last_error = None
             logger.info("Cron: job '{}' completed", job.name)

@@ -15,6 +15,34 @@ EMPTY_FINAL_RESPONSE_MESSAGE = (
     "Please try again or narrow the task."
 )
 
+PROVIDER_ERROR_FRIENDLY = (
+    "⚠️ The AI service is temporarily unavailable. "
+    "Please try again in a moment."
+)
+
+PROVIDER_ERROR_FRIENDLY_CRON = (
+    "⚠️ Scheduled task encountered a temporary service error. "
+    "It will retry automatically."
+)
+
+
+def is_provider_error_message(content: str | None) -> bool:
+    """Detect if content is a raw provider error message."""
+    if not content:
+        return False
+    content_lower = content.lower()
+    return (
+        content.startswith("Error:")
+        and ('"error"' in content or "bad_response" in content_lower or "unknown error" in content_lower)
+    )
+
+
+def format_provider_error(content: str | None, is_cron: bool = False) -> str:
+    """Convert raw provider error to user-friendly message."""
+    if not is_provider_error_message(content):
+        return content or ""
+    return PROVIDER_ERROR_FRIENDLY_CRON if is_cron else PROVIDER_ERROR_FRIENDLY
+
 FINALIZATION_RETRY_PROMPT = (
     "You have already finished the tool work. Do not call any more tools. "
     "Using only the conversation and tool results above, provide the final answer for the user now."
