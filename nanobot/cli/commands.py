@@ -670,6 +670,7 @@ def gateway(
                 session_key=f"cron:{job.id}",
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to or "direct",
+                thread_id=job.payload.thread_id,
             )
         finally:
             if isinstance(cron_tool, CronTool) and cron_token is not None:
@@ -687,10 +688,14 @@ def gateway(
             )
             if should_notify:
                 from nanobot.bus.events import OutboundMessage
+                metadata = {}
+                if job.payload.thread_id:
+                    metadata["message_thread_id"] = job.payload.thread_id
                 await bus.publish_outbound(OutboundMessage(
                     channel=job.payload.channel or "cli",
                     chat_id=job.payload.to,
                     content=response,
+                    metadata=metadata,
                 ))
         return response
     cron.on_job = on_cron_job

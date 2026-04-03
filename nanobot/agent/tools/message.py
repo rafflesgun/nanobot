@@ -89,12 +89,14 @@ class MessageTool(Tool):
     ) -> str:
         channel = channel or self._default_channel
         chat_id = chat_id or self._default_chat_id
+        
         # Only inherit default message_id when targeting the same channel+chat.
         # Cross-chat sends must not carry the original message_id, because
         # some channels (e.g. Feishu) use it to determine the target
         # conversation via their Reply API, which would route the message
         # to the wrong chat entirely.
-        if channel == self._default_channel and chat_id == self._default_chat_id:
+        same_target = (channel == self._default_channel and chat_id == self._default_chat_id)
+        if same_target:
             message_id = message_id or self._default_message_id
         else:
             message_id = None
@@ -106,9 +108,9 @@ class MessageTool(Tool):
             return "Error: Message sending not configured"
 
         meta: dict = {"message_id": message_id}
-        effective_thread_id = self._default_thread_id
-        if effective_thread_id is not None:
-            meta["message_thread_id"] = effective_thread_id
+        # Include thread_id when sending to the same target (preserves topic context)
+        if same_target and self._default_thread_id is not None:
+            meta["message_thread_id"] = self._default_thread_id
         msg = OutboundMessage(
             channel=channel,
             chat_id=chat_id,
