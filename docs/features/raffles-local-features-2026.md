@@ -34,6 +34,8 @@ understand intended behavior quickly.
 | **/status shows session model override**   | ✅     | command/builtin.py, utils/helpers.py                   | tests/cli/test_restart_command.py      | shows `gpt-4o (default: claude-opus-4)` when overridden |
 | **Builtin commands preserve topic context** | ✅   | command/builtin.py, channels/telegram.py              | tests/test_telegram_builtin_commands_topic.py | `/new`, `/stop`, `/restart`, `/status`, `/help` |
 | **Cron jobs preserve topic thread_id**     | ✅     | agent/loop.py, agent/tools/cron.py                    | tests/test_cron_topic_delivery.py      | thread_id passed through _run_agent_loop |
+| **Subagent responses preserve topic**      | ✅     | agent/loop.py, agent/subagent.py, agent/tools/message.py | tests/test_telegram_builtin_commands_topic.py | OutboundMessage from system messages includes thread_id |
+| **Telegram updater auto-restart on network errors** | ✅ | channels/telegram.py | manual | monitors updater.running, exponential backoff retry |
 | **Commands enhanced for topic support**     | ✅     | channels/telegram.py, agent/loop.py                    | manual                                 | `/new`, `/stop`, `/model`, `/stats`, `/tts`, `/trace` |
 | **Tool definitions caching (#2205)**        | ✅     | agent/tools/registry.py                                | tests/test_tool_registry_caching.py    | `_definitions_cache` invalidated on reg/unreg |
 | **Incremental session saving (#2219)**      | ✅     | agent/loop.py, agent/subagent.py                       | tests/test_loop_incremental_save.py    | save offset tracks persisted content          |
@@ -476,7 +478,77 @@ Keep the incremental save functionality that protects against data loss during m
 pytest tests/test_loop_incremental_save.py -v
 ```
 
-### 19. Web search status after merge
+### 19. Subagent responses preserve topic thread_id
+
+**Core behavior**
+- When a subagent announces its result via system message, the response goes to the correct topic
+- System message processing extracts `message_thread_id` from metadata and builds topic-scoped session key
+- `OutboundMessage` returned from system message processing includes `thread_id` in metadata
+- MessageTool preserves `thread_id` when LLM explicitly provides `channel` and `chat_id` parameters
+
+**Root cause of original bug**
+- Subagent `_announce_result()` was correctly setting `metadata["message_thread_id"]`
+- System message processing was building correct session key with topic
+- BUT `OutboundMessage` returned at end of system message processing was NOT including `thread_id` in metadata
+- This caused the final response to go to General instead of the topic
+
+**Files to protect during conflicts**
+- nanobot/agent/loop.py → `_process_message()` for system messages, metadata in OutboundMessage
+- nanobot/agent/subagent.py → `_announce_result()` includes `message_thread_id` in metadata
+- nanobot/agent/tools/message.py → `execute()` preserves `thread_id` when `same_target` is True
+
+**Resolution priority**
+1. Keep `metadata["message_thread_id"]` in subagent's `_announce_result()`
+2. Keep thread_id extraction in system message processing: `thread_id = msg.metadata.get("message_thread_id")`
+3. Keep topic-scoped session key: `key = f"{channel}:{chat_id}:topic:{thread_id}"`
+4. **CRITICAL**: Keep `thread_id` in OutboundMessage metadata for system message responses
+5. Keep MessageTool's `same_target` logic that preserves thread_id
+
+**Quick validation**
+```bash
+pytest tests/test_telegram_builtin_commands_topic.py tests/test_cron_topic_delivery.py -v
+```
+
+### 20. Telegram updater auto-restart on network errors
+
+**Core behavior**
+- Monitors `updater.running` state in the polling loop
+- If updater stops unexpectedly (network error, DNS failure), auto-restarts with exponential backoff
+- Retry delay: 5s → 7.5s → 11.25s → ... → 60s max
+- Resets retry delay on successful restart
+- Preserves all bot context (sessions, memory, handlers, Application state)
+
+**Network errors handled**
+- DNS resolution failures (`Temporary failure in name resolution`)
+- Bad Gateway (502)
+- Service Unavailable (503)
+- Connection timeouts
+- General `NetworkError` from python-telegram-bot
+
+**Important**: This restarts only the **polling task**, not the entire bot:
+- `updater.start_polling()` starts a background coroutine that polls `getUpdates()` API
+- When network errors occur, this internal task stops and `updater.running` becomes `False`
+- The fix simply calls `updater.start_polling()` again on the same Application
+- All state (sessions, memory, handlers, caches) is preserved
+
+**Files to protect during conflicts**
+- nanobot/channels/telegram.py → `start()` method, polling loop with `updater.running` check
+
+**Resolution priority**
+Keep the monitoring loop that checks `updater.running` and restarts polling.
+Do NOT restart the entire Application - that would wipe context.
+
+**Code pattern**
+```python
+while self._running:
+    await asyncio.sleep(1)
+    if self._running and not self._app.updater.running:
+        await asyncio.sleep(retry_delay)
+        await self._app.updater.start_polling(...)
+        retry_delay = 5.0  # reset on success
+```
+
+### 21. Web search status after merge
 
 **Core behavior**
 - The old local-only DuckDuckGo enhancement is no longer branch-specific
