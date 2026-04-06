@@ -823,6 +823,7 @@ class AgentLoop:
                 chat_id=chat_id,
                 message_id=msg.metadata.get("message_id"),
                 thread_id=thread_id,
+                model_override=self._model_overrides.get(key),
             )
             self._save_turn(session, all_msgs, 1 + len(history))
             self._clear_runtime_checkpoint(session)
