@@ -24,4 +24,5 @@ nano.*.save
 .DS_Store
 uv.lock
 .ccb/
-/.ccb
+.claude/
+*.log
