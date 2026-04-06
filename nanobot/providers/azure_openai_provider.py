@@ -113,8 +113,17 @@ class AzureOpenAIProvider(LLMProvider):
 
     @staticmethod
     def _handle_error(e: Exception) -> LLMResponse:
-        body = getattr(e, "body", None) or getattr(getattr(e, "response", None), "text", None)
-        msg = f"Error: {str(body).strip()[:500]}" if body else f"Error calling Azure OpenAI: {e}"
+        # Try multiple attributes to extract error body from Azure SDK exceptions
+        body = (
+            getattr(e, "body", None)
+            or getattr(e, "doc", None)
+            or getattr(getattr(e, "response", None), "text", None)
+        )
+        # If body is a dict, format it nicely
+        if isinstance(body, dict):
+            import json
+            body = json.dumps(body, ensure_ascii=False)
+        msg = f"Error: {str(body).strip()[:500]}" if body and str(body).strip() else f"Error calling Azure OpenAI: {e}"
         return LLMResponse(content=msg, finish_reason="error")
 
     # ------------------------------------------------------------------
@@ -139,6 +148,14 @@ class AzureOpenAIProvider(LLMProvider):
             response = await self._client.responses.create(**body)
             return parse_response_output(response)
         except Exception as e:
+            # Log the body that caused the error for debugging
+            from loguru import logger
+            logger.warning(
+                "Azure OpenAI API error with model={}, body_keys={}: {}",
+                body.get("model"),
+                list(body.keys()),
+                str(e)[:200],
+            )
             return self._handle_error(e)
 
     async def chat_stream(
@@ -171,6 +188,14 @@ class AzureOpenAIProvider(LLMProvider):
                 reasoning_content=reasoning_content,
             )
         except Exception as e:
+            # Log the body that caused the error for debugging
+            from loguru import logger
+            logger.warning(
+                "Azure OpenAI stream API error with model={}, body_keys={}: {}",
+                body.get("model"),
+                list(body.keys()),
+                str(e)[:200],
+            )
             return self._handle_error(e)
 
     def get_default_model(self) -> str:

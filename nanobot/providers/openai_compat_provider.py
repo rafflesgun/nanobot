@@ -574,8 +574,17 @@ class OpenAICompatProvider(LLMProvider):
 
     @staticmethod
     def _handle_error(e: Exception) -> LLMResponse:
-        body = getattr(e, "doc", None) or getattr(getattr(e, "response", None), "text", None)
-        msg = f"Error: {body.strip()[:500]}" if body and body.strip() else f"Error calling LLM: {e}"
+        # Try multiple attributes to extract error body from OpenAI SDK exceptions
+        body = (
+            getattr(e, "body", None)
+            or getattr(e, "doc", None)
+            or getattr(getattr(e, "response", None), "text", None)
+        )
+        # If body is a dict, format it nicely
+        if isinstance(body, dict):
+            import json
+            body = json.dumps(body, ensure_ascii=False)
+        msg = f"Error: {str(body).strip()[:500]}" if body and str(body).strip() else f"Error calling LLM: {e}"
         return LLMResponse(content=msg, finish_reason="error")
 
     # ------------------------------------------------------------------
@@ -599,6 +608,14 @@ class OpenAICompatProvider(LLMProvider):
         try:
             return self._parse(await self._client.chat.completions.create(**kwargs))
         except Exception as e:
+            # Log the kwargs that caused the error for debugging
+            from loguru import logger
+            logger.warning(
+                "LLM API error with model={}, kwargs_keys={}: {}",
+                kwargs.get("model"),
+                list(kwargs.keys()),
+                str(e)[:200],
+            )
             return self._handle_error(e)
 
     async def chat_stream(
@@ -646,6 +663,14 @@ class OpenAICompatProvider(LLMProvider):
                 finish_reason="error",
             )
         except Exception as e:
+            # Log the kwargs that caused the error for debugging
+            from loguru import logger
+            logger.warning(
+                "LLM stream API error with model={}, kwargs_keys={}: {}",
+                kwargs.get("model"),
+                list(kwargs.keys()),
+                str(e)[:200],
+            )
             return self._handle_error(e)
 
     def get_default_model(self) -> str:
