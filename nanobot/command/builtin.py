@@ -115,6 +115,10 @@ async def cmd_help(ctx: CommandContext) -> OutboundMessage:
         "/stop — Stop the current task",
         "/restart — Restart the bot",
         "/status — Show bot status",
+        "/model — Show current model",
+        "/model <model-id> — Switch model for this session",
+        "/model temp — Show temperature settings",
+        "/model temp <value> — Set temperature (0.0-2.0)",
         "/help — Show available commands",
     ]
     # Preserve topic thread context so the reply stays in the correct topic
@@ -144,6 +148,10 @@ def build_help_text() -> str:
         "/stop — Stop the current task",
         "/restart — Restart the bot",
         "/status — Show bot status",
+        "/model — Show current model",
+        "/model <model-id> — Switch model for this session",
+        "/model temp — Show temperature settings",
+        "/model temp <value> — Set temperature (0.0-2.0)",
         "/help — Show available commands",
     ]
     return "\n".join(lines)

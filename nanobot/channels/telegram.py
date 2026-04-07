@@ -1038,6 +1038,7 @@ class TelegramChannel(BaseChannel):
             "/new — Start a new conversation\n"
             "/stop — Stop the current task\n"
             "/model — Show or switch the LLM model\n"
+            "/model temp — Show/set temperature (0.0-2.0)\n"
             "/tts — Control TTS settings (on/off, voice, provider)\n"
             "/trace — Toggle agent trace output (on/off/status)\n"
             "/stats — Show token usage statistics\n"
