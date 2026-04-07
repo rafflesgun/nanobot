@@ -634,8 +634,25 @@ class OpenAICompatProvider(LLMProvider):
             reasoning_effort, tool_choice,
         )
         kwargs["stream"] = True
-        kwargs["stream_options"] = {"include_usage": True}
+        # stream_options can cause 500 errors with some providers (e.g., MiniMax)
+        # Set NANOBOT_NO_STREAM_OPTIONS=1 to disable
+        if not os.environ.get("NANOBOT_NO_STREAM_OPTIONS"):
+            kwargs["stream_options"] = {"include_usage": True}
         idle_timeout_s = int(os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "90"))
+
+        # Log request details for debugging provider issues
+        from loguru import logger
+        logger.debug(
+            "LLM stream request: model={}, max_tokens={}, temperature={}, "
+            "tools_count={}, stream_options={}, reasoning_effort={}",
+            kwargs.get("model"),
+            kwargs.get("max_tokens") or kwargs.get("max_completion_tokens"),
+            kwargs.get("temperature"),
+            len(tools) if tools else 0,
+            kwargs.get("stream_options"),
+            reasoning_effort,
+        )
+
         try:
             stream = await self._client.chat.completions.create(**kwargs)
             chunks: list[Any] = []

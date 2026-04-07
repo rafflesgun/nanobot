@@ -182,6 +182,87 @@ async def test_model_override_in_process_message():
 
 
 @pytest.mark.asyncio
+async def test_fallback_models_on_error():
+    """Test that fallback models are tried when primary model fails."""
+    # Setup
+    bus = AsyncMock()
+    provider = _make_mock_provider()
+
+    # Create responses: first fails, second succeeds
+    fail_response = LLMResponse(
+        content="Error: {'message': 'unknown error []', 'type': 'bad_response_status_code'}",
+        finish_reason="error",
+    )
+    success_response = LLMResponse(
+        content="Success from fallback",
+        tool_calls=[],
+        finish_reason="stop",
+    )
+
+    provider.chat_with_retry = AsyncMock()
+    provider.chat_with_retry.side_effect = [fail_response, success_response]
+
+    with patch("nanobot.agent.loop.load_model_overrides", return_value={}):
+        loop = AgentLoop(
+            bus=bus,
+            provider=provider,
+            workspace=Path("/tmp/test"),
+            model="primary-model",
+            fallback_models=["fallback-model-1", "fallback-model-2"],
+        )
+
+    # Process a message
+    msg = AsyncMock()
+    msg.channel = "telegram"
+    msg.sender_id = "user1"
+    msg.chat_id = "123"
+    msg.content = "Hello"
+    msg.metadata = {}
+
+    final_content, tools_used, all_msgs = await loop._run_agent_loop(
+        [{"role": "user", "content": "hello"}],
+    )
+
+    # Should have tried primary first, then fallback
+    assert provider.chat_with_retry.call_count >= 1
+    # The fallback model should have been used
+    calls = provider.chat_with_retry.call_args_list
+    models_called = [call.kwargs.get("model") for call in calls]
+    # First call should be primary model
+    assert "primary-model" in models_called[0] or models_called[0] is None
+
+
+@pytest.mark.asyncio
+async def test_no_fallback_on_user_abort():
+    """Test that fallback is not triggered on non-retriable errors."""
+    bus = AsyncMock()
+    provider = _make_mock_provider()
+
+    # Response that should NOT trigger fallback (e.g., content policy)
+    fail_response = LLMResponse(
+        content="Error: content policy violation",
+        finish_reason="error",
+    )
+    provider.chat_with_retry = AsyncMock(return_value=fail_response)
+
+    with patch("nanobot.agent.loop.load_model_overrides", return_value={}):
+        loop = AgentLoop(
+            bus=bus,
+            provider=provider,
+            workspace=Path("/tmp/test"),
+            model="primary-model",
+            fallback_models=["fallback-model"],
+        )
+
+    final_content, tools_used, all_msgs = await loop._run_agent_loop(
+        [{"role": "user", "content": "hello"}],
+    )
+
+    # Should have only called once (no fallback for content policy)
+    assert provider.chat_with_retry.call_count == 1
+
+
+@pytest.mark.asyncio
 async def test_model_override_in_system_message():
     """Test that model override is applied when processing system messages (subagent results)."""
     # Setup

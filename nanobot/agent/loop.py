@@ -391,28 +391,6 @@ class AgentLoop:
 
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
-    @staticmethod
-    def _is_fallback_eligible_error(error: Exception) -> bool:
-        """Return True when the primary model failure should trigger fallback."""
-        error_msg = str(error).lower()
-        return (
-            "provider returned error" in error_msg
-            or "502" in error_msg
-            or "503" in error_msg
-            or "400" in error_msg  # Bad request - may be model-specific format issue
-            or "timeout" in error_msg
-            or "404" in error_msg
-            or "403" in error_msg
-            or "not found" in error_msg
-            or "invalid model" in error_msg
-            or "allocationquota" in error_msg
-            or "free tier" in error_msg
-            or "exhausted" in error_msg
-            or "database is locked" in error_msg  # SQLite concurrency issue
-            or "bad_response" in error_msg
-            or "unknown error" in error_msg
-        )
-
     def _ordered_fallback_models(self, primary_model: str) -> list[str]:
         """Return de-duplicated fallback models in the order they should be tried."""
         ordered: list[str] = []
@@ -606,31 +584,92 @@ class AgentLoop:
                 return
             self._set_runtime_checkpoint(session, payload)
 
-        result = await self.runner.run(
-            AgentRunSpec(
-                initial_messages=initial_messages,
-                tools=self.tools,
-                model=effective_model,
-                max_iterations=self.max_iterations,
-                max_tool_result_chars=self.max_tool_result_chars,
-                hook=hook,
-                error_message="Sorry, I encountered an error calling the AI model.",
-                concurrent_tools=True,
-                workspace=self.workspace,
-                session_key=session.key if session else None,
-                context_window_tokens=self.context_window_tokens,
-                context_block_limit=self.context_block_limit,
-                provider_retry_mode=self.provider_retry_mode,
-                progress_callback=on_progress,
-                checkpoint_callback=_checkpoint,
-            )
+        # Try with fallback models if configured
+        models_to_try = [effective_model] + self._ordered_fallback_models(effective_model)
+        last_error: Exception | None = None
+
+        for model in models_to_try:
+            try:
+                result = await self.runner.run(
+                    AgentRunSpec(
+                        initial_messages=initial_messages,
+                        tools=self.tools,
+                        model=model,
+                        max_iterations=self.max_iterations,
+                        max_tool_result_chars=self.max_tool_result_chars,
+                        hook=hook,
+                        error_message="Sorry, I encountered an error calling the AI model.",
+                        concurrent_tools=True,
+                        workspace=self.workspace,
+                        session_key=session.key if session else None,
+                        context_window_tokens=self.context_window_tokens,
+                        context_block_limit=self.context_block_limit,
+                        provider_retry_mode=self.provider_retry_mode,
+                        progress_callback=on_progress,
+                        checkpoint_callback=_checkpoint,
+                    )
+                )
+                self._last_usage = result.usage
+
+                # Check for errors that should trigger fallback
+                if result.stop_reason == "error":
+                    error_content = (result.final_content or "").lower()
+                    if self._is_fallback_eligible_error_str(error_content):
+                        raise Exception(result.final_content or "Unknown error")
+
+                # Success or non-fallback error
+                if result.stop_reason == "max_iterations":
+                    logger.warning("Max iterations ({}) reached", self.max_iterations)
+                elif result.stop_reason == "error":
+                    logger.error("LLM returned error: {}", (result.final_content or "")[:200])
+                return result.final_content, result.tools_used, result.messages
+
+            except Exception as e:
+                last_error = e
+                error_msg = str(e).lower()
+
+                # Check if this is a fallback-eligible error
+                is_fallback_eligible = self._is_fallback_eligible_error_str(error_msg)
+
+                if is_fallback_eligible and model != models_to_try[-1]:
+                    logger.warning(
+                        "Model {} failed with: {}, trying fallback model",
+                        model,
+                        str(e)[:100],
+                    )
+                    continue
+                else:
+                    # Non-fallback error or last model exhausted
+                    if is_fallback_eligible:
+                        logger.error("All fallback models exhausted, last error: {}", str(e)[:200])
+                    raise
+
+        # Should not reach here, but return error if it does
+        return str(last_error) if last_error else "Unknown error", [], []
+
+    @staticmethod
+    def _is_fallback_eligible_error_str(error_msg: str) -> bool:
+        """Return True when the error should trigger fallback."""
+        return (
+            "provider returned error" in error_msg
+            or "502" in error_msg
+            or "503" in error_msg
+            or "500" in error_msg
+            or "400" in error_msg
+            or "timeout" in error_msg
+            or "timed out" in error_msg
+            or "404" in error_msg
+            or "403" in error_msg
+            or "not found" in error_msg
+            or "invalid model" in error_msg
+            or "allocationquota" in error_msg
+            or "free tier" in error_msg
+            or "exhausted" in error_msg
+            or "database is locked" in error_msg
+            or "bad_response" in error_msg
+            or "unknown error" in error_msg
+            or "bad_response_status_code" in error_msg
         )
-        self._last_usage = result.usage
-        if result.stop_reason == "max_iterations":
-            logger.warning("Max iterations ({}) reached", self.max_iterations)
-        elif result.stop_reason == "error":
-            logger.error("LLM returned error: {}", (result.final_content or "")[:200])
-        return result.final_content, result.tools_used, result.messages
 
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
