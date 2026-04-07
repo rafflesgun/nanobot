@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
+import re
 import secrets
 import string
 import uuid
@@ -37,6 +38,89 @@ _DEFAULT_OPENROUTER_HEADERS = {
 def _short_tool_id() -> str:
     """9-char alphanumeric ID compatible with all providers (incl. Mistral)."""
     return "".join(secrets.choice(_ALNUM) for _ in range(9))
+
+
+# Kimi K2 tool call special tokens
+_KIMI_TC_SECTION_BEGIN = "<|tool_calls_section_begin|>"
+_KIMI_TC_SECTION_END = "<|tool_calls_section_end|>"
+_KIMI_TC_BEGIN = "<|tool_call_begin|>"
+_KIMI_TC_END = "<|tool_call_end|>"
+_KIMI_TC_ARG_BEGIN = "<|tool_call_argument_begin|>"
+
+# Regex patterns for Kimi K2 tool call parsing
+_KIMI_TC_SECTION_PATTERN = re.compile(
+    rf"{re.escape(_KIMI_TC_SECTION_BEGIN)}(.*?){re.escape(_KIMI_TC_SECTION_END)}",
+    re.DOTALL,
+)
+_KIMI_TC_PATTERN = re.compile(
+    rf"{re.escape(_KIMI_TC_BEGIN)}(.*?){re.escape(_KIMI_TC_END)}",
+    re.DOTALL,
+)
+# Matches "functions.func_name:idx" or just "func_name:idx"
+_KIMI_FUNC_ID_PATTERN = re.compile(r"^(?:functions\.)?([^:]+):(\d+)$")
+
+
+def _parse_kimi_tool_calls(text: str) -> list[ToolCallRequest]:
+    """Parse Kimi K2 style tool calls from raw text.
+
+    Kimi K2 emits tool calls as special tokens in the response content when
+    the API doesn't properly parse them into the standard tool_calls field.
+
+    Format:
+        <|tool_calls_section_begin|>
+        <|tool_call_begin|>functions.func_name:0<|tool_call_argument_begin|>{"arg": "value"}<|tool_call_end|>
+        <|tool_calls_section_end|>
+    """
+    tool_calls: list[ToolCallRequest] = []
+
+    # Find the tool calls section
+    section_match = _KIMI_TC_SECTION_PATTERN.search(text)
+    if not section_match:
+        return tool_calls
+
+    section_content = section_match.group(1)
+
+    # Parse individual tool calls
+    for tc_match in _KIMI_TC_PATTERN.finditer(section_content):
+        tc_content = tc_match.group(1).strip()
+
+        # Split by argument marker
+        if _KIMI_TC_ARG_BEGIN not in tc_content:
+            continue
+
+        func_id_part, args_part = tc_content.split(_KIMI_TC_ARG_BEGIN, 1)
+        func_id = func_id_part.strip()
+        args_str = args_part.strip()
+
+        # Parse function ID (functions.name:idx or name:idx)
+        func_name = func_id
+        func_match = _KIMI_FUNC_ID_PATTERN.match(func_id)
+        if func_match:
+            func_name = func_match.group(1)
+
+        # Parse arguments JSON
+        try:
+            args = json_repair.loads(args_str) if args_str else {}
+        except Exception:
+            args = {}
+
+        tool_calls.append(ToolCallRequest(
+            id=_short_tool_id(),
+            name=func_name,
+            arguments=args if isinstance(args, dict) else {},
+        ))
+
+    return tool_calls
+
+
+def _strip_kimi_tool_call_tokens(text: str) -> str:
+    """Remove Kimi K2 tool call tokens from text, keeping other content."""
+    if _KIMI_TC_SECTION_BEGIN not in text:
+        return text
+
+    # Remove the entire tool calls section
+    result = _KIMI_TC_SECTION_PATTERN.sub("", text)
+    return result.strip()
 
 
 def _get(obj: Any, key: str) -> Any:
@@ -433,6 +517,24 @@ class OpenAICompatProvider(LLMProvider):
                     function_provider_specific_fields=fn_prov,
                 ))
 
+            # Kimi K2: Also parse tool calls from content if present (API may not parse them)
+            if content and _KIMI_TC_SECTION_BEGIN in content:
+                kimi_tool_calls = _parse_kimi_tool_calls(content)
+                if kimi_tool_calls:
+                    parsed_tool_calls.extend(kimi_tool_calls)
+                    content = _strip_kimi_tool_call_tokens(content)
+                    if parsed_tool_calls:
+                        finish_reason = "tool_calls"
+
+            # Kimi K2: Also check reasoning_content for tool call tokens (streaming bug)
+            if reasoning_content and _KIMI_TC_SECTION_BEGIN in reasoning_content:
+                kimi_tool_calls = _parse_kimi_tool_calls(reasoning_content)
+                if kimi_tool_calls:
+                    parsed_tool_calls.extend(kimi_tool_calls)
+                    reasoning_content = _strip_kimi_tool_call_tokens(reasoning_content)
+                    if parsed_tool_calls:
+                        finish_reason = "tool_calls"
+
             return LLMResponse(
                 content=content,
                 tool_calls=parsed_tool_calls,
@@ -474,12 +576,31 @@ class OpenAICompatProvider(LLMProvider):
                 function_provider_specific_fields=fn_prov,
             ))
 
+        # Kimi K2: Also parse tool calls from content if present (API may not parse them)
+        reasoning_content = getattr(msg, "reasoning_content", None) or None
+        if content and _KIMI_TC_SECTION_BEGIN in content:
+            kimi_tool_calls = _parse_kimi_tool_calls(content)
+            if kimi_tool_calls:
+                tool_calls.extend(kimi_tool_calls)
+                content = _strip_kimi_tool_call_tokens(content)
+                if tool_calls:
+                    finish_reason = "tool_calls"
+
+        # Kimi K2: Also check reasoning_content for tool call tokens (streaming bug)
+        if reasoning_content and _KIMI_TC_SECTION_BEGIN in reasoning_content:
+            kimi_tool_calls = _parse_kimi_tool_calls(reasoning_content)
+            if kimi_tool_calls:
+                tool_calls.extend(kimi_tool_calls)
+                reasoning_content = _strip_kimi_tool_call_tokens(reasoning_content)
+                if tool_calls:
+                    finish_reason = "tool_calls"
+
         return LLMResponse(
             content=content,
             tool_calls=tool_calls,
             finish_reason=finish_reason or "stop",
             usage=self._extract_usage(response),
-            reasoning_content=getattr(msg, "reasoning_content", None) or None,
+            reasoning_content=reasoning_content,
         )
 
     @classmethod
@@ -555,19 +676,34 @@ class OpenAICompatProvider(LLMProvider):
             for tc in (delta.tool_calls or []) if delta else []:
                 _accum_tc(tc, getattr(tc, "index", 0))
 
+        # Build the combined content
+        combined_content = "".join(content_parts) or None
+
+        # Parse tool calls from buffers
+        parsed_tool_calls = [
+            ToolCallRequest(
+                id=b["id"] or _short_tool_id(),
+                name=b["name"],
+                arguments=json_repair.loads(b["arguments"]) if b["arguments"] else {},
+                extra_content=b.get("extra_content"),
+                provider_specific_fields=b.get("prov"),
+                function_provider_specific_fields=b.get("fn_prov"),
+            )
+            for b in tc_bufs.values()
+        ]
+
+        # Kimi K2: Also parse tool calls from content if present (streaming may emit them as text)
+        if combined_content and _KIMI_TC_SECTION_BEGIN in combined_content:
+            kimi_tool_calls = _parse_kimi_tool_calls(combined_content)
+            if kimi_tool_calls:
+                parsed_tool_calls.extend(kimi_tool_calls)
+                combined_content = _strip_kimi_tool_call_tokens(combined_content)
+                if parsed_tool_calls:
+                    finish_reason = "tool_calls"
+
         return LLMResponse(
-            content="".join(content_parts) or None,
-            tool_calls=[
-                ToolCallRequest(
-                    id=b["id"] or _short_tool_id(),
-                    name=b["name"],
-                    arguments=json_repair.loads(b["arguments"]) if b["arguments"] else {},
-                    extra_content=b.get("extra_content"),
-                    provider_specific_fields=b.get("prov"),
-                    function_provider_specific_fields=b.get("fn_prov"),
-                )
-                for b in tc_bufs.values()
-            ],
+            content=combined_content,
+            tool_calls=parsed_tool_calls,
             finish_reason=finish_reason,
             usage=usage,
         )
