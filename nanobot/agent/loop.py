@@ -30,7 +30,7 @@ from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.bus.queue import MessageBus
 from collections.abc import Callable as AbcCallable
-from nanobot.config.paths import load_model_overrides, save_model_overrides
+from nanobot.config.paths import load_model_overrides, save_model_overrides, load_temperature_overrides, save_temperature_overrides
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
@@ -241,6 +241,7 @@ class AgentLoop:
         self._last_usage: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
         self._model_overrides: dict[str, str] = load_model_overrides()
+        self._temperature_overrides: dict[str, float] = load_temperature_overrides()
         self.stats_manager = StatsManager(workspace)
 
         self.context = ContextBuilder(workspace, timezone=timezone)
@@ -412,10 +413,15 @@ class AgentLoop:
     ) -> OutboundMessage:
         """Handle /model command — show current model or switch to a new one."""
         raw = (raw_content or msg.content).strip()
-        parts = raw.split(None, 1)
+        parts = raw.split(None, 2)
         model_arg = parts[1].strip() if len(parts) > 1 else ""
         _meta = dict(msg.metadata or {})
         _meta["command_response"] = True  # Skip TTS for command responses
+
+        # Handle temperature subcommand: /model temp [value|reset]
+        if model_arg.lower() == "temp":
+            temp_arg = parts[2].strip() if len(parts) > 2 else ""
+            return self._handle_temp_command(msg, session_key, temp_arg, _meta)
 
         if not model_arg:
             effective = self._model_overrides.get(session_key, self.model)
@@ -461,6 +467,78 @@ class AgentLoop:
             channel=msg.channel,
             chat_id=msg.chat_id,
             content=f"✅ Model switched to `{new_model}` for this session.\nUse `/model reset` to revert to default.",
+            metadata=_meta,
+        )
+
+    def _handle_temp_command(
+        self, msg: InboundMessage, session_key: str, temp_arg: str, _meta: dict
+    ) -> OutboundMessage:
+        """Handle /model temp subcommand — show or set temperature override."""
+        if not temp_arg:
+            # Show current temperature
+            effective_temp = self._temperature_overrides.get(session_key)
+            is_override = session_key in self._temperature_overrides
+            guidance = (
+                "\n\n**Temperature Guidance:**\n"
+                "| Task | Recommended Temp | Why? |\n"
+                "|------|-----------------|------|\n"
+                "| Stock Analysis | 0.0 - 0.2 | Precision, factual accuracy |\n"
+                "| Coding / Technical | 0.2 - 0.4 | Deterministic, consistent |\n"
+                "| General Chat | 0.7 | Balanced creativity |\n"
+                "| Brainstorming | 0.9 - 1.2 | Maximum creativity |\n"
+            )
+            if is_override:
+                status = f"🌡️ Current temperature: `{effective_temp}`\n_(session override — use `/model temp reset` to revert)_"
+            else:
+                status = "🌡️ Temperature: using model default (no override set)"
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=status + guidance + "\n\nSet temperature with `/model temp <value>`.",
+                metadata=_meta,
+            )
+
+        if temp_arg.lower() == "reset":
+            removed = self._temperature_overrides.pop(session_key, None)
+            if removed:
+                save_temperature_overrides(self._temperature_overrides)
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content="🔄 Temperature reset to model default.",
+                    metadata=_meta,
+                )
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="Temperature is already using model default.",
+                metadata=_meta,
+            )
+
+        try:
+            new_temp = float(temp_arg)
+            if new_temp < 0 or new_temp > 2.0:
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content="❌ Temperature must be between 0.0 and 2.0.",
+                    metadata=_meta,
+                )
+        except ValueError:
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=f"❌ Invalid temperature value: `{temp_arg}`. Use a number like `0.7`.",
+                metadata=_meta,
+            )
+
+        self._temperature_overrides[session_key] = new_temp
+        save_temperature_overrides(self._temperature_overrides)
+        logger.info("Temperature set to {} for session {}", new_temp, session_key)
+        return OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content=f"✅ Temperature set to `{new_temp}` for this session.\nUse `/model temp reset` to revert to default.",
             metadata=_meta,
         )
 
@@ -552,6 +630,7 @@ class AgentLoop:
         message_id: str | None = None,
         thread_id: int | None = None,
         model_override: str | None = None,
+        temperature_override: float | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop.
 
@@ -602,6 +681,7 @@ class AgentLoop:
                         model=model,
                         max_iterations=self.max_iterations,
                         max_tool_result_chars=self.max_tool_result_chars,
+                        temperature=temperature_override,
                         hook=hook,
                         error_message="Sorry, I encountered an error calling the AI model.",
                         concurrent_tools=True,
@@ -869,6 +949,7 @@ class AgentLoop:
                 message_id=msg.metadata.get("message_id"),
                 thread_id=thread_id,
                 model_override=self._model_overrides.get(key),
+                temperature_override=self._temperature_overrides.get(key),
             )
             self._save_turn(session, all_msgs, 1 + len(history))
             self._clear_runtime_checkpoint(session)
@@ -955,6 +1036,7 @@ class AgentLoop:
             message_id=msg.metadata.get("message_id"),
             thread_id=msg.metadata.get("message_thread_id"),
             model_override=self._model_overrides.get(key),
+            temperature_override=self._temperature_overrides.get(key),
         )
 
         if final_content is None or not final_content.strip():

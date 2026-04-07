@@ -708,3 +708,30 @@ test = '<|tool_calls_section_begin|><|tool_call_begin|>functions.web_fetch:0<|to
 print(len(_parse_kimi_tool_calls(test)), 'tool calls parsed')
 "
 ```
+
+### 24. Temperature override per session (`/model temp`)
+
+**Core behavior**
+- `/model temp` — Shows current temperature setting with guidance table
+- `/model temp 0.7` — Sets temperature override for the current session
+- `/model temp reset` — Clears temperature override, reverts to model default
+- Temperature persists per session (like model overrides)
+- Passed through to AgentRunSpec for LLM calls
+
+**Temperature guidance**
+| Task | Recommended Temp | Why? |
+|------|-----------------|------|
+| Stock Analysis | 0.0 - 0.2 | Precision, factual accuracy |
+| Coding / Technical | 0.2 - 0.4 | Deterministic, consistent |
+| General Chat | 0.7 | Balanced creativity |
+| Brainstorming | 0.9 - 1.2 | Maximum creativity |
+
+**Implementation**
+- `nanobot/config/paths.py`: Added `load_temperature_overrides()` and `save_temperature_overrides()`
+- `nanobot/agent/loop.py`: Added `_temperature_overrides` dict and `_handle_temp_command()` method
+- `nanobot/command/builtin.py`: Updated help text to include temperature commands
+
+**Persistence**
+- Stored in `~/.nanobot/overrides.json` alongside model and TTS overrides
+- Keyed by session_key (e.g., `telegram:123456789:topic:42`)
+

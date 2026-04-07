@@ -18,6 +18,7 @@ class MockLoop:
         self._last_usage = {"prompt_tokens": 100, "completion_tokens": 50}
         self.context_window_tokens = 200000
         self._model_overrides = {}
+        self._temperature_overrides = {}
         self._active_tasks = {}
         self.sessions = MagicMock()
         self.memory_consolidator = MagicMock()

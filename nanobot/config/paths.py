@@ -7,7 +7,7 @@ from pathlib import Path
 from nanobot.config.loader import get_config_path
 from nanobot.utils.helpers import ensure_dir, get_workspace_path
 
-__all__ = ["get_workspace_path"]
+__all__ = ["get_workspace_path", "load_temperature_overrides", "save_temperature_overrides"]
 
 logger = logging.getLogger(__name__)
 
@@ -57,15 +57,16 @@ def load_overrides() -> dict:
     """Load persisted overrides from disk."""
     overrides_file = get_overrides_file()
     if not overrides_file.exists():
-        return {"model_overrides": {}, "tts_overrides": {}}
+        return {"model_overrides": {}, "tts_overrides": {}, "temperature_overrides": {}}
     try:
         data = json.loads(overrides_file.read_text(encoding="utf-8"))
         return {
             "model_overrides": data.get("model_overrides", {}),
             "tts_overrides": data.get("tts_overrides", {}),
+            "temperature_overrides": data.get("temperature_overrides", {}),
         }
     except Exception:
-        return {"model_overrides": {}, "tts_overrides": {}}
+        return {"model_overrides": {}, "tts_overrides": {}, "temperature_overrides": {}}
 
 
 def save_overrides(overrides: dict) -> None:
@@ -101,6 +102,18 @@ def save_tts_overrides(tts_overrides: dict[str, dict]) -> None:
     """Save TTS overrides to disk."""
     overrides = load_overrides()
     overrides["tts_overrides"] = tts_overrides
+    save_overrides(overrides)
+
+
+def load_temperature_overrides() -> dict[str, float]:
+    """Load temperature overrides from disk."""
+    return load_overrides().get("temperature_overrides", {})
+
+
+def save_temperature_overrides(temperature_overrides: dict[str, float]) -> None:
+    """Save temperature overrides to disk."""
+    overrides = load_overrides()
+    overrides["temperature_overrides"] = temperature_overrides
     save_overrides(overrides)
 
 

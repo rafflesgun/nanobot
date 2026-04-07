@@ -1,4 +1,4 @@
-"""Tests for /model command and per-session model override."""
+"""Tests for /model command and per-session model/temperature override."""
 
 import pytest
 from pathlib import Path
@@ -300,3 +300,226 @@ async def test_model_override_in_system_message():
     call_args = provider.chat_with_retry.call_args
     assert call_args.kwargs['model'] == "claude-3.5-sonnet", \
         "System message should use model override for the session"
+
+
+# =============================================================================
+# Temperature Override Tests
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_temp_show_current():
+    """Test that /model temp command shows current temperature when no argument is provided."""
+    bus = AsyncMock()
+    provider = _make_mock_provider()
+
+    with patch("nanobot.agent.loop.load_model_overrides", return_value={}), \
+         patch("nanobot.agent.loop.load_temperature_overrides", return_value={}):
+        loop = AgentLoop(
+            bus=bus,
+            provider=provider,
+            workspace=Path("/tmp/test"),
+            model="gpt-4o",
+        )
+
+    msg = MagicMock()
+    msg.channel = "telegram"
+    msg.chat_id = "123"
+    msg.metadata = {}
+    msg.content = "/model temp"
+
+    with patch("nanobot.agent.loop.save_temperature_overrides"):
+        response = loop._handle_model_command(msg, "test:session", "/model temp")
+
+    assert "Temperature" in response.content
+    assert "no override set" in response.content.lower()
+
+
+@pytest.mark.asyncio
+async def test_temp_set_and_use():
+    """Test that /model temp 0.7 sets temperature and it's used in agent loop."""
+    bus = AsyncMock()
+    provider = _make_mock_provider()
+
+    with patch("nanobot.agent.loop.load_model_overrides", return_value={}), \
+         patch("nanobot.agent.loop.load_temperature_overrides", return_value={}):
+        loop = AgentLoop(
+            bus=bus,
+            provider=provider,
+            workspace=Path("/tmp/test"),
+            model="gpt-4o",
+        )
+
+    session_key = "test:session"
+
+    msg = MagicMock()
+    msg.channel = "telegram"
+    msg.chat_id = "123"
+    msg.metadata = {}
+    msg.content = "/model temp 0.5"
+
+    with patch("nanobot.agent.loop.save_temperature_overrides"):
+        response = loop._handle_model_command(msg, session_key, "/model temp 0.5")
+
+    assert loop._temperature_overrides[session_key] == 0.5
+    assert "Temperature set to `0.5`" in response.content
+
+    # Verify that _run_agent_loop uses the temperature override
+    final_content, tools_used, all_msgs = await loop._run_agent_loop(
+        [{"role": "user", "content": "hello"}],
+        temperature_override=loop._temperature_overrides.get(session_key),
+    )
+
+    # Check that provider.chat_with_retry was called with the temperature
+    assert provider.chat_with_retry.called
+    call_args = provider.chat_with_retry.call_args
+    assert call_args.kwargs.get('temperature') == 0.5
+
+
+@pytest.mark.asyncio
+async def test_temp_revert_to_default():
+    """Test that /model temp reset reverts to model default temperature."""
+    bus = AsyncMock()
+    provider = _make_mock_provider()
+
+    with patch("nanobot.agent.loop.load_model_overrides", return_value={}), \
+         patch("nanobot.agent.loop.load_temperature_overrides", return_value={}):
+        loop = AgentLoop(
+            bus=bus,
+            provider=provider,
+            workspace=Path("/tmp/test"),
+            model="gpt-4o",
+        )
+
+    session_key = "test:session"
+
+    # Set override
+    loop._temperature_overrides[session_key] = 0.9
+
+    msg = MagicMock()
+    msg.channel = "telegram"
+    msg.chat_id = "123"
+    msg.metadata = {}
+    msg.content = "/model temp reset"
+
+    with patch("nanobot.agent.loop.save_temperature_overrides"):
+        response = loop._handle_model_command(msg, session_key, "/model temp reset")
+
+    assert session_key not in loop._temperature_overrides
+    assert "reset" in response.content.lower()
+
+
+@pytest.mark.asyncio
+async def test_temp_invalid_value():
+    """Test that /model temp rejects invalid temperature values."""
+    bus = AsyncMock()
+    provider = _make_mock_provider()
+
+    with patch("nanobot.agent.loop.load_model_overrides", return_value={}), \
+         patch("nanobot.agent.loop.load_temperature_overrides", return_value={}):
+        loop = AgentLoop(
+            bus=bus,
+            provider=provider,
+            workspace=Path("/tmp/test"),
+            model="gpt-4o",
+        )
+
+    msg = MagicMock()
+    msg.channel = "telegram"
+    msg.chat_id = "123"
+    msg.metadata = {}
+    msg.content = "/model temp 3.0"
+
+    response = loop._handle_model_command(msg, "test:session", "/model temp 3.0")
+
+    assert "must be between 0.0 and 2.0" in response.content
+    assert "test:session" not in loop._temperature_overrides
+
+
+@pytest.mark.asyncio
+async def test_temp_invalid_format():
+    """Test that /model temp rejects non-numeric values."""
+    bus = AsyncMock()
+    provider = _make_mock_provider()
+
+    with patch("nanobot.agent.loop.load_model_overrides", return_value={}), \
+         patch("nanobot.agent.loop.load_temperature_overrides", return_value={}):
+        loop = AgentLoop(
+            bus=bus,
+            provider=provider,
+            workspace=Path("/tmp/test"),
+            model="gpt-4o",
+        )
+
+    msg = MagicMock()
+    msg.channel = "telegram"
+    msg.chat_id = "123"
+    msg.metadata = {}
+    msg.content = "/model temp hot"
+
+    response = loop._handle_model_command(msg, "test:session", "/model temp hot")
+
+    assert "Invalid temperature value" in response.content
+
+
+@pytest.mark.asyncio
+async def test_temp_shows_override_status():
+    """Test that /model temp shows when there's an active override."""
+    bus = AsyncMock()
+    provider = _make_mock_provider()
+
+    with patch("nanobot.agent.loop.load_model_overrides", return_value={}), \
+         patch("nanobot.agent.loop.load_temperature_overrides", return_value={}):
+        loop = AgentLoop(
+            bus=bus,
+            provider=provider,
+            workspace=Path("/tmp/test"),
+            model="gpt-4o",
+        )
+
+    session_key = "test:session"
+    loop._temperature_overrides[session_key] = 0.3
+
+    msg = MagicMock()
+    msg.channel = "telegram"
+    msg.chat_id = "123"
+    msg.metadata = {}
+    msg.content = "/model temp"
+
+    response = loop._handle_model_command(msg, session_key, "/model temp")
+
+    assert "Current temperature: `0.3`" in response.content
+    assert "session override" in response.content.lower()
+
+
+@pytest.mark.asyncio
+async def test_temp_persists_across_sessions():
+    """Test that temperature overrides are persisted to disk."""
+    bus = AsyncMock()
+    provider = _make_mock_provider()
+
+    with patch("nanobot.agent.loop.load_model_overrides", return_value={}), \
+         patch("nanobot.agent.loop.load_temperature_overrides", return_value={}):
+        loop = AgentLoop(
+            bus=bus,
+            provider=provider,
+            workspace=Path("/tmp/test"),
+            model="gpt-4o",
+        )
+
+    session_key = "telegram:123:topic:42"
+
+    msg = MagicMock()
+    msg.channel = "telegram"
+    msg.chat_id = "123"
+    msg.metadata = {"message_thread_id": 42}
+    msg.content = "/model temp 0.7"
+
+    saved_overrides = {}
+    def mock_save(overrides):
+        saved_overrides.update(overrides)
+
+    with patch("nanobot.agent.loop.save_temperature_overrides", side_effect=mock_save):
+        loop._handle_model_command(msg, session_key, "/model temp 0.7")
+
+    assert saved_overrides.get(session_key) == 0.7
