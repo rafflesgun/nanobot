@@ -8,7 +8,6 @@ from loguru import logger
 
 from nanobot.utils.helpers import stringify_text_blocks
 
-_MAX_REPEAT_EXTERNAL_LOOKUPS = 2
 
 EMPTY_FINAL_RESPONSE_MESSAGE = (
     "I completed the tool steps but couldn't produce a final answer. "
@@ -89,6 +88,11 @@ def external_lookup_signature(tool_name: str, arguments: dict[str, Any]) -> str 
         query = str(arguments.get("query") or arguments.get("search_term") or "").strip()
         if query:
             return f"web_search:{query.lower()}"
+    # Block repeated read_file of same path to prevent infinite loops
+    if tool_name == "read_file":
+        path = str(arguments.get("path") or arguments.get("file_path") or "").strip()
+        if path:
+            return f"read_file:{path.lower()}"
     return None
 
 
@@ -96,6 +100,7 @@ def repeated_external_lookup_error(
     tool_name: str,
     arguments: dict[str, Any],
     seen_counts: dict[str, int],
+    max_repeat_lookups: int = 2,
 ) -> str | None:
     """Block repeated external lookups after a small retry budget."""
     signature = external_lookup_signature(tool_name, arguments)
@@ -103,7 +108,7 @@ def repeated_external_lookup_error(
         return None
     count = seen_counts.get(signature, 0) + 1
     seen_counts[signature] = count
-    if count <= _MAX_REPEAT_EXTERNAL_LOOKUPS:
+    if count <= max_repeat_lookups:
         return None
     logger.warning(
         "Blocking repeated external lookup {} on attempt {}",

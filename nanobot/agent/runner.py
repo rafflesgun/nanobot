@@ -58,6 +58,7 @@ class AgentRunSpec:
     provider_retry_mode: str = "standard"
     progress_callback: Any | None = None
     checkpoint_callback: Any | None = None
+    max_repeat_lookups: int = 2  # Max times same tool call allowed before blocking
 
 
 @dataclass(slots=True)
@@ -380,6 +381,7 @@ class AgentRunner:
             tool_call.name,
             tool_call.arguments,
             external_lookup_counts,
+            max_repeat_lookups=spec.max_repeat_lookups,
         )
         if lookup_error:
             event = {

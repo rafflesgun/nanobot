@@ -59,6 +59,7 @@ class SubagentManager:
         restrict_to_workspace: bool = False,
         extra_read: list[str] | None = None,
         extra_write: list[str] | None = None,
+        max_repeat_lookups: int = 2,
     ):
         from nanobot.config.schema import AgentsConfig, ExecToolConfig, WebSearchConfig
 
@@ -76,6 +77,7 @@ class SubagentManager:
         self.restrict_to_workspace = restrict_to_workspace
         self.extra_read = extra_read or []
         self.extra_write = extra_write or []
+        self.max_repeat_lookups = max_repeat_lookups
         self.runner = AgentRunner(provider)
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
@@ -233,6 +235,7 @@ class SubagentManager:
                             max_iterations_message="Task completed but no final response was generated.",
                             error_message=None,
                             fail_on_tool_error=True,
+                            max_repeat_lookups=self.max_repeat_lookups,
                         )
                     )
 

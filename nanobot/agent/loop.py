@@ -199,6 +199,7 @@ class AgentLoop:
         fallback_models: list[str] | None = None,
         agents_config: Any = None,
         provider_factory: AbcCallable[[Any], LLMProvider] | None = None,
+        max_repeat_lookups: int | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 
@@ -221,6 +222,9 @@ class AgentLoop:
             max_tool_result_chars
             if max_tool_result_chars is not None
             else defaults.max_tool_result_chars
+        )
+        self.max_repeat_lookups = (
+            max_repeat_lookups if max_repeat_lookups is not None else defaults.max_repeat_lookups
         )
         self.provider_retry_mode = provider_retry_mode
         self.web_search_config = web_search_config or WebSearchConfig()
@@ -258,6 +262,7 @@ class AgentLoop:
             restrict_to_workspace=restrict_to_workspace,
             extra_read=self.extra_read,
             extra_write=self.extra_write,
+            max_repeat_lookups=self.max_repeat_lookups,
         )
 
         self._running = False
@@ -607,6 +612,7 @@ class AgentLoop:
                         provider_retry_mode=self.provider_retry_mode,
                         progress_callback=on_progress,
                         checkpoint_callback=_checkpoint,
+                        max_repeat_lookups=self.max_repeat_lookups,
                     )
                 )
                 self._last_usage = result.usage

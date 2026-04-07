@@ -39,6 +39,7 @@ understand intended behavior quickly.
 | **Commands enhanced for topic support**     | ✅     | channels/telegram.py, agent/loop.py                    | manual                                 | `/new`, `/stop`, `/model`, `/stats`, `/tts`, `/trace` |
 | **Tool definitions caching (#2205)**        | ✅     | agent/tools/registry.py                                | tests/test_tool_registry_caching.py    | `_definitions_cache` invalidated on reg/unreg |
 | **Incremental session saving (#2219)**      | ✅     | agent/loop.py, agent/subagent.py                       | tests/test_loop_incremental_save.py    | save offset tracks persisted content          |
+| **Repeated tool call protection**           | ✅     | agent/runner.py, utils/runtime.py, config/schema.py    | tests/agent/test_runner.py             | `maxRepeatLookups: 2` blocks infinite loops   |
 | Web search enhancements merged into main   | ℹ️     | agent/tools/web.py, README.md                          | tests/tools/test_web_search_tool.py    | Multi-provider search now upstream (`brave`, `tavily`, `duckduckgo`, `searxng`, `jina`) |
 | Runtime hardening (PR #2733)               | ℹ️     | agent/runner.py, agent/hook.py, agent/loop.py          | tests/agent/test_runner.py             | Now upstream: AgentRunner, checkpoints, tool batching, provider retry |
 
@@ -478,7 +479,62 @@ Keep the incremental save functionality that protects against data loss during m
 pytest tests/test_loop_incremental_save.py -v
 ```
 
-### 19. Subagent responses preserve topic thread_id
+### 19. Repeated tool call protection (infinite loop prevention)
+
+**Core behavior**
+- Prevents models from getting stuck in infinite tool-calling loops (e.g., repeatedly reading the same file)
+- Blocks repeated calls to `read_file`, `web_fetch`, and `web_search` with identical arguments after a configurable threshold
+- Default threshold: 2 (allows 2 retries, blocks on 3rd attempt)
+- Configurable via `agents.defaults.maxRepeatLookups` in config
+- When blocked, model receives error message forcing it to use existing results
+
+**Root cause of original bug**
+- Model `infini-minimax-m27` got stuck reading `SESSION-STATE.md` 30+ times without producing output
+- AGENTS.md had aggressive instruction: "Check SESSION-STATE.md on EVERY message"
+- Existing detection only covered `web_fetch` and `web_search`, not `read_file`
+- Model followed instruction literally but couldn't break out of the loop
+
+**Files to protect during conflicts**
+- nanobot/utils/runtime.py → `external_lookup_signature()` (now includes `read_file`), `repeated_external_lookup_error()`
+- nanobot/agent/runner.py → `AgentRunSpec.max_repeat_lookups`, passes to `repeated_external_lookup_error()`
+- nanobot/agent/loop.py → `max_repeat_lookups` param, passes to `AgentRunSpec` and `SubagentManager`
+- nanobot/agent/subagent.py → `max_repeat_lookups` param
+- nanobot/cli/commands.py → wires config to `AgentLoop` (3 places)
+- nanobot/config/schema.py → `AgentDefaults.max_repeat_lookups` field
+
+**Resolution priority**
+1. Keep `read_file` in `external_lookup_signature()` - this is the key fix for the infinite loop
+2. Keep the configurable `max_repeat_lookups` parameter flowing through the call chain
+3. Keep the error message that forces the model to proceed with existing results
+
+**Config example**
+```json
+{
+  "agents": {
+    "defaults": {
+      "maxRepeatLookups": 2
+    }
+  }
+}
+```
+
+**AGENTS.md guidance** (should also be updated)
+```markdown
+5. **Read `SESSION-STATE.md` ONCE per turn** — at the START of processing a new user message
+
+**WAL Protocol:**
+- Read SESSION-STATE.md once at the start of your response
+- DO NOT read it again in the same turn
+- If you already read a file this turn, proceed to respond — don't re-read
+```
+
+**Quick validation**
+```bash
+# Check that repeated read_file calls are blocked after threshold
+pytest tests/agent/test_runner.py -v
+```
+
+### 20. Subagent responses preserve topic thread_id
 
 **Core behavior**
 - When a subagent announces its result via system message, the response goes to the correct topic
@@ -509,7 +565,7 @@ pytest tests/test_loop_incremental_save.py -v
 pytest tests/test_telegram_builtin_commands_topic.py tests/test_cron_topic_delivery.py -v
 ```
 
-### 20. Telegram updater auto-restart on network errors
+### 21. Telegram updater auto-restart on network errors
 
 **Core behavior**
 - Monitors `updater.running` state in the polling loop
@@ -548,7 +604,7 @@ while self._running:
         retry_delay = 5.0  # reset on success
 ```
 
-### 21. Web search status after merge
+### 22. Web search status after merge
 
 **Core behavior**
 - The old local-only DuckDuckGo enhancement is no longer branch-specific

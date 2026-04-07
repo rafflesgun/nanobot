@@ -550,6 +550,7 @@ def serve(
         mcp_servers=runtime_config.tools.mcp_servers,
         channels_config=runtime_config.channels,
         timezone=runtime_config.agents.defaults.timezone,
+        max_repeat_lookups=runtime_config.agents.defaults.max_repeat_lookups,
     )
 
     model_name = runtime_config.agents.defaults.model
@@ -645,6 +646,7 @@ def gateway(
         extra_write=config.tools.restrict_to_workspace.extra_write if hasattr(config.tools.restrict_to_workspace, 'extra_write') else None,
         fallback_models=getattr(config.agents.defaults, 'fallback_models', []),
         agents_config=config.agents,
+        max_repeat_lookups=getattr(config.agents.defaults, 'max_repeat_lookups', 2),
     )
 
     # Set cron callback (needs agent)
@@ -682,21 +684,29 @@ def gateway(
         if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
             return response
 
-        if job.payload.deliver and job.payload.to and response:
-            should_notify = await evaluate_response(
-                response, job.payload.message, provider, agent.model,
-            )
+        # Send the response through the bus with proper thread_id metadata
+        if response:
+            should_notify = job.payload.deliver
+            if should_notify:
+                should_notify = await evaluate_response(
+                    response, job.payload.message, provider, agent.model,
+                )
             if should_notify:
                 from nanobot.bus.events import OutboundMessage
-                metadata = {}
-                if job.payload.thread_id:
-                    metadata["message_thread_id"] = job.payload.thread_id
-                await bus.publish_outbound(OutboundMessage(
-                    channel=job.payload.channel or "cli",
-                    chat_id=job.payload.to,
-                    content=response,
-                    metadata=metadata,
-                ))
+                # Use the OutboundMessage from process_direct which has correct metadata
+                if resp:
+                    await bus.publish_outbound(resp)
+                else:
+                    # Fallback: construct manually with thread_id
+                    metadata = {}
+                    if job.payload.thread_id:
+                        metadata["message_thread_id"] = job.payload.thread_id
+                    await bus.publish_outbound(OutboundMessage(
+                        channel=job.payload.channel or "cli",
+                        chat_id=job.payload.to,
+                        content=response,
+                        metadata=metadata,
+                    ))
         return response
     cron.on_job = on_cron_job
 
@@ -858,6 +868,7 @@ def agent(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
+        max_repeat_lookups=config.agents.defaults.max_repeat_lookups,
     )
 
     # Shared reference for progress callbacks
