@@ -648,6 +648,11 @@ class TelegramChannel(BaseChannel):
                     **thread_kwargs,
                 )
 
+        # Send text content first so the user always gets a response
+        if msg.content and msg.content != "[empty message]":
+            for chunk in split_message(msg.content, TELEGRAM_MAX_MESSAGE_LEN):
+                await self._send_text(chat_id, chunk, reply_params, thread_kwargs)
+
         await self._maybe_send_tts(
             chat_id=chat_id,
             text=msg.content,
@@ -655,11 +660,6 @@ class TelegramChannel(BaseChannel):
             thread_kwargs=thread_kwargs,
             metadata=msg.metadata,
         )
-
-        # Send text content
-        if msg.content and msg.content != "[empty message]":
-            for chunk in split_message(msg.content, TELEGRAM_MAX_MESSAGE_LEN):
-                await self._send_text(chat_id, chunk, reply_params, thread_kwargs)
 
     async def _call_with_retry(self, fn, *args, **kwargs):
         """Call an async Telegram API function with retry on pool/network timeout and flood control."""
@@ -830,7 +830,14 @@ class TelegramChannel(BaseChannel):
             )
 
             temp_tts_manager = TTSManager(tts_config)
-            ogg_bytes = await temp_tts_manager.generate_voice_note(text)
+            try:
+                ogg_bytes = await asyncio.wait_for(
+                    temp_tts_manager.generate_voice_note(text),
+                    timeout=30.0,
+                )
+            except asyncio.TimeoutError:
+                logger.warning("TTS generation timed out after 30s → skipping voice note")
+                return
             if not ogg_bytes:
                 logger.warning("TTS returned no audio → skipping voice note")
                 return

@@ -28,7 +28,7 @@ understand intended behavior quickly.
 | SDK retries disabled + surfaced to progress | ✅     | providers/base.py, providers/*, agent/loop.py         | tests/providers/test_provider_retry.py | provider SDK retries forced to `0`            |
 | Fine-grained workspace allowlist for tools   | ✅     | config/schema.py, config/loader.py, cli/commands.py, agent/loop.py, agent/subagent.py, agent/tools/shell.py | tests/config/test_config_migration.py, tests/tools/test_exec_security.py | `restrictToWorkspace = { enabled, extraRead, extraWrite }` |
 | Telegram forwarded message debounce         | ✅     | channels/telegram.py                                   | tests/channels/test_telegram_channel.py | 80ms lane = `chat_id:thread_id`              |
-| **TTS voice notes (Edge + OpenAI + Riva)**  | ✅     | providers/tts.py, tts/manager.py, channels/telegram.py | tests/test_tts.py (new)                | `tts.enabled = false` (default)               |
+| **TTS voice notes (Edge + OpenAI + Riva)**  | ✅     | providers/tts.py, tts/manager.py, channels/telegram.py, utils/audio.py | tests/test_tts.py (new)                | `tts.enabled = false` (default), text sent before TTS, 30s timeout |
 | **/trace command - AI thinking visibility** | ✅     | channels/telegram.py                                   | tests/test_trace_command_additional.py | `_trace_enabled[chat_id] = false` (default)   |
 | **/stats command - token usage visibility** | ✅     | channels/telegram.py, utils/stats.py                   | tests/test_telegram_stats_command.py   | `/stats`, `/stats topic`, `/stats all`          |
 | **/status shows session model override**   | ✅     | command/builtin.py, utils/helpers.py                   | tests/cli/test_restart_command.py      | shows `gpt-4o (default: claude-opus-4)` when overridden |
@@ -437,6 +437,52 @@ pytest tests/test_telegram_builtin_commands_topic.py -v
 - Heartbeat DM-only logic lives in `_pick_heartbeat_target()` inside `nanobot/cli/commands.py` (not `heartbeat/service.py`)
 - Skips topic sub-sessions and negative Telegram chat IDs
 - Heartbeat history is bounded pre/post run by content length and recent legal suffix
+
+### 17. TTS reliability fixes
+
+**Core behavior**
+- Text response sent **before** TTS generation so user always sees a response
+- TTS generation has 30-second timeout to prevent blocking indefinitely
+- Pydub/ffmpeg work runs in thread executor to avoid blocking event loop
+- If TTS times out or fails, user still has the text response
+
+**Root cause of original bug**
+- TTS generation could hang or take very long
+- Text was sent **after** TTS, so if TTS failed/hung, user got no response at all
+- Pydub's blocking I/O was running on the main event loop, causing stalls
+
+**Files to protect during conflicts**
+- nanobot/channels/telegram.py → `send()` method: text sent before `_maybe_send_tts()`
+- nanobot/channels/telegram.py → `_maybe_send_tts()`: 30s `asyncio.wait_for()` timeout
+- nanobot/utils/audio.py → `_blocking_convert_to_ogg_opus()`, `_blocking_get_audio_duration()`
+- nanobot/utils/audio.py → `run_in_executor()` for pydub work
+
+**Resolution priority**
+1. Keep text send BEFORE `_maybe_send_tts()` call - critical for reliability
+2. Keep 30s timeout on TTS generation
+3. Keep pydub work in thread executor (not blocking event loop)
+
+**Code pattern (telegram.py send method)**
+```python
+# Send text content first so the user always gets a response
+if msg.content and msg.content != "[empty message]":
+    for chunk in split_message(msg.content, TELEGRAM_MAX_MESSAGE_LEN):
+        await self._send_text(chat_id, chunk, reply_params, thread_kwargs)
+
+await self._maybe_send_tts(...)  # TTS after text
+```
+
+**Code pattern (TTS timeout)**
+```python
+try:
+    ogg_bytes = await asyncio.wait_for(
+        temp_tts_manager.generate_voice_note(text),
+        timeout=30.0,
+    )
+except asyncio.TimeoutError:
+    logger.warning("TTS generation timed out after 30s → skipping voice note")
+    return
+```
 
 ### 17. Tool definitions caching (#2205)
 
