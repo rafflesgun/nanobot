@@ -670,3 +670,41 @@ Do not treat web search as a local-only feature anymore. Keep the upstream multi
 ```bash
 pytest tests/tools/test_web_search_tool.py -q
 ```
+
+### 23. Kimi K2 tool call parsing (special token format)
+
+**Core behavior**
+- Parses Kimi K2's special tool call tokens when API doesn't properly format them as standard `tool_calls`
+- Handles both streaming and non-streaming responses
+- Strips special tokens from content after parsing to prevent them appearing in output
+- Works with MiniMax and other providers that may use Kimi K2 style formatting
+
+**Root cause**
+- Kimi K2 emits tool calls using special tokens: `<|tool_calls_section_begin|>`, `<|tool_call_begin|>`, etc.
+- Some API endpoints (Moonshot, vLLM, OpenRouter, MiniMax) don't always parse these into the standard OpenAI `tool_calls` field
+- The raw tokens appear in the response content instead of being parsed
+- GitHub issue: https://github.com/MoonshotAI/Kimi-K2/issues/89
+
+**Special token format**
+```
+<|tool_calls_section_begin|>
+<|tool_call_begin|>functions.func_name:0<|tool_call_argument_begin|>{"arg": "value"}<|tool_call_end|>
+<|tool_calls_section_end|>
+```
+
+**Files to protect during conflicts**
+- nanobot/providers/openai_compat_provider.py → `_parse_kimi_tool_calls()`, `_strip_kimi_tool_call_tokens()`, `_parse()` and `_parse_chunks()` methods
+
+**Resolution priority**
+1. Keep the Kimi K2 token parsing functions
+2. Keep the calls to parsing in `_parse()` (dict path) and `_parse()` (SDK path) and `_parse_chunks()`
+3. Keep the content stripping after successful parsing
+
+**Quick validation**
+```bash
+python3 -c "
+from nanobot.providers.openai_compat_provider import _parse_kimi_tool_calls
+test = '<|tool_calls_section_begin|><|tool_call_begin|>functions.web_fetch:0<|tool_call_argument_begin|>{\"url\": \"https://example.com\"}<|tool_call_end|><|tool_calls_section_end|>'
+print(len(_parse_kimi_tool_calls(test)), 'tool calls parsed')
+"
+```
