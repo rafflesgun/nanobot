@@ -73,12 +73,15 @@ def _parse_kimi_tool_calls(text: str) -> list[ToolCallRequest]:
     """
     tool_calls: list[ToolCallRequest] = []
 
-    # Find the tool calls section
+    # First try: Find the tool calls section (standard format)
     section_match = _KIMI_TC_SECTION_PATTERN.search(text)
-    if not section_match:
-        return tool_calls
-
-    section_content = section_match.group(1)
+    if section_match:
+        section_content = section_match.group(1)
+    else:
+        # Fallback: Look for tool calls directly in text (some APIs omit section wrapper)
+        if _KIMI_TC_BEGIN not in text:
+            return tool_calls
+        section_content = text
 
     # Parse individual tool calls
     for tc_match in _KIMI_TC_PATTERN.finditer(section_content):
@@ -115,11 +118,18 @@ def _parse_kimi_tool_calls(text: str) -> list[ToolCallRequest]:
 
 def _strip_kimi_tool_call_tokens(text: str) -> str:
     """Remove Kimi K2 tool call tokens from text, keeping other content."""
-    if _KIMI_TC_SECTION_BEGIN not in text:
+    if _KIMI_TC_SECTION_BEGIN not in text and _KIMI_TC_BEGIN not in text:
         return text
 
-    # Remove the entire tool calls section
-    result = _KIMI_TC_SECTION_PATTERN.sub("", text)
+    # First try to remove the entire tool calls section
+    if _KIMI_TC_SECTION_BEGIN in text:
+        result = _KIMI_TC_SECTION_PATTERN.sub("", text)
+    else:
+        result = text
+
+    # Also remove any orphaned tool call tokens (without section wrapper)
+    result = _KIMI_TC_PATTERN.sub("", result)
+
     return result.strip()
 
 
@@ -518,7 +528,7 @@ class OpenAICompatProvider(LLMProvider):
                 ))
 
             # Kimi K2: Also parse tool calls from content if present (API may not parse them)
-            if content and _KIMI_TC_SECTION_BEGIN in content:
+            if content and (_KIMI_TC_SECTION_BEGIN in content or _KIMI_TC_BEGIN in content):
                 kimi_tool_calls = _parse_kimi_tool_calls(content)
                 if kimi_tool_calls:
                     parsed_tool_calls.extend(kimi_tool_calls)
@@ -527,7 +537,7 @@ class OpenAICompatProvider(LLMProvider):
                         finish_reason = "tool_calls"
 
             # Kimi K2: Also check reasoning_content for tool call tokens (streaming bug)
-            if reasoning_content and _KIMI_TC_SECTION_BEGIN in reasoning_content:
+            if reasoning_content and (_KIMI_TC_SECTION_BEGIN in reasoning_content or _KIMI_TC_BEGIN in reasoning_content):
                 kimi_tool_calls = _parse_kimi_tool_calls(reasoning_content)
                 if kimi_tool_calls:
                     parsed_tool_calls.extend(kimi_tool_calls)
@@ -578,7 +588,7 @@ class OpenAICompatProvider(LLMProvider):
 
         # Kimi K2: Also parse tool calls from content if present (API may not parse them)
         reasoning_content = getattr(msg, "reasoning_content", None) or None
-        if content and _KIMI_TC_SECTION_BEGIN in content:
+        if content and (_KIMI_TC_SECTION_BEGIN in content or _KIMI_TC_BEGIN in content):
             kimi_tool_calls = _parse_kimi_tool_calls(content)
             if kimi_tool_calls:
                 tool_calls.extend(kimi_tool_calls)
@@ -587,7 +597,7 @@ class OpenAICompatProvider(LLMProvider):
                     finish_reason = "tool_calls"
 
         # Kimi K2: Also check reasoning_content for tool call tokens (streaming bug)
-        if reasoning_content and _KIMI_TC_SECTION_BEGIN in reasoning_content:
+        if reasoning_content and (_KIMI_TC_SECTION_BEGIN in reasoning_content or _KIMI_TC_BEGIN in reasoning_content):
             kimi_tool_calls = _parse_kimi_tool_calls(reasoning_content)
             if kimi_tool_calls:
                 tool_calls.extend(kimi_tool_calls)
@@ -693,7 +703,7 @@ class OpenAICompatProvider(LLMProvider):
         ]
 
         # Kimi K2: Also parse tool calls from content if present (streaming may emit them as text)
-        if combined_content and _KIMI_TC_SECTION_BEGIN in combined_content:
+        if combined_content and (_KIMI_TC_SECTION_BEGIN in combined_content or _KIMI_TC_BEGIN in combined_content):
             kimi_tool_calls = _parse_kimi_tool_calls(combined_content)
             if kimi_tool_calls:
                 parsed_tool_calls.extend(kimi_tool_calls)
