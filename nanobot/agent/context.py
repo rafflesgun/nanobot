@@ -84,14 +84,16 @@ class ContextBuilder:
         channel: str | None,
         chat_id: str | None,
         timezone: str | None = None,
-        thread_id: int | None = None,
+        thread_id: int | str | None = None,
     ) -> str:
         """Build untrusted runtime metadata block for injection before the user message."""
         lines = [f"Current Time: {current_time_str(timezone)}"]
         if channel and chat_id:
-            lines += [f"Channel: {channel}", f"Chat ID: {chat_id}"]
-            if thread_id is not None:
-                lines.append(f"Thread ID: {thread_id}")
+            lines.extend([f"Channel: {channel}"])
+            if channel == "telegram":
+                normalized_thread_id = 0 if thread_id is None else thread_id
+                lines.append(f"Thread ID: {normalized_thread_id}")
+            lines.append(f"Chat ID: {chat_id}")
         return ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines)
 
     @staticmethod
@@ -131,7 +133,7 @@ class ContextBuilder:
         media: list[str] | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
-        thread_id: int | None = None,
+        thread_id: int | str | None = None,
         current_role: str = "user",
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""

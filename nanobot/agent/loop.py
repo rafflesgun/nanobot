@@ -1259,6 +1259,7 @@ class AgentLoop:
                 current_message=msg.content,
                 channel=channel,
                 chat_id=chat_id,
+                thread_id=thread_id,
                 current_role=current_role,
             )
 
@@ -1336,6 +1337,7 @@ class AgentLoop:
             media=msg.media if msg.media else None,
             channel=msg.channel,
             chat_id=msg.chat_id,
+            thread_id=msg.metadata.get("message_thread_id"),
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:

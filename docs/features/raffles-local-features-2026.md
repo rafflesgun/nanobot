@@ -33,6 +33,7 @@ understand intended behavior quickly.
 | **/stats command - token usage visibility** | ✅     | channels/telegram.py, utils/stats.py                   | tests/test_telegram_stats_command.py   | `/stats`, `/stats topic`, `/stats all`          |
 | **/status shows session model override**   | ✅     | command/builtin.py, utils/helpers.py                   | tests/cli/test_restart_command.py      | shows `gpt-4o (default: claude-opus-4)` when overridden |
 | **Builtin commands preserve topic context** | ✅   | command/builtin.py, channels/telegram.py              | tests/test_telegram_builtin_commands_topic.py | `/new`, `/stop`, `/restart`, `/status`, `/help` |
+| **Channel Info includes Telegram thread_id** | ✅  | agent/context.py, agent/loop.py                       | tests/agent/test_context_prompt_cache.py, tests/agent/test_loop_save_turn.py | Telegram runtime block shows `Thread ID` above `Chat ID`; non-topic = `0` |
 | **Cron jobs preserve topic thread_id**     | ✅     | agent/loop.py, agent/tools/cron.py                    | tests/test_cron_topic_delivery.py      | thread_id passed through _run_agent_loop |
 | **Subagent responses preserve topic**      | ✅     | agent/loop.py, agent/subagent.py, agent/tools/message.py | tests/test_telegram_builtin_commands_topic.py | OutboundMessage from system messages includes thread_id |
 | **Agent runtime context exposes topic Thread ID** | ✅ | agent/context.py, agent/loop.py | tests/agent/test_context_prompt_cache.py | Runtime context includes `Channel`, `Chat ID`, and `Thread ID` for topic messages |
@@ -430,7 +431,29 @@ Keep the `message_thread_id` extraction and inclusion in outbound metadata for a
 pytest tests/test_telegram_builtin_commands_topic.py -v
 ```
 
-### 16–20. Other smaller features (summary)
+### 16. Channel Info includes Telegram thread_id
+
+**Core behavior**
+- Runtime Channel Info includes `Thread ID` for Telegram sessions
+- `Thread ID` appears above `Chat ID` in the runtime block
+- Non-topic Telegram chats use `Thread ID: 0`
+- Non-Telegram channels keep the existing runtime block without `Thread ID`
+
+**Files to protect during conflicts**
+- `nanobot/agent/context.py`
+- `nanobot/agent/loop.py`
+
+**Resolution priority**
+Keep the Telegram-only runtime context branch that injects `Thread ID` before `Chat ID`.
+Preserve `thread_id=0` as a real Telegram value for non-topic chats instead of treating it as missing.
+Do not add `Thread ID` to non-Telegram channels.
+
+**Quick validation**
+```bash
+pytest tests/agent/test_context_prompt_cache.py tests/agent/test_loop_save_turn.py -q
+```
+
+### 17–21. Other smaller features (summary)
 
 - Thinking draft message → PM only (`if is_group: return`)
 - Typing + ACK reaction → per composite key (chat+thread)
@@ -445,7 +468,7 @@ pytest tests/test_telegram_builtin_commands_topic.py -v
 - Skips topic sub-sessions and negative Telegram chat IDs
 - Heartbeat history is bounded pre/post run by content length and recent legal suffix
 
-### 17. TTS reliability fixes
+### 18. TTS reliability fixes
 
 **Core behavior**
 - Text response sent **before** TTS generation so user always sees a response
@@ -491,7 +514,7 @@ except asyncio.TimeoutError:
     return
 ```
 
-### 17. Tool definitions caching (#2205)
+### 19. Tool definitions caching (#2205)
 
 **Core behavior**
 - Added caching to `ToolRegistry.get_definitions()` to prevent repeated traversal of tool sets and JSON schema construction during each iteration of the agent loop
@@ -511,7 +534,7 @@ Preserve the caching mechanism that improves performance by avoiding redundant s
 pytest tests/test_tool_registry_caching.py -v
 ```
 
-### 18. Incremental session saving (#2219)
+### 20. Incremental session saving (#2219)
 
 **Core behavior**
 - Implements incremental session saving for agent loops to prevent data loss when operations crash or get cancelled mid-process
@@ -532,7 +555,7 @@ Keep the incremental save functionality that protects against data loss during m
 pytest tests/test_loop_incremental_save.py -v
 ```
 
-### 19. Repeated tool call protection (infinite loop prevention)
+### 21. Repeated tool call protection (infinite loop prevention)
 
 **Core behavior**
 - Prevents models from getting stuck in infinite tool-calling loops (e.g., repeatedly reading the same file)
@@ -587,7 +610,7 @@ pytest tests/test_loop_incremental_save.py -v
 pytest tests/agent/test_runner.py -v
 ```
 
-### 20. Subagent responses preserve topic thread_id
+### 22. Subagent responses preserve topic thread_id
 
 **Core behavior**
 - When a subagent announces its result via system message, the response goes to the correct topic
@@ -618,7 +641,7 @@ pytest tests/agent/test_runner.py -v
 pytest tests/test_telegram_builtin_commands_topic.py tests/test_cron_topic_delivery.py -v
 ```
 
-### 21. Telegram updater auto-restart on network errors
+### 23. Telegram updater auto-restart on network errors
 
 **Core behavior**
 - Monitors `updater.running` state in the polling loop
@@ -657,7 +680,7 @@ while self._running:
         retry_delay = 5.0  # reset on success
 ```
 
-### 22. Web search status after merge
+### 24. Web search status after merge
 
 **Core behavior**
 - The old local-only DuckDuckGo enhancement is no longer branch-specific
@@ -678,7 +701,7 @@ Do not treat web search as a local-only feature anymore. Keep the upstream multi
 pytest tests/tools/test_web_search_tool.py -q
 ```
 
-### 23. Kimi K2 tool call parsing (special token format)
+### 25. Kimi K2 tool call parsing (special token format)
 
 **Core behavior**
 - Parses Kimi K2's special tool call tokens when API doesn't properly format them as standard `tool_calls`
@@ -716,7 +739,7 @@ print(len(_parse_kimi_tool_calls(test)), 'tool calls parsed')
 "
 ```
 
-### 24. Temperature override per session (`/model temp`)
+### 26. Temperature override per session (`/model temp`)
 
 **Core behavior**
 - `/model temp` — Shows current temperature setting with guidance table
