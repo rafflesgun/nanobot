@@ -186,6 +186,7 @@ def _markdown_to_telegram_html(text: str) -> str:
 
 _SEND_MAX_RETRIES = 3
 _SEND_RETRY_BASE_DELAY = 0.5  # seconds, doubled each retry
+_STREAM_EDIT_INTERVAL_DEFAULT = 0.6  # min seconds between edit_message_text calls
 
 
 @dataclass
@@ -213,6 +214,7 @@ class TelegramConfig(Base):
     pool_timeout: float = 5.0
     streaming: bool = True
     tts: SchemaTTSConfig = Field(default_factory=SchemaTTSConfig)
+    stream_edit_interval: float = Field(default=_STREAM_EDIT_INTERVAL_DEFAULT, ge=0.1)
 
 
 class TelegramChannel(BaseChannel):
@@ -911,7 +913,7 @@ class TelegramChannel(BaseChannel):
             except Exception as e:
                 logger.warning("Stream initial send failed: {}", e)
                 raise
-        elif (now - buf.last_edit) >= self._STREAM_EDIT_INTERVAL:
+        elif (now - buf.last_edit) >= self.config.stream_edit_interval:
             try:
                 await self._call_with_retry(
                     self._app.bot.edit_message_text,

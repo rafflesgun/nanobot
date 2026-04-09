@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import os
+import re
 import time
 from contextlib import AsyncExitStack, nullcontext
 from pathlib import Path
@@ -39,11 +41,19 @@ from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.helpers import image_placeholder_text, truncate_text
-from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE, format_provider_error
+from nanobot.utils.runtime import (
+    EMPTY_FINAL_RESPONSE_MESSAGE,
+    format_provider_error,
+    is_provider_error_message,
+)
+from nanobot.utils.stats import StatsManager
 
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebToolsConfig
     from nanobot.cron.service import CronService
+
+
+UNIFIED_SESSION_KEY = "unified:default"
 
 
 class _LoopHook(AgentHook):
@@ -62,6 +72,7 @@ class _LoopHook(AgentHook):
         thread_id: int | None = None,
         session_key: str | None = None,
     ) -> None:
+        super().__init__(reraise=True)
         self._loop = agent_loop
         self._on_progress = on_progress
         self._on_stream = on_stream
@@ -191,6 +202,7 @@ class AgentLoop:
         timezone: str | None = None,
         hooks: list[AgentHook] | None = None,
         fallback_models: list[str] | None = None,
+        unified_session: bool = False,
     ):
         from nanobot.config.schema import ExecToolConfig, WebToolsConfig
 
@@ -221,11 +233,12 @@ class AgentLoop:
         self.restrict_to_workspace = restrict_to_workspace
         self._start_time = time.time()
         self._last_usage: dict[str, int] = {}
-        self.fallback_models = fallback_models or [] if "fallback_models" in locals() else []
+        self.fallback_models = fallback_models or []
         self.max_repeat_lookups = getattr(defaults, "max_repeat_lookups", 2)
         self._model_overrides: dict[str, str] = load_model_overrides()
         self._temperature_overrides: dict[str, float] = load_temperature_overrides()
         self._extra_hooks: list[AgentHook] = hooks or []
+        self.stats_manager = StatsManager(workspace)
 
         self.context = ContextBuilder(workspace, timezone=timezone)
         self.sessions = session_manager or SessionManager(workspace)
@@ -241,7 +254,7 @@ class AgentLoop:
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
         )
-
+        self._unified_session = unified_session
         self._running = False
         self._mcp_servers = mcp_servers or {}
         self._mcp_stack: AsyncExitStack | None = None
@@ -383,358 +396,16 @@ class AgentLoop:
 
         return format_tool_hints(tool_calls)
 
-    async def run(self) -> None:
-        """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
-        self._running = True
-        await self._connect_mcp()
-        logger.info("Agent loop started")
-
-        while self._running:
-            try:
-                msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
-            except asyncio.TimeoutError:
-                continue
-            except asyncio.CancelledError:
-                # Preserve real task cancellation so shutdown can complete cleanly.
-                # Only ignore non-task CancelledError signals that may leak from integrations.
-                if not self._running or asyncio.current_task().cancelling():
-                    raise
-                continue
-            except Exception as e:
-                logger.warning("Error consuming inbound message: {}, continuing...", e)
-                continue
-
-            raw = msg.content.strip()
-            if self.commands.is_priority(raw):
-                ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw=raw, loop=self)
-                result = await self.commands.dispatch_priority(ctx)
-                if result:
-                    await self.bus.publish_outbound(result)
-                continue
-            task = asyncio.create_task(self._dispatch(msg))
-            self._active_tasks.setdefault(msg.session_key, []).append(task)
-            task.add_done_callback(
-                lambda t, k=msg.session_key: (
-                    self._active_tasks.get(k, []) and self._active_tasks[k].remove(t)
-                    if t in self._active_tasks.get(k, [])
-                    else None
-                )
-            )
-
-    async def _dispatch(self, msg: InboundMessage) -> None:
-        """Process a message: per-session serial, cross-session concurrent."""
-        lock = self._session_locks.setdefault(msg.session_key, asyncio.Lock())
-        gate = self._concurrency_gate or nullcontext()
-        async with lock, gate:
-            try:
-                on_stream = on_stream_end = None
-                if msg.metadata.get("_wants_stream"):
-                    # Split one answer into distinct stream segments.
-                    stream_base_id = f"{msg.session_key}:{time.time_ns()}"
-                    stream_segment = 0
-
-                    def _current_stream_id() -> str:
-                        return f"{stream_base_id}:{stream_segment}"
-
-                    async def on_stream(delta: str) -> None:
-                        meta = dict(msg.metadata or {})
-                        meta["_stream_delta"] = True
-                        meta["_stream_id"] = _current_stream_id()
-                        await self.bus.publish_outbound(
-                            OutboundMessage(
-                                channel=msg.channel,
-                                chat_id=msg.chat_id,
-                                content=delta,
-                                metadata=meta,
-                            )
-                        )
-
-                    async def on_stream_end(*, resuming: bool = False) -> None:
-                        nonlocal stream_segment
-                        meta = dict(msg.metadata or {})
-                        meta["_stream_end"] = True
-                        meta["_resuming"] = resuming
-                        meta["_stream_id"] = _current_stream_id()
-                        await self.bus.publish_outbound(
-                            OutboundMessage(
-                                channel=msg.channel,
-                                chat_id=msg.chat_id,
-                                content="",
-                                metadata=meta,
-                            )
-                        )
-                        stream_segment += 1
-
-                response = await self._process_message(
-                    msg,
-                    on_stream=on_stream,
-                    on_stream_end=on_stream_end,
-                )
-                if response is not None:
-                    await self.bus.publish_outbound(response)
-                elif msg.channel == "cli":
-                    await self.bus.publish_outbound(
-                        OutboundMessage(
-                            channel=msg.channel,
-                            chat_id=msg.chat_id,
-                            content="",
-                            metadata=msg.metadata or {},
-                        )
-                    )
-            except asyncio.CancelledError:
-                logger.info("Task cancelled for session {}", msg.session_key)
-                raise
-            except Exception:
-                logger.exception("Error processing message for session {}", msg.session_key)
-                await self.bus.publish_outbound(
-                    OutboundMessage(
-                        channel=msg.channel,
-                        chat_id=msg.chat_id,
-                        content="Sorry, I encountered an error.",
-                    )
-                )
-
-    async def close_mcp(self) -> None:
-        """Drain pending background archives, then close MCP connections."""
-        if self._background_tasks:
-            await asyncio.gather(*self._background_tasks, return_exceptions=True)
-            self._background_tasks.clear()
-        if self._mcp_stack:
-            try:
-                await self._mcp_stack.aclose()
-            except (RuntimeError, BaseExceptionGroup):
-                pass  # MCP SDK cancel scope cleanup is noisy but harmless
-            self._mcp_stack = None
-
-    def _schedule_background(self, coro) -> None:
-        """Schedule a coroutine as a tracked background task (drained on shutdown)."""
-        task = asyncio.create_task(coro)
-        self._background_tasks.append(task)
-        task.add_done_callback(self._background_tasks.remove)
-
-    def stop(self) -> None:
-        """Stop the agent loop."""
-        self._running = False
-        logger.info("Agent loop stopping")
-
-    async def _process_message(
-        self,
-        msg: InboundMessage,
-        session_key: str | None = None,
-        on_progress: Callable[[str], Awaitable[None]] | None = None,
-        on_stream: Callable[[str], Awaitable[None]] | None = None,
-        on_stream_end: Callable[..., Awaitable[None]] | None = None,
-    ) -> OutboundMessage | None:
-        """Process a single inbound message and return the response."""
-        # System messages: parse origin from chat_id ("channel:chat_id")
-        if msg.channel == "system":
-            channel, chat_id = (
-                msg.chat_id.split(":", 1) if ":" in msg.chat_id else ("cli", msg.chat_id)
-            )
-            logger.info("Processing system message from {}", msg.sender_id)
-            key = f"{channel}:{chat_id}"
-            session = self.sessions.get_or_create(key)
-            if self._restore_runtime_checkpoint(session):
-                self.sessions.save(session)
-            await self.consolidator.maybe_consolidate_by_tokens(session)
-            self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
-            history = session.get_history(max_messages=0)
-            current_role = "assistant" if msg.sender_id == "subagent" else "user"
-            messages = self.context.build_messages(
-                history=history,
-                current_message=msg.content,
-                channel=channel,
-                chat_id=chat_id,
-                current_role=current_role,
-            )
-            final_content, _, all_msgs = await self._run_agent_loop(
-                messages,
-                session=session,
-                channel=channel,
-                chat_id=chat_id,
-                message_id=msg.metadata.get("message_id"),
-            )
-            self._save_turn(session, all_msgs, 1 + len(history))
-            self._clear_runtime_checkpoint(session)
-            self.sessions.save(session)
-            self._schedule_background(self.consolidator.maybe_consolidate_by_tokens(session))
-            return OutboundMessage(
-                channel=channel,
-                chat_id=chat_id,
-                content=final_content or "Background task completed.",
-            )
-
-        preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
-        logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
-
-        key = session_key or msg.session_key
-        session = self.sessions.get_or_create(key)
-        if self._restore_runtime_checkpoint(session):
-            self.sessions.save(session)
-
-        # Slash commands
-        raw = msg.content.strip()
-        ctx = CommandContext(msg=msg, session=session, key=key, raw=raw, loop=self)
-        if result := await self.commands.dispatch(ctx):
-            return result
-
-        await self.consolidator.maybe_consolidate_by_tokens(session)
-
-        self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
-        if message_tool := self.tools.get("message"):
-            if isinstance(message_tool, MessageTool):
-                message_tool.start_turn()
-
-        history = session.get_history(max_messages=0)
-        initial_messages = self.context.build_messages(
-            history=history,
-            current_message=msg.content,
-            media=msg.media if msg.media else None,
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            thread_id=msg.metadata.get("message_thread_id"),
-        )
-
-        async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
-            meta = dict(msg.metadata or {})
-            meta["_progress"] = True
-            meta["_tool_hint"] = tool_hint
-            await self.bus.publish_outbound(
-                OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content=content,
-                    metadata=meta,
-                )
-            )
-
-        async def _on_turn_saved(messages: list[dict]) -> None:
-            self._save_turn(session, messages, 1 + len(history))
-            self.sessions.save(session)
-
-        final_content, _, all_msgs = await self._run_agent_loop(
-            initial_messages,
-            on_progress=on_progress or _bus_progress,
-            on_stream=on_stream,
-            on_stream_end=on_stream_end,
-            session=session,
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            message_id=msg.metadata.get("message_id"),
-            on_turn_saved=_on_turn_saved,
-        )
-
-        if final_content is None or not final_content.strip():
-            final_content = EMPTY_FINAL_RESPONSE_MESSAGE
-
-        self._save_turn(session, all_msgs, 1 + len(history))
-        self._clear_runtime_checkpoint(session)
-        self.sessions.save(session)
-        self._schedule_background(self.consolidator.maybe_consolidate_by_tokens(session))
-
-        if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
-            return None
-
-        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
-        logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
-
-        meta = dict(msg.metadata or {})
-        if on_stream is not None:
-            meta["_streamed"] = True
-        return OutboundMessage(
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            content=final_content,
-            metadata=meta,
-        )
-
-    def _sanitize_persisted_blocks(
-        self,
-        content: list[dict[str, Any]],
-        *,
-        truncate_text: bool = False,
-        drop_runtime: bool = False,
-    ) -> list[dict[str, Any]]:
-        """Strip volatile multimodal payloads before writing session history."""
-        filtered: list[dict[str, Any]] = []
-        for block in content:
-            if not isinstance(block, dict):
-                filtered.append(block)
-                continue
-
-            if (
-                drop_runtime
-                and block.get("type") == "text"
-                and isinstance(block.get("text"), str)
-                and block["text"].startswith(ContextBuilder._RUNTIME_CONTEXT_TAG)
-            ):
-                continue
-
-            if block.get("type") == "image_url" and block.get("image_url", {}).get(
-                "url", ""
-            ).startswith("data:image/"):
-                path = (block.get("_meta") or {}).get("path", "")
-                filtered.append({"type": "text", "text": image_placeholder_text(path)})
-                continue
-
-            if block.get("type") == "text" and isinstance(block.get("text"), str):
-                text = block["text"]
-                if truncate_text and len(text) > self.max_tool_result_chars:
-                    text = truncate_text(text, self.max_tool_result_chars)
-                filtered.append({**block, "text": text})
-                continue
-
-            filtered.append(block)
-
-        return filtered
-
-    def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
-        """Save new-turn messages into session, truncating large tool results."""
-        from datetime import datetime
-
-        for m in messages[skip:]:
-            entry = dict(m)
-            role, content = entry.get("role"), entry.get("content")
-            if role == "assistant" and not content and not entry.get("tool_calls"):
-                continue  # skip empty assistant messages — they poison session context
-            if role == "tool":
-                if isinstance(content, str) and len(content) > self.max_tool_result_chars:
-                    entry["content"] = truncate_text(content, self.max_tool_result_chars)
-                elif isinstance(content, list):
-                    filtered = self._sanitize_persisted_blocks(content, truncate_text=True)
-                    if not filtered:
-                        continue
-                    entry["content"] = filtered
-            elif role == "user":
-                if isinstance(content, str) and content.startswith(
-                    ContextBuilder._RUNTIME_CONTEXT_TAG
-                ):
-                    # Strip the runtime-context prefix, keep only the user text.
-                    parts = content.split("\n\n", 1)
-                    if len(parts) > 1 and parts[1].strip():
-                        entry["content"] = parts[1]
-                    else:
-                        continue
-                if isinstance(content, list):
-                    filtered = self._sanitize_persisted_blocks(content, drop_runtime=True)
-                    if not filtered:
-                        continue
-                    entry["content"] = filtered
-            entry.setdefault("timestamp", datetime.now().isoformat())
-            session.messages.append(entry)
-        session.updated_at = datetime.now()
-
     def _handle_model_command(
         self, msg: InboundMessage, session_key: str, raw_content: str | None = None
     ) -> OutboundMessage:
-        """Handle /model command — show current model or switch to a new one."""
+        """Handle /model command: show current model or set a session override."""
         raw = (raw_content or msg.content).strip()
         parts = raw.split(None, 2)
         model_arg = parts[1].strip() if len(parts) > 1 else ""
         _meta = dict(msg.metadata or {})
-        _meta["command_response"] = True  # Skip TTS for command responses
+        _meta["command_response"] = True
 
-        # Handle temperature subcommand: /model temp [value|reset]
         if model_arg.lower() == "temp":
             temp_arg = parts[2].strip() if len(parts) > 2 else ""
             return self._handle_temp_command(msg, session_key, temp_arg, _meta)
@@ -749,7 +420,7 @@ class AgentLoop:
                     if is_override
                     else ""
                 )
-                + f"\n\nSwitch model with `/model <model-id>`."
+                + "\n\nSwitch model with `/model <model-id>`."
             )
             return OutboundMessage(
                 channel=msg.channel,
@@ -789,9 +460,8 @@ class AgentLoop:
     def _handle_temp_command(
         self, msg: InboundMessage, session_key: str, temp_arg: str, _meta: dict
     ) -> OutboundMessage:
-        """Handle /model temp subcommand — show or set temperature override."""
+        """Handle /model temp subcommand: show or set a session temperature override."""
         if not temp_arg:
-            # Show current temperature
             effective_temp = self._temperature_overrides.get(session_key)
             is_override = session_key in self._temperature_overrides
             guidance = (
@@ -816,7 +486,7 @@ class AgentLoop:
 
         if temp_arg.lower() == "reset":
             removed = self._temperature_overrides.pop(session_key, None)
-            if removed:
+            if removed is not None:
                 save_temperature_overrides(self._temperature_overrides)
                 return OutboundMessage(
                     channel=msg.channel,
@@ -859,9 +529,9 @@ class AgentLoop:
         )
 
     async def _handle_stats_command(self, msg: InboundMessage, args: list[str]) -> OutboundMessage:
-        """Handle /stats command — show token usage statistics."""
+        """Handle /stats command for chat, topic, or global token usage."""
         _meta = dict(msg.metadata or {})
-        _meta["command_response"] = True  # Skip TTS for command responses
+        _meta["command_response"] = True
 
         if args and args[0].lower() == "topic" and _meta.get("message_thread_id") is None:
             return OutboundMessage(
@@ -883,11 +553,9 @@ class AgentLoop:
 
             total_messages = sum(stats.values())
             total_tokens = sum(stat["total_tokens"] for stat in stats.values())
-
-            response = f"📊 Total Token Usage Statistics\n\n"
+            response = "📊 Total Token Usage Statistics\n\n"
             response += f"• Total messages: {total_messages}\n"
             response += f"• Total tokens: {total_tokens:,}\n\n"
-
             for channel, stat in stats.items():
                 response += (
                     f"📡 {channel}: {stat['total_tokens']:,} tokens ({stat['count']} messages)\n"
@@ -914,13 +582,12 @@ class AgentLoop:
         total_output = stats["total_output_tokens"]
         total_tokens = stats["total_tokens"]
 
-        response = f"📊 Token Usage Statistics"
+        response = "📊 Token Usage Statistics"
         if _meta.get("message_thread_id") is not None:
             response += f" (Topic {_meta.get('message_thread_id')})"
         else:
             response += " (This Chat)"
         response += "\n\n"
-
         response += f"• Total messages: {total_messages}\n"
         response += f"• Input tokens: {total_input:,}\n"
         response += f"• Output tokens: {total_output:,}\n"
@@ -932,6 +599,51 @@ class AgentLoop:
             content=response,
             metadata=_meta,
         )
+
+    async def run(self) -> None:
+        """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
+        self._running = True
+        await self._connect_mcp()
+        logger.info("Agent loop started")
+
+        while self._running:
+            try:
+                msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
+            except asyncio.TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                # Preserve real task cancellation so shutdown can complete cleanly.
+                # Only ignore non-task CancelledError signals that may leak from integrations.
+                if not self._running or asyncio.current_task().cancelling():
+                    raise
+                continue
+            except Exception as e:
+                logger.warning("Error consuming inbound message: {}, continuing...", e)
+                continue
+
+            raw = msg.content.strip()
+            if self.commands.is_priority(raw):
+                ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw=raw, loop=self)
+                result = await self.commands.dispatch_priority(ctx)
+                if result:
+                    await self.bus.publish_outbound(result)
+                continue
+            # Compute the effective session key before dispatching
+            # This ensures /stop command can find tasks correctly when unified session is enabled
+            effective_key = (
+                UNIFIED_SESSION_KEY
+                if self._unified_session and not msg.session_key_override
+                else msg.session_key
+            )
+            task = asyncio.create_task(self._dispatch(msg))
+            self._active_tasks.setdefault(effective_key, []).append(task)
+            task.add_done_callback(
+                lambda t, k=effective_key: (
+                    self._active_tasks.get(k, []) and self._active_tasks[k].remove(t)
+                    if t in self._active_tasks.get(k, [])
+                    else None
+                )
+            )
 
     async def _run_agent_loop(
         self,
@@ -1117,6 +829,8 @@ class AgentLoop:
 
     async def _dispatch(self, msg: InboundMessage) -> None:
         """Process a message: per-session serial, cross-session concurrent."""
+        if self._unified_session and not msg.session_key_override:
+            msg = dataclasses.replace(msg, session_key_override=UNIFIED_SESSION_KEY)
         lock = self._session_locks.setdefault(msg.session_key, asyncio.Lock())
         gate = self._concurrency_gate or nullcontext()
         async with lock, gate:
