@@ -73,6 +73,63 @@ def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
     assert "Return exactly: OK" in user_content
 
 
+def test_telegram_topic_runtime_context_includes_thread_id_and_keeps_it_above_chat_id(
+    tmp_path,
+) -> None:
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    messages = builder.build_messages(
+        history=[],
+        current_message="Return exactly: OK",
+        channel="telegram",
+        chat_id="-100123",
+        thread_id=42,
+    )
+
+    user_content = messages[-1]["content"]
+    assert isinstance(user_content, str)
+    assert "Thread ID: 42" in user_content
+    assert "Chat ID: -100123" in user_content
+    assert user_content.index("Thread ID: 42") < user_content.index("Chat ID: -100123")
+
+
+def test_telegram_non_topic_runtime_context_includes_zero_thread_id_and_keeps_it_above_chat_id(
+    tmp_path,
+) -> None:
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    messages = builder.build_messages(
+        history=[],
+        current_message="Return exactly: OK",
+        channel="telegram",
+        chat_id="123456789",
+    )
+
+    user_content = messages[-1]["content"]
+    assert isinstance(user_content, str)
+    assert "Thread ID: 0" in user_content
+    assert "Chat ID: 123456789" in user_content
+    assert user_content.index("Thread ID: 0") < user_content.index("Chat ID: 123456789")
+
+
+def test_non_telegram_runtime_context_omits_thread_id(tmp_path) -> None:
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    messages = builder.build_messages(
+        history=[],
+        current_message="Return exactly: OK",
+        channel="cli",
+        chat_id="direct",
+    )
+
+    user_content = messages[-1]["content"]
+    assert isinstance(user_content, str)
+    assert "Thread ID:" not in user_content
+
+
 def test_subagent_result_does_not_create_consecutive_assistant_messages(tmp_path) -> None:
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)

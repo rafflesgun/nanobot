@@ -30,7 +30,12 @@ from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.bus.queue import MessageBus
 from collections.abc import Callable as AbcCallable
-from nanobot.config.paths import load_model_overrides, save_model_overrides, load_temperature_overrides, save_temperature_overrides
+from nanobot.config.paths import (
+    load_model_overrides,
+    save_model_overrides,
+    load_temperature_overrides,
+    save_temperature_overrides,
+)
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
@@ -939,6 +944,7 @@ class AgentLoop:
                 current_message=msg.content,
                 channel=channel,
                 chat_id=chat_id,
+                thread_id=thread_id,
                 current_role=current_role,
             )
             final_content, _, all_msgs = await self._run_agent_loop(
@@ -1010,6 +1016,7 @@ class AgentLoop:
             media=msg.media if msg.media else None,
             channel=msg.channel,
             chat_id=msg.chat_id,
+            thread_id=msg.metadata.get("message_thread_id"),
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:

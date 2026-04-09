@@ -5,6 +5,7 @@ import pytest
 
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.loop import AgentLoop
+from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import GenerationSettings, LLMResponse
 from nanobot.session.manager import Session
@@ -171,6 +172,9 @@ async def test_process_direct_keeps_zero_thread_id_in_metadata(tmp_path) -> None
         model="test-model",
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
+    loop.memory_consolidator.maybe_consolidate_by_tokens = AsyncMock()  # type: ignore[method-assign]
+    original_build_messages = loop.context.build_messages
+    loop.context.build_messages = MagicMock(side_effect=original_build_messages)
 
     result = await loop.process_direct(
         "hello topic",
@@ -182,6 +186,50 @@ async def test_process_direct_keeps_zero_thread_id_in_metadata(tmp_path) -> None
 
     assert result is not None
     assert result.metadata["message_thread_id"] == 0
+    assert any(
+        call.kwargs.get("thread_id") == 0 for call in loop.context.build_messages.call_args_list
+    )
+
+
+@pytest.mark.asyncio
+async def test_process_system_message_passes_thread_id_to_context_builder(tmp_path) -> None:
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.generation = GenerationSettings(max_tokens=0)
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
+    provider.chat_stream_with_retry = AsyncMock(
+        return_value=LLMResponse(content="ok", tool_calls=[])
+    )
+
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+    )
+    loop.tools.get_definitions = MagicMock(return_value=[])
+    loop.memory_consolidator.maybe_consolidate_by_tokens = AsyncMock()  # type: ignore[method-assign]
+    loop._run_agent_loop = AsyncMock(
+        return_value=("ok", None, [{"role": "assistant", "content": "ok"}])
+    )  # type: ignore[method-assign]
+    original_build_messages = loop.context.build_messages
+    loop.context.build_messages = MagicMock(side_effect=original_build_messages)
+
+    result = await loop._process_message(
+        InboundMessage(
+            channel="system",
+            sender_id="system",
+            chat_id="telegram:-100123",
+            content="system task",
+            metadata={"message_id": "m1", "message_thread_id": 42},
+        )
+    )
+
+    assert result is not None
+    assert result.metadata["message_thread_id"] == 42
+    assert any(
+        call.kwargs.get("thread_id") == 42 for call in loop.context.build_messages.call_args_list
+    )
 
 
 def test_restore_runtime_checkpoint_rehydrates_completed_and_pending_tools() -> None:
