@@ -10,6 +10,7 @@ from typing import Any
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.utils.prompt_templates import render_template
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider, ToolCallRequest
 from nanobot.utils.helpers import (
@@ -23,17 +24,32 @@ from nanobot.utils.helpers import (
 from nanobot.utils.runtime import (
     EMPTY_FINAL_RESPONSE_MESSAGE,
     build_finalization_retry_message,
+    build_length_recovery_message,
     ensure_nonempty_tool_result,
     is_blank_text,
     repeated_external_lookup_error,
 )
 
-_DEFAULT_MAX_ITERATIONS_MESSAGE = (
-    "I reached the maximum number of tool call iterations ({max_iterations}) "
-    "without completing the task. You can try breaking the task into smaller steps."
-)
 _DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
+_MAX_EMPTY_RETRIES = 2
+_MAX_LENGTH_RECOVERIES = 3
 _SNIP_SAFETY_BUFFER = 1024
+_MICROCOMPACT_KEEP_RECENT = 10
+_MICROCOMPACT_MIN_CHARS = 500
+_COMPACTABLE_TOOLS = frozenset(
+    {
+        "read_file",
+        "exec",
+        "grep",
+        "glob",
+        "web_search",
+        "web_fetch",
+        "list_dir",
+    }
+)
+_BACKFILL_CONTENT = "[Tool result unavailable — call was interrupted or lost]"
+
+
 @dataclass(slots=True)
 class AgentRunSpec:
     """Configuration for a single agent execution."""
@@ -58,7 +74,8 @@ class AgentRunSpec:
     provider_retry_mode: str = "standard"
     progress_callback: Any | None = None
     checkpoint_callback: Any | None = None
-    max_repeat_lookups: int = 2  # Max times same tool call allowed before blocking
+    max_repeat_lookups: int = 2
+    on_turn_saved: Callable[[list[dict[str, Any]]], Awaitable[None]] | None = None
 
 
 @dataclass(slots=True)
@@ -90,9 +107,13 @@ class AgentRunner:
         stop_reason = "completed"
         tool_events: list[dict[str, str]] = []
         external_lookup_counts: dict[str, int] = {}
+        empty_content_retries = 0
+        length_recovery_count = 0
 
         for iteration in range(spec.max_iterations):
             try:
+                messages = self._backfill_missing_tool_results(messages)
+                messages = self._microcompact(messages)
                 messages = self._apply_tool_result_budget(spec, messages)
                 messages_for_model = self._snip_history(spec, messages)
             except Exception as exc:
@@ -132,7 +153,9 @@ class AgentRunner:
                         "model": spec.model,
                         "assistant_message": assistant_message,
                         "completed_tool_results": [],
-                        "pending_tool_calls": [tc.to_openai_tool_call() for tc in response.tool_calls],
+                        "pending_tool_calls": [
+                            tc.to_openai_tool_call() for tc in response.tool_calls
+                        ],
                     },
                 )
 
@@ -182,15 +205,33 @@ class AgentRunner:
                         "pending_tool_calls": [],
                     },
                 )
+                empty_content_retries = 0
+                length_recovery_count = 0
                 await hook.after_iteration(context)
+                if spec.on_turn_saved:
+                    await spec.on_turn_saved(messages)
                 continue
 
             clean = hook.finalize_content(context, response.content)
             if response.finish_reason != "error" and is_blank_text(clean):
+                empty_content_retries += 1
+                if empty_content_retries < _MAX_EMPTY_RETRIES:
+                    logger.warning(
+                        "Empty response on turn {} for {} ({}/{}); retrying",
+                        iteration,
+                        spec.session_key or "default",
+                        empty_content_retries,
+                        _MAX_EMPTY_RETRIES,
+                    )
+                    if hook.wants_streaming():
+                        await hook.on_stream_end(context, resuming=False)
+                    await hook.after_iteration(context)
+                    continue
                 logger.warning(
-                    "Empty final response on turn {} for {}; retrying with explicit finalization prompt",
+                    "Empty response on turn {} for {} after {} retries; attempting finalization",
                     iteration,
                     spec.session_key or "default",
+                    empty_content_retries,
                 )
                 if hook.wants_streaming():
                     await hook.on_stream_end(context, resuming=False)
@@ -202,6 +243,29 @@ class AgentRunner:
                 context.usage = dict(raw_usage)
                 context.tool_calls = list(response.tool_calls)
                 clean = hook.finalize_content(context, response.content)
+
+            if response.finish_reason == "length" and not is_blank_text(clean):
+                length_recovery_count += 1
+                if length_recovery_count <= _MAX_LENGTH_RECOVERIES:
+                    logger.info(
+                        "Output truncated on turn {} for {} ({}/{}); continuing",
+                        iteration,
+                        spec.session_key or "default",
+                        length_recovery_count,
+                        _MAX_LENGTH_RECOVERIES,
+                    )
+                    if hook.wants_streaming():
+                        await hook.on_stream_end(context, resuming=True)
+                    messages.append(
+                        build_assistant_message(
+                            clean,
+                            reasoning_content=response.reasoning_content,
+                            thinking_blocks=response.thinking_blocks,
+                        )
+                    )
+                    messages.append(build_length_recovery_message())
+                    await hook.after_iteration(context)
+                    continue
 
             if hook.wants_streaming():
                 await hook.on_stream_end(context, resuming=False)
@@ -227,11 +291,13 @@ class AgentRunner:
                 await hook.after_iteration(context)
                 break
 
-            messages.append(build_assistant_message(
-                clean,
-                reasoning_content=response.reasoning_content,
-                thinking_blocks=response.thinking_blocks,
-            ))
+            messages.append(
+                build_assistant_message(
+                    clean,
+                    reasoning_content=response.reasoning_content,
+                    thinking_blocks=response.thinking_blocks,
+                )
+            )
             await self._emit_checkpoint(
                 spec,
                 {
@@ -250,8 +316,16 @@ class AgentRunner:
             break
         else:
             stop_reason = "max_iterations"
-            template = spec.max_iterations_message or _DEFAULT_MAX_ITERATIONS_MESSAGE
-            final_content = template.format(max_iterations=spec.max_iterations)
+            if spec.max_iterations_message:
+                final_content = spec.max_iterations_message.format(
+                    max_iterations=spec.max_iterations,
+                )
+            else:
+                final_content = render_template(
+                    "agent/max_iterations_message.md",
+                    strip=True,
+                    max_iterations=spec.max_iterations,
+                )
             self._append_final_message(messages, final_content)
 
         return AgentRunResult(
@@ -276,7 +350,15 @@ class AgentRunner:
             "tools": tools,
             "model": spec.model,
             "retry_mode": spec.provider_retry_mode,
-            "on_retry_wait": spec.progress_callback,
+            "on_retry": (
+                lambda attempt, total: (
+                    asyncio.create_task(
+                        spec.progress_callback(f"Retrying... (attempt {attempt}/{total})")
+                    )
+                    if spec.progress_callback
+                    else None
+                )
+            ),
         }
         if spec.temperature is not None:
             kwargs["temperature"] = spec.temperature
@@ -299,6 +381,7 @@ class AgentRunner:
             tools=spec.tools.get_definitions(),
         )
         if hook.wants_streaming():
+
             async def _stream(delta: str) -> None:
                 await hook.on_stream(context, delta)
 
@@ -352,13 +435,19 @@ class AgentRunner:
         tool_results: list[tuple[Any, dict[str, str], BaseException | None]] = []
         for batch in batches:
             if spec.concurrent_tools and len(batch) > 1:
-                tool_results.extend(await asyncio.gather(*(
-                    self._run_tool(spec, tool_call, external_lookup_counts)
-                    for tool_call in batch
-                )))
+                tool_results.extend(
+                    await asyncio.gather(
+                        *(
+                            self._run_tool(spec, tool_call, external_lookup_counts)
+                            for tool_call in batch
+                        )
+                    )
+                )
             else:
                 for tool_call in batch:
-                    tool_results.append(await self._run_tool(spec, tool_call, external_lookup_counts))
+                    tool_results.append(
+                        await self._run_tool(spec, tool_call, external_lookup_counts)
+                    )
 
         results: list[Any] = []
         events: list[dict[str, str]] = []
@@ -407,7 +496,11 @@ class AgentRunner:
                 "status": "error",
                 "detail": prep_error.split(": ", 1)[-1][:120],
             }
-            return prep_error + _HINT, event, RuntimeError(prep_error) if spec.fail_on_tool_error else None
+            return (
+                prep_error + _HINT,
+                event,
+                RuntimeError(prep_error) if spec.fail_on_tool_error else None,
+            )
         try:
             if tool is not None:
                 result = await tool.execute(**params)
@@ -495,6 +588,76 @@ class AgentRunner:
             return truncate_text(content, spec.max_tool_result_chars)
         return content
 
+    @staticmethod
+    def _backfill_missing_tool_results(
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Insert synthetic error results for orphaned tool_use blocks."""
+        declared: list[tuple[int, str, str]] = []  # (assistant_idx, call_id, name)
+        fulfilled: set[str] = set()
+        for idx, msg in enumerate(messages):
+            role = msg.get("role")
+            if role == "assistant":
+                for tc in msg.get("tool_calls") or []:
+                    if isinstance(tc, dict) and tc.get("id"):
+                        name = ""
+                        func = tc.get("function")
+                        if isinstance(func, dict):
+                            name = func.get("name", "")
+                        declared.append((idx, str(tc["id"]), name))
+            elif role == "tool":
+                tid = msg.get("tool_call_id")
+                if tid:
+                    fulfilled.add(str(tid))
+
+        missing = [(ai, cid, name) for ai, cid, name in declared if cid not in fulfilled]
+        if not missing:
+            return messages
+
+        updated = list(messages)
+        offset = 0
+        for assistant_idx, call_id, name in missing:
+            insert_at = assistant_idx + 1 + offset
+            while insert_at < len(updated) and updated[insert_at].get("role") == "tool":
+                insert_at += 1
+            updated.insert(
+                insert_at,
+                {
+                    "role": "tool",
+                    "tool_call_id": call_id,
+                    "name": name,
+                    "content": _BACKFILL_CONTENT,
+                },
+            )
+            offset += 1
+        return updated
+
+    @staticmethod
+    def _microcompact(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Replace old compactable tool results with one-line summaries."""
+        compactable_indices: list[int] = []
+        for idx, msg in enumerate(messages):
+            if msg.get("role") == "tool" and msg.get("name") in _COMPACTABLE_TOOLS:
+                compactable_indices.append(idx)
+
+        if len(compactable_indices) <= _MICROCOMPACT_KEEP_RECENT:
+            return messages
+
+        stale = compactable_indices[: len(compactable_indices) - _MICROCOMPACT_KEEP_RECENT]
+        updated: list[dict[str, Any]] | None = None
+        for idx in stale:
+            msg = messages[idx]
+            content = msg.get("content")
+            if not isinstance(content, str) or len(content) < _MICROCOMPACT_MIN_CHARS:
+                continue
+            name = msg.get("name", "tool")
+            summary = f"[{name} result omitted from context]"
+            if updated is None:
+                updated = [dict(m) for m in messages]
+            updated[idx]["content"] = summary
+
+        return updated if updated is not None else messages
+
     def _apply_tool_result_budget(
         self,
         spec: AgentRunSpec,
@@ -524,9 +687,13 @@ class AgentRunner:
         if not messages or not spec.context_window_tokens:
             return messages
 
-        provider_max_tokens = getattr(getattr(self.provider, "generation", None), "max_tokens", 4096)
-        max_output = spec.max_tokens if isinstance(spec.max_tokens, int) else (
-            provider_max_tokens if isinstance(provider_max_tokens, int) else 4096
+        provider_max_tokens = getattr(
+            getattr(self.provider, "generation", None), "max_tokens", 4096
+        )
+        max_output = (
+            spec.max_tokens
+            if isinstance(spec.max_tokens, int)
+            else (provider_max_tokens if isinstance(provider_max_tokens, int) else 4096)
         )
         budget = spec.context_block_limit or (
             spec.context_window_tokens - max_output - _SNIP_SAFETY_BUFFER
@@ -567,7 +734,7 @@ class AgentRunner:
                 if message.get("role") == "user":
                     user_idx = i
                     break
-            
+
             if user_idx is not None:
                 # Start from first user message
                 kept = kept[user_idx:]
@@ -576,30 +743,16 @@ class AgentRunner:
                 if start and start < len(kept):
                     kept = kept[start:]
             else:
-                # No user message in kept - this means we only have tool results
-                # We need to keep a valid message chain: user -> assistant -> tool_results
                 logger.warning(
                     "History snip would remove all user messages; keeping last valid chain"
                 )
-                # Find the last user message and following assistant with tool_calls
-                for i in range(len(non_system) - 1, -1, -1):
-                    if non_system[i].get("role") == "user":
-                        # Found user, rebuild from here
-                        kept = []
-                        for j in range(i, len(non_system)):
-                            kept.append(non_system[j])
-                        break
-                
-                # Verify the rebuilt chain has a user message
-                has_user = any(m.get("role") == "user" for m in kept)
-                if not has_user:
-                    # Fallback: just use the last few messages from non_system
-                    logger.warning("Could not rebuild valid chain, using last 4 messages")
-                    kept = non_system[-min(len(non_system), 4):]
+                start = find_legal_message_start(kept)
+                if start and start < len(kept):
+                    kept = kept[start:]
         else:
             # Nothing kept, use last few messages
-            kept = non_system[-min(len(non_system), 4):]
-        
+            kept = non_system[-min(len(non_system), 4) :]
+
         return system_messages + kept
 
     def _partition_tool_batches(
@@ -626,4 +779,3 @@ class AgentRunner:
         if current:
             batches.append(current)
         return batches
-

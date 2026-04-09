@@ -38,7 +38,8 @@ class ToolRegistry:
     def get_definitions(self) -> list[dict[str, Any]]:
         """Get all tool definitions in OpenAI format."""
         if self._definitions_cache is None:
-            self._definitions_cache = [tool.to_schema() for tool in self._tools.values()]
+            ordered = sorted(self._tools.values(), key=lambda t: (1 if t.name.startswith("mcp_") else 0, t.name))
+            self._definitions_cache = [tool.to_schema() for tool in ordered]
         return self._definitions_cache
 
     def prepare_call(

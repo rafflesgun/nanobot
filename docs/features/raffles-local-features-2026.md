@@ -15,7 +15,7 @@ understand intended behavior quickly.
 | Telegram groups → mention-only mode         | ✅     | channels/telegram.py                                   | manual + group_policy test             | `group_policy = "mention"` (default)          |
 | Group commands via @mention                 | ✅     | channels/telegram.py → _on_message                     | manual                                 | `@BotName /command` → text message path       |
 | Configured subagents via `spawn(subagent_id)` | ✅   | config/schema.py, cli/commands.py, agent/loop.py, agent/subagent.py, agent/tools/spawn.py | tests/agent/test_configured_subagents.py, tests/agent/test_task_cancel.py | named `agents.*` profiles inherit from `agents.defaults` |
-| Ordered fallback models on provider errors  | ✅     | agent/loop.py, config/schema.py, cli/commands.py, agent/subagent.py | tests/agent/test_fallback_models.py, tests/config/test_config_migration.py | `fallback_models: []` (list, tried in order) |
+| Ordered fallback models on provider errors  | ✅     | agent/loop.py, config/schema.py, cli/commands.py, agent/subagent.py | tests/agent/test_fallback_models.py, tests/config/test_config_migration.py | `fallback_models: []` (list, tried in order, includes bare `429`) |
 | "Thinking…" placeholder (PM only)           | ✅     | channels/telegram.py → _send_thinking_message          | tests/test_thinking_message.py         | skipped when `is_group == True`               |
 | Typing indicator & ACK reaction             | ✅     | channels/telegram.py                                   | tests/test_typing_ack.py               | typing per chat+thread, `react_emoji` can be str or list |
 | Heartbeat results → DM / private only       | ✅     | cli/commands.py, heartbeat/service.py                  | test_heartbeat_service.py + targeted tests | skips negative IDs and topic sub-sessions  |
@@ -28,13 +28,14 @@ understand intended behavior quickly.
 | SDK retries disabled + surfaced to progress | ✅     | providers/base.py, providers/*, agent/loop.py         | tests/providers/test_provider_retry.py | provider SDK retries forced to `0`            |
 | Fine-grained workspace allowlist for tools   | ✅     | config/schema.py, config/loader.py, cli/commands.py, agent/loop.py, agent/subagent.py, agent/tools/shell.py | tests/config/test_config_migration.py, tests/tools/test_exec_security.py | `restrictToWorkspace = { enabled, extraRead, extraWrite }` |
 | Telegram forwarded message debounce         | ✅     | channels/telegram.py                                   | tests/channels/test_telegram_channel.py | 80ms lane = `chat_id:thread_id`              |
-| **TTS voice notes (Edge + OpenAI + Riva)**  | ✅     | providers/tts.py, tts/manager.py, channels/telegram.py, utils/audio.py | tests/test_tts.py (new)                | `tts.enabled = false` (default), text sent before TTS, 30s timeout |
-| **/trace command - AI thinking visibility** | ✅     | channels/telegram.py                                   | tests/test_trace_command_additional.py | `_trace_enabled[chat_id] = false` (default)   |
+| **TTS voice notes (Edge + OpenAI + Riva)**  | ✅     | providers/tts.py, tts/manager.py, channels/telegram.py, utils/audio.py | tests/test_tts.py (new)                | `tts.enabled = false` (default), text sent before TTS, 30s timeout, overrides persist across restart |
+| **/trace command - AI thinking visibility** | ✅     | channels/telegram.py                                   | tests/test_trace_command_additional.py | `_trace_enabled[chat_id] = false` (default, chat-scoped not topic-scoped) |
 | **/stats command - token usage visibility** | ✅     | channels/telegram.py, utils/stats.py                   | tests/test_telegram_stats_command.py   | `/stats`, `/stats topic`, `/stats all`          |
 | **/status shows session model override**   | ✅     | command/builtin.py, utils/helpers.py                   | tests/cli/test_restart_command.py      | shows `gpt-4o (default: claude-opus-4)` when overridden |
 | **Builtin commands preserve topic context** | ✅   | command/builtin.py, channels/telegram.py              | tests/test_telegram_builtin_commands_topic.py | `/new`, `/stop`, `/restart`, `/status`, `/help` |
 | **Cron jobs preserve topic thread_id**     | ✅     | agent/loop.py, agent/tools/cron.py                    | tests/test_cron_topic_delivery.py      | thread_id passed through _run_agent_loop |
 | **Subagent responses preserve topic**      | ✅     | agent/loop.py, agent/subagent.py, agent/tools/message.py | tests/test_telegram_builtin_commands_topic.py | OutboundMessage from system messages includes thread_id |
+| **Agent runtime context exposes topic Thread ID** | ✅ | agent/context.py, agent/loop.py | tests/agent/test_context_prompt_cache.py | Runtime context includes `Channel`, `Chat ID`, and `Thread ID` for topic messages |
 | **Telegram updater auto-restart on network errors** | ✅ | channels/telegram.py | manual | monitors updater.running, exponential backoff retry |
 | **Commands enhanced for topic support**     | ✅     | channels/telegram.py, agent/loop.py                    | manual                                 | `/new`, `/stop`, `/model`, `/stats`, `/tts`, `/trace` |
 | **Tool definitions caching (#2205)**        | ✅     | agent/tools/registry.py                                | tests/test_tool_registry_caching.py    | `_definitions_cache` invalidated on reg/unreg |
@@ -109,6 +110,7 @@ Overrides persist across restarts.
 - Non-default profiles inherit unspecified fields from `agents.defaults`
 - `spawn` accepts `subagent_id` so the main agent can deliberately pick a configured subagent backend
 - The spawn tool description advertises configured profiles so the main agent can discover them in-context
+- The parent session `model_override` now propagates into spawned subagents unless the caller leaves it unset
 - This phase is intentionally limited to background subagents; it does not implement full peer-agent routing or handoff
 
 **Files**
@@ -122,6 +124,7 @@ Overrides persist across restarts.
 Keep named agent profiles as overlays on `agents.defaults`, not fully separate standalone configs.  
 Keep the scope limited to `spawn(subagent_id=...)`. Do not conflate this with the larger multi-agent work from PR #2064.  
 Preserve the existing default subagent path when no `subagent_id` is provided.
+Preserve propagation of the parent session model override into spawned subagents.
 
 **Quick validation**
 ```bash
@@ -159,6 +162,7 @@ Preserve the loop-level fallback helper that tries the ordered chain and keeps t
 - 'timeout' in error_msg
 - '404' in error_msg
 - '403' in error_msg
+- '429' in error_msg
 - 'not found' in error_msg
 - 'invalid model' in error_msg
 - 'allocationquota' in error_msg (specific to quota-related errors)
@@ -168,6 +172,7 @@ Preserve the loop-level fallback helper that tries the ordered chain and keeps t
 Keep the list-based fallback config:
 - `fallback_models` is a list of model names tried in order
 - Skip duplicates and skip the already-selected primary model
+- The effective primary model is `model_override` when present, otherwise the configured default model
 
 **Config example**
 ```json
@@ -433,7 +438,9 @@ pytest tests/test_telegram_builtin_commands_topic.py -v
 - Media downloads → `workspace/media/telegram/` when workspace is configured (accessible within workspace restrictions)
 - Telegram flood control retry → handles `RetryAfter` errors with automatic retry
 - Model/TTS overrides → persisted to `~/.nanobot/overrides.json`, loaded on startup
+- Temperature overrides → persisted to `~/.nanobot/overrides.json`, loaded on startup
 - Cron thread_id → preserved through `_run_agent_loop` for topic-aware job creation
+- Agent runtime context for topic messages includes `Thread ID: ...` so the model can see the topic identity directly
 - Heartbeat DM-only logic lives in `_pick_heartbeat_target()` inside `nanobot/cli/commands.py` (not `heartbeat/service.py`)
 - Skips topic sub-sessions and negative Telegram chat IDs
 - Heartbeat history is bounded pre/post run by content length and recent legal suffix
@@ -717,6 +724,7 @@ print(len(_parse_kimi_tool_calls(test)), 'tool calls parsed')
 - `/model temp reset` — Clears temperature override, reverts to model default
 - Temperature persists per session (like model overrides)
 - Passed through to AgentRunSpec for LLM calls
+- Topic sessions preserve their own temperature override independently via topic-scoped session keys
 
 **Temperature guidance**
 | Task | Recommended Temp | Why? |
@@ -734,4 +742,3 @@ print(len(_parse_kimi_tool_calls(test)), 'tool calls parsed')
 **Persistence**
 - Stored in `~/.nanobot/overrides.json` alongside model and TTS overrides
 - Keyed by session_key (e.g., `telegram:123456789:topic:42`)
-

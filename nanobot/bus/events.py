@@ -21,7 +21,12 @@ class InboundMessage:
     @property
     def session_key(self) -> str:
         """Unique key for session identification."""
-        return self.session_key_override or f"{self.channel}:{self.chat_id}"
+        if self.session_key_override:
+            return self.session_key_override
+        thread_id = self.metadata.get("message_thread_id")
+        if thread_id is not None:
+            return f"{self.channel}:{self.chat_id}:topic:{thread_id}"
+        return f"{self.channel}:{self.chat_id}"
 
 
 @dataclass
@@ -38,4 +43,3 @@ class OutboundMessage:
     def __contains__(self, item: object) -> bool:
         """Support simple string containment checks against content in tests/callers."""
         return isinstance(item, str) and item in self.content
-

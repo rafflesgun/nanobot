@@ -58,6 +58,7 @@ class AzureOpenAIProvider(LLMProvider):
             api_key=api_key,
             base_url=base_url,
             default_headers={"x-session-affinity": uuid.uuid4().hex},
+            max_retries=0,
         )
 
     # ------------------------------------------------------------------
@@ -113,18 +114,14 @@ class AzureOpenAIProvider(LLMProvider):
 
     @staticmethod
     def _handle_error(e: Exception) -> LLMResponse:
-        # Try multiple attributes to extract error body from Azure SDK exceptions
-        body = (
-            getattr(e, "body", None)
-            or getattr(e, "doc", None)
-            or getattr(getattr(e, "response", None), "text", None)
-        )
-        # If body is a dict, format it nicely
-        if isinstance(body, dict):
-            import json
-            body = json.dumps(body, ensure_ascii=False)
-        msg = f"Error: {str(body).strip()[:500]}" if body and str(body).strip() else f"Error calling Azure OpenAI: {e}"
-        return LLMResponse(content=msg, finish_reason="error")
+        response = getattr(e, "response", None)
+        body = getattr(e, "body", None) or getattr(response, "text", None)
+        body_text = str(body).strip() if body is not None else ""
+        msg = f"Error: {body_text[:500]}" if body_text else f"Error calling Azure OpenAI: {e}"
+        retry_after = LLMProvider._extract_retry_after_from_headers(getattr(response, "headers", None))
+        if retry_after is None:
+            retry_after = LLMProvider._extract_retry_after(msg)
+        return LLMResponse(content=msg, finish_reason="error", retry_after=retry_after)
 
     # ------------------------------------------------------------------
     # Public API
@@ -148,14 +145,6 @@ class AzureOpenAIProvider(LLMProvider):
             response = await self._client.responses.create(**body)
             return parse_response_output(response)
         except Exception as e:
-            # Log the body that caused the error for debugging
-            from loguru import logger
-            logger.warning(
-                "Azure OpenAI API error with model={}, body_keys={}: {}",
-                body.get("model"),
-                list(body.keys()),
-                str(e)[:200],
-            )
             return self._handle_error(e)
 
     async def chat_stream(
@@ -188,14 +177,6 @@ class AzureOpenAIProvider(LLMProvider):
                 reasoning_content=reasoning_content,
             )
         except Exception as e:
-            # Log the body that caused the error for debugging
-            from loguru import logger
-            logger.warning(
-                "Azure OpenAI stream API error with model={}, body_keys={}: {}",
-                body.get("model"),
-                list(body.keys()),
-                str(e)[:200],
-            )
             return self._handle_error(e)
 
     def get_default_model(self) -> str:

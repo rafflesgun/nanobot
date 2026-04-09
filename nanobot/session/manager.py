@@ -52,23 +52,34 @@ class Session:
             sliced = sliced[start:]
 
         out: list[dict[str, Any]] = []
-        for m in sliced:
-            content = m.get("content", "")
-            # Normalise list-format content saved by older versions of _save_turn.
-            # Some providers receive a 400 error when content is a list, so flatten
-            # to a plain string here so all stored history is safe regardless of age.
-            if isinstance(content, list):
-                parts = [
-                    c.get("text", "") if isinstance(c, dict) else str(c)
-                    for c in content
-                ]
-                content = "\n".join(p for p in parts if p) or ""
-            entry: dict[str, Any] = {"role": m["role"], "content": content}
-            for k in ("tool_calls", "tool_call_id", "name"):
-                if k in m:
-                    entry[k] = m[k]
+        for message in sliced:
+            entry: dict[str, Any] = {"role": message["role"], "content": message.get("content", "")}
+            for key in ("tool_calls", "tool_call_id", "name", "reasoning_content"):
+                if key in message:
+                    entry[key] = message[key]
             out.append(entry)
         return out
+
+    def prune_by_content_length(self, max_chars: int) -> None:
+        """Trim message content fields to a maximum character length."""
+        if max_chars <= 0:
+            return
+        for message in self.messages:
+            content = message.get("content")
+            if isinstance(content, str) and len(content) > max_chars:
+                message["content"] = content[:max_chars]
+            elif isinstance(content, list):
+                trimmed: list[dict[str, Any]] = []
+                for block in content:
+                    if not isinstance(block, dict):
+                        trimmed.append(block)
+                        continue
+                    new_block = dict(block)
+                    if block.get("type") == "text" and isinstance(block.get("text"), str):
+                        new_block["text"] = block["text"][:max_chars]
+                    trimmed.append(new_block)
+                message["content"] = trimmed
+        self.updated_at = datetime.now()
 
     def clear(self) -> None:
         """Clear all messages and reset session to initial state."""
@@ -101,38 +112,6 @@ class Session:
         self.messages = retained
         self.last_consolidated = max(0, self.last_consolidated - dropped)
         self.updated_at = datetime.now()
-
-    def prune_by_content_length(self, max_chars: int) -> None:
-        """Truncate oversized message text content in-place."""
-        if max_chars <= 0:
-            return
-
-        changed = False
-        for message in self.messages:
-            content = message.get("content")
-            if isinstance(content, str) and len(content) > max_chars:
-                message["content"] = content[:max_chars]
-                changed = True
-                continue
-            if isinstance(content, list):
-                new_content: list[Any] = []
-                list_changed = False
-                for item in content:
-                    if (
-                        isinstance(item, dict)
-                        and isinstance(item.get("text"), str)
-                        and len(item["text"]) > max_chars
-                    ):
-                        new_content.append({**item, "text": item["text"][:max_chars]})
-                        list_changed = True
-                    else:
-                        new_content.append(item)
-                if list_changed:
-                    message["content"] = new_content
-                    changed = True
-
-        if changed:
-            self.updated_at = datetime.now()
 
 
 class SessionManager:

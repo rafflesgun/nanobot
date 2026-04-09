@@ -2,10 +2,23 @@
 
 from typing import Any, Awaitable, Callable
 
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.schema import ArraySchema, StringSchema, tool_parameters_schema
 from nanobot.bus.events import OutboundMessage
 
 
+@tool_parameters(
+    tool_parameters_schema(
+        content=StringSchema("The message content to send"),
+        channel=StringSchema("Optional: target channel (telegram, discord, etc.)"),
+        chat_id=StringSchema("Optional: target chat/user ID"),
+        media=ArraySchema(
+            StringSchema(""),
+            description="Optional: list of file paths to attach (images, audio, documents)",
+        ),
+        required=["content"],
+    )
+)
 class MessageTool(Tool):
     """Tool to send messages to users on chat channels."""
 
@@ -15,13 +28,12 @@ class MessageTool(Tool):
         default_channel: str = "",
         default_chat_id: str = "",
         default_message_id: str | None = None,
-        default_thread_id: int | None = None,
     ):
         self._send_callback = send_callback
         self._default_channel = default_channel
         self._default_chat_id = default_chat_id
         self._default_message_id = default_message_id
-        self._default_thread_id = default_thread_id
+        self._default_thread_id: int | None = None
         self._sent_in_turn: bool = False
 
     def set_context(
@@ -32,14 +44,6 @@ class MessageTool(Tool):
         thread_id: int | None = None,
     ) -> None:
         """Set the current message context."""
-        from loguru import logger
-
-        logger.debug(
-            "MessageTool.set_context: channel={}, chat_id={}, thread_id={}",
-            channel,
-            chat_id,
-            thread_id,
-        )
         self._default_channel = channel
         self._default_chat_id = chat_id
         self._default_message_id = message_id
@@ -66,26 +70,6 @@ class MessageTool(Tool):
             "Do NOT use read_file to send files — that only reads content for your own analysis."
         )
 
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "content": {"type": "string", "description": "The message content to send"},
-                "channel": {
-                    "type": "string",
-                    "description": "Optional: target channel (telegram, discord, etc.)",
-                },
-                "chat_id": {"type": "string", "description": "Optional: target chat/user ID"},
-                "media": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Optional: list of file paths to attach (images, audio, documents)",
-                },
-            },
-            "required": ["content"],
-        }
-
     async def execute(
         self,
         content: str,
@@ -95,37 +79,25 @@ class MessageTool(Tool):
         media: list[str] | None = None,
         **kwargs: Any,
     ) -> str:
-        from loguru import logger
+        from nanobot.utils.helpers import strip_think
 
-        logger.debug(
-            "MessageTool.execute: channel={}, chat_id={}, _default_channel={}, _default_chat_id={}, _default_thread_id={}",
-            channel,
-            chat_id,
-            self._default_channel,
-            self._default_chat_id,
-            self._default_thread_id,
-        )
+        content = strip_think(content)
 
         channel = channel or self._default_channel
         chat_id = chat_id or self._default_chat_id
-
+        thread_id = kwargs.get("thread_id")
         # Only inherit default message_id when targeting the same channel+chat.
         # Cross-chat sends must not carry the original message_id, because
         # some channels (e.g. Feishu) use it to determine the target
         # conversation via their Reply API, which would route the message
         # to the wrong chat entirely.
-        same_target = channel == self._default_channel and chat_id == self._default_chat_id
-        logger.debug(
-            "MessageTool.execute: same_target={}, final channel={}, chat_id={}",
-            same_target,
-            channel,
-            chat_id,
-        )
-
-        if same_target:
+        if channel == self._default_channel and chat_id == self._default_chat_id:
             message_id = message_id or self._default_message_id
+            if thread_id is None:
+                thread_id = self._default_thread_id
         else:
             message_id = None
+            thread_id = None
 
         if not channel or not chat_id:
             return "Error: No target channel/chat specified"
@@ -133,20 +105,18 @@ class MessageTool(Tool):
         if not self._send_callback:
             return "Error: Message sending not configured"
 
-        meta: dict = {"message_id": message_id}
-        # Include thread_id when sending to the same target (preserves topic context)
-        if same_target and self._default_thread_id is not None:
-            meta["message_thread_id"] = self._default_thread_id
-            logger.debug(
-                "MessageTool.execute: adding message_thread_id={} to metadata",
-                self._default_thread_id,
-            )
+        metadata: dict[str, Any] = {}
+        if message_id is not None:
+            metadata["message_id"] = message_id
+        if thread_id is not None:
+            metadata["message_thread_id"] = thread_id
+
         msg = OutboundMessage(
             channel=channel,
             chat_id=chat_id,
             content=content,
             media=media or [],
-            metadata=meta,
+            metadata=metadata,
         )
 
         try:

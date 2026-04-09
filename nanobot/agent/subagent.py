@@ -9,35 +9,19 @@ from typing import Any
 
 from loguru import logger
 
-from nanobot.agent.hook import AgentHook, AgentHookContext
-from nanobot.agent.runner import AgentRunSpec, AgentRunner
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
+from nanobot.agent.runner import AgentRunSpec, AgentRunner
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.search import GlobTool, GrepTool
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ExecToolConfig
 from nanobot.providers.base import LLMProvider
+from nanobot.utils.helpers import build_assistant_message
 from nanobot.utils.stats import StatsManager
-
-
-class _SubagentHook(AgentHook):
-    """Logging-only hook for subagent execution."""
-
-    def __init__(self, task_id: str) -> None:
-        self._task_id = task_id
-
-    async def before_execute_tools(self, context: AgentHookContext) -> None:
-        for tool_call in context.tool_calls:
-            args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
-            logger.debug(
-                "Subagent [{}] executing: {} with arguments: {}",
-                self._task_id,
-                tool_call.name,
-                args_str,
-            )
 
 
 class SubagentManager:
@@ -48,18 +32,19 @@ class SubagentManager:
         provider: LLMProvider,
         workspace: Path,
         bus: MessageBus,
-        max_tool_result_chars: int,
         model: str | None = None,
+        max_tool_result_chars: int | None = None,
+        fallback_model: str | None = None,
         fallback_models: list[str] | None = None,
         agents_config: "AgentsConfig | None" = None,
         provider_factory: Callable[["AgentDefaults"], LLMProvider] | None = None,
         web_search_config: "WebSearchConfig | None" = None,
         web_proxy: str | None = None,
+        web_config: Any | None = None,
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
         extra_read: list[str] | None = None,
         extra_write: list[str] | None = None,
-        max_repeat_lookups: int = 2,
     ):
         from nanobot.config.schema import AgentsConfig, ExecToolConfig, WebSearchConfig
 
@@ -67,21 +52,27 @@ class SubagentManager:
         self.workspace = workspace
         self.bus = bus
         self.model = model or provider.get_default_model()
+        self.max_tool_result_chars = (
+            max_tool_result_chars if max_tool_result_chars is not None else 16000
+        )
+        self.fallback_model = fallback_model
         self.fallback_models = fallback_models or []
         self.agents_config = agents_config or AgentsConfig()
         self.provider_factory = provider_factory
-        self.max_tool_result_chars = max_tool_result_chars
-        self.web_search_config = web_search_config or WebSearchConfig()
-        self.web_proxy = web_proxy
+        if web_config is not None:
+            self.web_search_config = getattr(web_config, "search", None) or WebSearchConfig()
+            self.web_proxy = getattr(web_config, "proxy", None)
+        else:
+            self.web_search_config = web_search_config or WebSearchConfig()
+            self.web_proxy = web_proxy
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
         self.extra_read = extra_read or []
         self.extra_write = extra_write or []
-        self.max_repeat_lookups = max_repeat_lookups
-        self.runner = AgentRunner(provider)
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
         self.stats_manager = StatsManager(workspace)
+        self.runner = AgentRunner(provider)
 
     async def spawn(
         self,
@@ -89,19 +80,15 @@ class SubagentManager:
         label: str | None = None,
         origin_channel: str = "cli",
         origin_chat_id: str = "direct",
-        origin_thread_id: int | None = None,
         session_key: str | None = None,
         subagent_id: str | None = None,
+        origin_thread_id: int | None = None,
         model_override: str | None = None,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
-        origin = {
-            "channel": origin_channel,
-            "chat_id": origin_chat_id,
-            "thread_id": origin_thread_id,
-        }
+        origin = {"channel": origin_channel, "chat_id": origin_chat_id}
 
         bg_task = asyncio.create_task(
             self._run_subagent(
@@ -170,9 +157,6 @@ class SubagentManager:
         try:
             agent_config, provider = self._resolve_subagent_backend(subagent_id)
 
-            # Use model override if provided, otherwise use agent config model
-            effective_model = model_override or agent_config.model
-
             # Build subagent tools (no message tool, no spawn tool)
             tools = ToolRegistry()
             allowed_dir: list[Path] = (
@@ -199,16 +183,17 @@ class SubagentManager:
             tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
             tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
             tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            if self.exec_config.enable:
-                tools.register(
-                    ExecTool(
-                        working_dir=str(self.workspace),
-                        timeout=self.exec_config.timeout,
-                        restrict_to_workspace=self.restrict_to_workspace,
-                        allowed_dirs=allowed_dir,
-                        path_append=self.exec_config.path_append,
-                    )
+            tools.register(
+                ExecTool(
+                    working_dir=str(self.workspace),
+                    timeout=self.exec_config.timeout,
+                    restrict_to_workspace=self.restrict_to_workspace,
+                    allowed_dirs=allowed_dir,
+                    path_append=self.exec_config.path_append,
                 )
+            )
+            tools.register(GlobTool(workspace=self.workspace, allowed_dir=allowed_dir))
+            tools.register(GrepTool(workspace=self.workspace, allowed_dir=allowed_dir))
             tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
             tools.register(WebFetchTool(proxy=self.web_proxy))
 
@@ -218,85 +203,48 @@ class SubagentManager:
                 {"role": "user", "content": task},
             ]
 
-            # Try with fallback models if configured
-            models_to_try = [effective_model] + self.fallback_models
-            last_error = None
-
-            for model in models_to_try:
-                try:
-                    result = await self.runner.run(
-                        AgentRunSpec(
-                            initial_messages=messages,
-                            tools=tools,
-                            model=model,
-                            max_iterations=15,
-                            max_tool_result_chars=self.max_tool_result_chars,
-                            hook=_SubagentHook(task_id),
-                            max_iterations_message="Task completed but no final response was generated.",
-                            error_message=None,
-                            fail_on_tool_error=True,
-                            max_repeat_lookups=self.max_repeat_lookups,
-                        )
-                    )
-
-                    if result.stop_reason == "tool_error":
-                        await self._announce_result(
-                            task_id,
-                            label,
-                            task,
-                            self._format_partial_progress(result),
-                            origin,
-                            "error",
-                        )
-                        return
-
-                    if result.stop_reason == "error":
-                        raise Exception(result.final_content or "Subagent error")
-
-                    # Success
-                    break
-
-                except Exception as e:
-                    last_error = e
-                    error_msg = str(e).lower()
-
-                    # Check if this is a fallback-eligible error
-                    is_fallback_eligible = (
-                        "provider returned error" in error_msg
-                        or "502" in error_msg
-                        or "503" in error_msg
-                        or "400" in error_msg
-                        or "timeout" in error_msg
-                        or "database is locked" in error_msg
-                        or "bad_response" in error_msg
-                        or "unknown error" in error_msg
-                    )
-
-                    if is_fallback_eligible and model != models_to_try[-1]:
-                        logger.warning(
-                            "Subagent [{}] model {} failed with: {}, trying fallback",
-                            task_id,
-                            model,
-                            str(e)[:100],
-                        )
-                        continue
-                    else:
-                        raise
-                await self._announce_result(
-                    task_id,
-                    label,
-                    task,
-                    result.error or "Error: subagent execution failed.",
-                    origin,
-                    "error",
-                )
-                return
-            final_result = (
-                result.final_content or "Task completed but no final response was generated."
+            spec = AgentRunSpec(
+                initial_messages=messages,
+                tools=tools,
+                model=model_override or agent_config.model,
+                max_iterations=15,
+                max_tool_result_chars=self.max_tool_result_chars,
+                error_message="Subagent task failed.",
+                concurrent_tools=False,
+                workspace=self.workspace,
             )
+            result = await self.runner.run(spec)
+            final_result = result.final_content
 
+            if final_result is None or (
+                "maximum number of tool call iterations" in str(final_result)
+            ):
+                tool_events = getattr(result, "tool_events", [])
+
+                def _field(event, key):
+                    return event.get(key) if isinstance(event, dict) else getattr(event, key, None)
+
+                completed = [e for e in tool_events if _field(e, "status") == "ok"]
+                failed = [e for e in tool_events if _field(e, "status") == "error"]
+                if failed:
+                    lines = []
+                    if completed:
+                        lines.append("Completed steps:")
+                        for e in completed:
+                            lines.append(f"- {_field(e, 'name')}: {_field(e, 'detail')}")
+                    if failed:
+                        if lines:
+                            lines.append("")
+                        lines.append("Failure:")
+                        for e in failed:
+                            lines.append(f"- {_field(e, 'name')}: {_field(e, 'detail')}")
+                    final_result = "\n".join(lines)
+                else:
+                    final_result = "Task completed but no final response was generated."
+
+            status = "error" if ("Failure:" in str(final_result)) else "ok"
             logger.info("Subagent [{}] completed successfully", task_id)
-            await self._announce_result(task_id, label, task, final_result, origin, "ok")
+            await self._announce_result(task_id, label, task, final_result, origin, status)
 
             # Record subagent token usage
             if hasattr(provider, "get_usage"):
@@ -339,55 +287,17 @@ Result:
 Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not mention technical details like "subagent" or task IDs."""
 
         # Inject as system message to trigger main agent
-        metadata = {}
-        if origin.get("thread_id"):
-            metadata["message_thread_id"] = origin["thread_id"]
-
-        logger.debug(
-            "Subagent [{}] creating system message: origin={}, metadata={}",
-            task_id,
-            origin,
-            metadata,
-        )
-
         msg = InboundMessage(
             channel="system",
             sender_id="subagent",
             chat_id=f"{origin['channel']}:{origin['chat_id']}",
             content=announce_content,
-            metadata=metadata,
         )
 
         await self.bus.publish_inbound(msg)
-        thread_info = f":topic:{origin['thread_id']}" if origin.get("thread_id") else ""
         logger.debug(
-            "Subagent [{}] announced result to {}:{}{}",
-            task_id,
-            origin["channel"],
-            origin["chat_id"],
-            thread_info,
+            "Subagent [{}] announced result to {}:{}", task_id, origin["channel"], origin["chat_id"]
         )
-
-    @staticmethod
-    def _format_partial_progress(result) -> str:
-        completed = [e for e in result.tool_events if e["status"] == "ok"]
-        failure = next((e for e in reversed(result.tool_events) if e["status"] == "error"), None)
-        lines: list[str] = []
-        if completed:
-            lines.append("Completed steps:")
-            for event in completed[-3:]:
-                lines.append(f"- {event['name']}: {event['detail']}")
-        if failure:
-            if lines:
-                lines.append("")
-            lines.append("Failure:")
-            lines.append(f"- {failure['name']}: {failure['detail']}")
-        if result.error and not failure:
-            if lines:
-                lines.append("")
-            lines.append("Failure:")
-            lines.append(f"- {result.error}")
-        return "\n".join(lines) or (result.error or "Error: subagent execution failed.")
 
     def _build_subagent_prompt(self) -> str:
         """Build a focused system prompt for the subagent."""

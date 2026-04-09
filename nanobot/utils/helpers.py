@@ -53,15 +53,16 @@ def ensure_dir(path: Path) -> Path:
     return path
 
 
+def get_workspace_path(workspace: str | Path | None = None) -> Path:
+    """Return the expanded workspace path, defaulting to nanobot's standard workspace."""
+    if workspace is None:
+        workspace = Path.home() / ".nanobot" / "workspace"
+    return Path(workspace).expanduser()
+
+
 def get_data_path() -> Path:
     """~/.nanobot data directory."""
     return ensure_dir(Path.home() / ".nanobot")
-
-
-def get_workspace_path(workspace: str | None = None) -> Path:
-    """Resolve workspace path. Defaults to ~/.nanobot/workspace."""
-    path = Path(workspace).expanduser() if workspace else Path.home() / ".nanobot" / "workspace"
-    return path.resolve(strict=False)
 
 
 def timestamp() -> str:
@@ -407,9 +408,16 @@ def build_status_content(
     context_window_tokens: int,
     session_msg_count: int,
     context_tokens_estimate: int,
+    search_usage_text: str | None = None,
     model_override: str | None = None,
 ) -> str:
-    """Build a human-readable runtime status snapshot."""
+    """Build a human-readable runtime status snapshot.
+    
+    Args:
+        search_usage_text: Optional pre-formatted web search usage string
+                           (produced by SearchUsageInfo.format()). When provided
+                           it is appended as an extra section.
+    """
     uptime_s = int(time.time() - start_time)
     uptime = (
         f"{uptime_s // 3600}h {(uptime_s % 3600) // 60}m"
@@ -423,20 +431,20 @@ def build_status_content(
     ctx_pct = int((context_tokens_estimate / ctx_total) * 100) if ctx_total > 0 else 0
     ctx_used_str = f"{context_tokens_estimate // 1000}k" if context_tokens_estimate >= 1000 else str(context_tokens_estimate)
     ctx_total_str = f"{ctx_total // 1024}k" if ctx_total > 0 else "n/a"
-    model_line = f"\U0001f9e0 Model: {model_override or model}"
-    if model_override and model_override != model:
-        model_line += f" (default: {model})"
     token_line = f"\U0001f4ca Tokens: {last_in} in / {last_out} out"
     if cached and last_in:
         token_line += f" ({cached * 100 // last_in}% cached)"
-    return "\n".join([
+    lines = [
         f"\U0001f408 nanobot v{version}",
-        model_line,
+        (f"\U0001f9e0 Model: {model_override or model}" + (f" (default: {model})" if model_override and model_override != model else "")),
         token_line,
         f"\U0001f4da Context: {ctx_used_str}/{ctx_total_str} ({ctx_pct}%)",
         f"\U0001f4ac Session: {session_msg_count} messages",
         f"\u23f1 Uptime: {uptime}",
-    ])
+    ]
+    if search_usage_text:
+        lines.append(search_usage_text)
+    return "\n".join(lines)    
 
 
 def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]:
@@ -462,11 +470,22 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
         if item.name.endswith(".md") and not item.name.startswith("."):
             _write(item, workspace / item.name)
     _write(tpl / "memory" / "MEMORY.md", workspace / "memory" / "MEMORY.md")
-    _write(None, workspace / "memory" / "HISTORY.md")
+    _write(None, workspace / "memory" / "history.jsonl")
     (workspace / "skills").mkdir(exist_ok=True)
 
     if added and not silent:
         from rich.console import Console
         for name in added:
             Console().print(f"  [dim]Created {name}[/dim]")
+
+    # Initialize git for memory version control
+    try:
+        from nanobot.utils.gitstore import GitStore
+        gs = GitStore(workspace, tracked_files=[
+            "SOUL.md", "USER.md", "memory/MEMORY.md",
+        ])
+        gs.init()
+    except Exception:
+        logger.warning("Failed to initialize git store for {}", workspace)
+
     return added

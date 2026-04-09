@@ -20,7 +20,7 @@ try:
     HAS_REACTION_TYPE = True
 except ImportError:
     HAS_REACTION_TYPE = False
-from telegram.error import RetryAfter, TimedOut
+from telegram.error import TimedOut
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
@@ -28,8 +28,9 @@ from io import BytesIO
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.config.paths import load_tts_overrides, save_tts_overrides
 from nanobot.channels.base import BaseChannel
-from nanobot.config.paths import get_media_dir, load_tts_overrides, save_tts_overrides
+from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base, TTSConfig as SchemaTTSConfig
 from nanobot.security.network import validate_url_target
 from nanobot.tts.manager import TTSManager
@@ -41,6 +42,15 @@ TELEGRAM_REPLY_CONTEXT_MAX_LEN = (
     TELEGRAM_MAX_MESSAGE_LEN  # Max length for reply context in user message
 )
 FORWARD_DEBOUNCE_MS = 80
+
+
+# ACK reaction emojis pool
+TELEGRAM_ACK_REACTIONS = ["⚡️", "👌", "👀", "🔥", "👍"]
+
+
+def _random_ack_reaction() -> str:
+    """Return a random emoji from the ACK reactions pool."""
+    return random.choice(TELEGRAM_ACK_REACTIONS)
 
 
 def _strip_md(s: str) -> str:
@@ -176,20 +186,6 @@ def _markdown_to_telegram_html(text: str) -> str:
 
 _SEND_MAX_RETRIES = 3
 _SEND_RETRY_BASE_DELAY = 0.5  # seconds, doubled each retry
-_STREAM_ROLLOVER_THRESHOLD = 200  # chars before limit to trigger rollover
-
-
-def _is_retryable_telegram_error(e: Exception) -> bool:
-    """Check if Telegram error should be retried.
-
-    Message_too_long is permanent - retrying won't help.
-    Network timeouts and transient errors should be retried.
-    """
-    from telegram.error import BadRequest
-
-    if not isinstance(e, BadRequest):
-        return True
-    return "Message_too_long" not in str(e)
 
 
 @dataclass
@@ -200,7 +196,7 @@ class _StreamBuf:
     message_id: int | None = None
     last_edit: float = 0.0
     thread_id: int | None = None
-    prev_message_ids: list[int] = field(default_factory=list)
+    stream_id: str | None = None
 
 
 class TelegramConfig(Base):
@@ -233,6 +229,9 @@ class TelegramChannel(BaseChannel):
     BOT_COMMANDS = [
         BotCommand("start", "Start the bot"),
         BotCommand("new", "Start a new conversation"),
+        BotCommand("dream", "Trigger dream memory processing"),
+        BotCommand("dream_log", "Show latest dream diff"),
+        BotCommand("dream_restore", "Restore a dream snapshot"),
         BotCommand("stop", "Stop the current task"),
         BotCommand("model", "Show or switch the LLM model"),
         BotCommand("tts", "Control TTS settings (on/off, voices, voice, provider)"),
@@ -275,7 +274,7 @@ class TelegramChannel(BaseChannel):
         # TTS manager initialization
         self.tts_manager = TTSManager(config.tts)
 
-        # Per-chat TTS overrides (for /tts command) - persisted across restarts
+        # Per-chat TTS overrides (for /tts command)
         self._chat_tts_overrides: dict[str, dict] = load_tts_overrides()
 
         # Per-chat trace toggle (runtime-only, resets on restart).
@@ -312,6 +311,17 @@ class TelegramChannel(BaseChannel):
             return False
 
         return sid in allow_list or username in allow_list
+
+    @staticmethod
+    def _normalize_telegram_command(content: str) -> str:
+        """Map Telegram-safe command aliases back to canonical nanobot commands."""
+        if not content.startswith("/"):
+            return content
+        if content == "/dream_log" or content.startswith("/dream_log "):
+            return content.replace("/dream_log", "/dream-log", 1)
+        if content == "/dream_restore" or content.startswith("/dream_restore "):
+            return content.replace("/dream_restore", "/dream-restore", 1)
+        return content
 
     async def start(self) -> None:
         """Start the Telegram bot with long polling."""
@@ -407,34 +417,12 @@ class TelegramChannel(BaseChannel):
         await self._app.updater.start_polling(
             allowed_updates=["message"],
             drop_pending_updates=True,  # Ignore old messages on startup
+            error_callback=self._on_error,
         )
 
-        # Keep running until stopped, with auto-restart on network errors
-        # The updater runs in a background task, so we monitor its health
-        retry_delay = 5.0
-        max_retry_delay = 60.0
-
+        # Keep running until stopped
         while self._running:
             await asyncio.sleep(1)
-
-            # Check if updater stopped unexpectedly (network error, etc.)
-            if self._running and not self._app.updater.running:
-                logger.warning(
-                    "Telegram updater stopped unexpectedly (retrying in {:.0f}s)",
-                    retry_delay,
-                )
-                await asyncio.sleep(retry_delay)
-                retry_delay = min(retry_delay * 1.5, max_retry_delay)
-
-                try:
-                    await self._app.updater.start_polling(
-                        allowed_updates=["message"],
-                        drop_pending_updates=True,
-                    )
-                    logger.info("Telegram updater restarted successfully")
-                    retry_delay = 5.0  # Reset delay on success
-                except Exception as e:
-                    logger.error("Failed to restart Telegram updater: {}", e)
 
     async def stop(self) -> None:
         """Stop the Telegram bot."""
@@ -477,12 +465,12 @@ class TelegramChannel(BaseChannel):
     @staticmethod
     def _composite_key(chat_id: str, thread_id: int | None = None) -> str:
         """Build a composite key for typing/thinking state dicts."""
-        return f"{chat_id}:{thread_id}" if thread_id is not None else chat_id
+        return f"{chat_id}:{thread_id}" if thread_id else chat_id
 
     @staticmethod
     def _tts_scope_key(chat_id: str, thread_id: int | None = None) -> str:
         """Scope TTS overrides to the current chat or topic thread."""
-        return f"{chat_id}:{thread_id}" if thread_id is not None else chat_id
+        return f"{chat_id}:{thread_id}" if thread_id else chat_id
 
     @staticmethod
     def _is_remote_media_url(path: str) -> bool:
@@ -522,11 +510,13 @@ class TelegramChannel(BaseChannel):
             logger.info("[progress:{}] chat={} → {}", label, msg.chat_id, preview)
 
             trace_on = self._trace_enabled.get(str(chat_id), False)
-            if not trace_on:
+            if not trace_on and thread_id is None:
                 return  # suppressed - only logged
 
             # Trace enabled → send to chat with prefix
-            prefix = "🤖 " if is_tool_hint else "💭 "
+            prefix = ""
+            if trace_on:
+                prefix = "🤖 " if is_tool_hint else "💭 "
             trace_content = prefix + (msg.content or "").strip()
 
             # Prepare sending parameters (reuse existing thread/reply logic)
@@ -590,11 +580,6 @@ class TelegramChannel(BaseChannel):
         reply_params = None
         if self.config.reply_to_message:
             reply_to_message_id = msg.metadata.get("message_id")
-            if reply_to_message_id is not None:
-                try:
-                    reply_to_message_id = int(reply_to_message_id)
-                except ValueError:
-                    pass
             if reply_to_message_id:
                 reply_params = ReplyParameters(
                     message_id=reply_to_message_id, allow_sending_without_reply=True
@@ -648,11 +633,6 @@ class TelegramChannel(BaseChannel):
                     **thread_kwargs,
                 )
 
-        # Send text content first so the user always gets a response
-        if msg.content and msg.content != "[empty message]":
-            for chunk in split_message(msg.content, TELEGRAM_MAX_MESSAGE_LEN):
-                await self._send_text(chat_id, chunk, reply_params, thread_kwargs)
-
         await self._maybe_send_tts(
             chat_id=chat_id,
             text=msg.content,
@@ -661,32 +641,16 @@ class TelegramChannel(BaseChannel):
             metadata=msg.metadata,
         )
 
-    async def _call_with_retry(self, fn, *args, **kwargs):
-        """Call an async Telegram API function with retry on pool/network timeout and flood control."""
-        from telegram.error import BadRequest
+        # Send text content
+        if msg.content and msg.content != "[empty message]":
+            for chunk in split_message(msg.content, TELEGRAM_MAX_MESSAGE_LEN):
+                await self._send_text(chat_id, chunk, reply_params, thread_kwargs)
 
+    async def _call_with_retry(self, fn, *args, **kwargs):
+        """Call an async Telegram API function with retry on pool/network timeout."""
         for attempt in range(1, _SEND_MAX_RETRIES + 1):
             try:
                 return await fn(*args, **kwargs)
-            except RetryAfter as e:
-                if attempt == _SEND_MAX_RETRIES:
-                    raise
-                retry_after = e.retry_after
-                if isinstance(retry_after, int):
-                    delay = float(retry_after)
-                else:
-                    delay = (
-                        retry_after.total_seconds()
-                        if retry_after
-                        else _SEND_RETRY_BASE_DELAY * (2**attempt)
-                    )
-                logger.warning(
-                    "Telegram flood control (attempt {}/{}), retrying in {:.1f}s",
-                    attempt,
-                    _SEND_MAX_RETRIES,
-                    delay,
-                )
-                await asyncio.sleep(delay)
             except TimedOut:
                 if attempt == _SEND_MAX_RETRIES:
                     raise
@@ -698,26 +662,6 @@ class TelegramChannel(BaseChannel):
                     delay,
                 )
                 await asyncio.sleep(delay)
-            except BadRequest as e:
-                if not _is_retryable_telegram_error(e):
-                    raise
-                if attempt == _SEND_MAX_RETRIES:
-                    raise
-                delay = _SEND_RETRY_BASE_DELAY * (2 ** (attempt - 1))
-                logger.warning(
-                    "Telegram BadRequest (attempt {}/{}), retrying in {:.1f}s: {}",
-                    attempt,
-                    _SEND_MAX_RETRIES,
-                    delay,
-                    e,
-                )
-                await asyncio.sleep(delay)
-
-    @staticmethod
-    def _is_not_modified_error(exc: Exception) -> bool:
-        """Check if error is 'message is not modified' type."""
-        err_str = str(exc).lower()
-        return "message is not modified" in err_str or "exactly the same" in err_str
 
     async def _send_text(
         self,
@@ -749,6 +693,7 @@ class TelegramChannel(BaseChannel):
                 )
             except Exception as e2:
                 logger.error("Error sending Telegram message: {}", e2)
+                raise
 
     def _get_tts_override(self, chat_id: str, thread_id: int | None = None) -> dict[str, Any]:
         """Resolve TTS overrides with topic-specific settings taking precedence."""
@@ -830,14 +775,7 @@ class TelegramChannel(BaseChannel):
             )
 
             temp_tts_manager = TTSManager(tts_config)
-            try:
-                ogg_bytes = await asyncio.wait_for(
-                    temp_tts_manager.generate_voice_note(text),
-                    timeout=30.0,
-                )
-            except asyncio.TimeoutError:
-                logger.warning("TTS generation timed out after 30s → skipping voice note")
-                return
+            ogg_bytes = await temp_tts_manager.generate_voice_note(text)
             if not ogg_bytes:
                 logger.warning("TTS returned no audio → skipping voice note")
                 return
@@ -860,21 +798,21 @@ class TelegramChannel(BaseChannel):
     async def send_delta(
         self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None
     ) -> None:
-        """Progressive message editing: send on first delta, edit on subsequent ones.
-
-        Handles message rollover when content exceeds Telegram's length limit.
-        """
+        """Progressive message editing: send on first delta, edit on subsequent ones."""
         if not self._app:
             return
         meta = metadata or {}
         int_chat_id = int(chat_id)
         thread_id = meta.get("message_thread_id")
         comp_key = self._composite_key(chat_id, thread_id)
+        stream_id = meta.get("_stream_id")
         thread_kwargs = {"message_thread_id": thread_id} if thread_id is not None else {}
 
         if meta.get("_stream_end"):
-            buf = self._stream_bufs.pop(comp_key, None)
+            buf = self._stream_bufs.get(comp_key)
             if not buf or not buf.message_id or not buf.text:
+                return
+            if stream_id and buf.stream_id and buf.stream_id != stream_id:
                 return
             self._stop_typing(comp_key)
             thinking_msg_id = self._thinking_messages.pop(comp_key, None)
@@ -885,27 +823,44 @@ class TelegramChannel(BaseChannel):
                     )
                 except Exception as e:
                     logger.debug("Failed to delete thinking message after stream: {}", e)
-            target_message_id = buf.message_id
             try:
                 html = _markdown_to_telegram_html(buf.text)
+                edit_text = html[:TELEGRAM_MAX_MESSAGE_LEN]
                 await self._call_with_retry(
                     self._app.bot.edit_message_text,
                     chat_id=int_chat_id,
-                    message_id=target_message_id,
-                    text=html,
+                    message_id=buf.message_id,
+                    text=edit_text,
                     parse_mode="HTML",
                 )
             except Exception as e:
-                logger.debug("Final stream edit failed (HTML), trying plain: {}", e)
-                try:
-                    await self._call_with_retry(
-                        self._app.bot.edit_message_text,
-                        chat_id=int_chat_id,
-                        message_id=target_message_id,
-                        text=buf.text,
+                if e.__class__.__name__ == "BadRequest" and "not modified" in str(e).lower():
+                    self._stream_bufs.pop(comp_key, None)
+                else:
+                    logger.debug("Final stream edit failed (HTML), trying plain: {}", e)
+                    try:
+                        await self._call_with_retry(
+                            self._app.bot.edit_message_text,
+                            chat_id=int_chat_id,
+                            message_id=buf.message_id,
+                            text=buf.text[:TELEGRAM_MAX_MESSAGE_LEN],
+                        )
+                    except Exception as e2:
+                        if (
+                            e2.__class__.__name__ == "BadRequest"
+                            and "not modified" in str(e2).lower()
+                        ):
+                            self._stream_bufs.pop(comp_key, None)
+                        else:
+                            raise
+            if len(buf.text) > TELEGRAM_MAX_MESSAGE_LEN:
+                for chunk in split_message(
+                    buf.text[TELEGRAM_MAX_MESSAGE_LEN:], TELEGRAM_MAX_MESSAGE_LEN
+                ):
+                    await self._app.bot.send_message(
+                        chat_id=int_chat_id, text=chunk, **thread_kwargs
                     )
-                except Exception as e2:
-                    logger.warning("Final stream edit failed: {}", e2)
+            self._stream_bufs.pop(comp_key, None)
             await self._maybe_send_tts(
                 chat_id=int_chat_id,
                 text=buf.text,
@@ -916,92 +871,46 @@ class TelegramChannel(BaseChannel):
             return
 
         buf = self._stream_bufs.get(comp_key)
-        if buf is None:
-            buf = _StreamBuf(thread_id=thread_id)
+        if buf is None or (stream_id and buf.stream_id and buf.stream_id != stream_id):
+            buf = _StreamBuf(thread_id=thread_id, stream_id=stream_id)
             self._stream_bufs[comp_key] = buf
+            buf.text = ""
+            buf.message_id = None
+        elif stream_id and not buf.stream_id:
+            buf.stream_id = stream_id
         buf.text += delta
 
         if not buf.text.strip():
             return
-
-        rollover_threshold = TELEGRAM_MAX_MESSAGE_LEN - _STREAM_ROLLOVER_THRESHOLD
-        needs_rollover = len(buf.text) > rollover_threshold and buf.message_id is not None
+        if meta.get("_stream_delta") and delta == "" and buf.message_id is not None:
+            now = time.monotonic()
+            if (now - buf.last_edit) >= 0:
+                try:
+                    await self._app.bot.edit_message_text(
+                        chat_id=int_chat_id, message_id=buf.message_id, text=buf.text
+                    )
+                    buf.last_edit = now
+                except Exception as e:
+                    if e.__class__.__name__ == "BadRequest" and "not modified" in str(e).lower():
+                        buf.last_edit = now
+                    else:
+                        logger.debug("Stream edit failed: {}", e)
+                return
 
         now = time.monotonic()
         if buf.message_id is None:
-            reply_to_message_id = meta.get("message_id")
-            if reply_to_message_id is not None:
-                try:
-                    reply_to_message_id = int(reply_to_message_id)
-                except ValueError:
-                    pass
-            message_thread_id = meta.get("message_thread_id")
-            if message_thread_id is None and reply_to_message_id is not None:
-                message_thread_id = self._message_threads.get((chat_id, reply_to_message_id))
-            thread_kwargs = {}
-            if message_thread_id is not None:
-                thread_kwargs["message_thread_id"] = message_thread_id
-
-            reply_params = None
-            if self.config.reply_to_message and reply_to_message_id:
-                reply_params = ReplyParameters(
-                    message_id=reply_to_message_id, allow_sending_without_reply=True
+            try:
+                sent = await self._call_with_retry(
+                    self._app.bot.send_message,
+                    chat_id=int_chat_id,
+                    text=buf.text,
+                    **thread_kwargs,
                 )
-
-            try:
-                if len(buf.text) > rollover_threshold:
-                    first_chunk = buf.text[:TELEGRAM_MAX_MESSAGE_LEN]
-                    remaining = buf.text[TELEGRAM_MAX_MESSAGE_LEN:]
-                    sent = await self._call_with_retry(
-                        self._app.bot.send_message,
-                        chat_id=int_chat_id,
-                        text=first_chunk,
-                        reply_parameters=reply_params,
-                        **thread_kwargs,
-                    )
-                    buf.prev_message_ids.append(sent.message_id)
-                    buf.text = remaining
-                    buf.message_id = sent.message_id
-                    buf.last_edit = now
-                else:
-                    sent = await self._call_with_retry(
-                        self._app.bot.send_message,
-                        chat_id=int_chat_id,
-                        text=buf.text,
-                        reply_parameters=reply_params,
-                        **thread_kwargs,
-                    )
-                    buf.message_id = sent.message_id
-                    buf.last_edit = now
-            except Exception as e:
-                logger.warning("Stream initial send failed: {}", e)
-        elif needs_rollover:
-            try:
-                if len(buf.text) > TELEGRAM_MAX_MESSAGE_LEN:
-                    first_chunk = buf.text[:TELEGRAM_MAX_MESSAGE_LEN]
-                    remaining = buf.text[TELEGRAM_MAX_MESSAGE_LEN:]
-                    sent = await self._call_with_retry(
-                        self._app.bot.send_message,
-                        chat_id=int_chat_id,
-                        text=first_chunk,
-                        **thread_kwargs,
-                    )
-                    buf.prev_message_ids.append(buf.message_id)
-                    buf.prev_message_ids.append(sent.message_id)
-                    buf.text = remaining
-                    buf.message_id = sent.message_id
-                else:
-                    sent = await self._call_with_retry(
-                        self._app.bot.send_message,
-                        chat_id=int_chat_id,
-                        text=buf.text,
-                        **thread_kwargs,
-                    )
-                    buf.prev_message_ids.append(buf.message_id)
-                    buf.message_id = sent.message_id
+                buf.message_id = sent.message_id
                 buf.last_edit = now
             except Exception as e:
-                logger.warning("Stream rollover send failed: {}", e)
+                logger.warning("Stream initial send failed: {}", e)
+                raise
         elif (now - buf.last_edit) >= self._STREAM_EDIT_INTERVAL:
             try:
                 await self._call_with_retry(
@@ -1009,11 +918,11 @@ class TelegramChannel(BaseChannel):
                     chat_id=int_chat_id,
                     message_id=buf.message_id,
                     text=buf.text,
+                    **thread_kwargs,
                 )
                 buf.last_edit = now
-            except Exception as e:
-                if not self._is_not_modified_error(e):
-                    logger.debug("Stream edit failed: {}", e)
+            except Exception:
+                pass
 
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
@@ -1021,31 +930,31 @@ class TelegramChannel(BaseChannel):
             return
 
         user = update.effective_user
-        await self._reply_in_topic(
-            update.message,
+        await update.message.reply_text(
             f"👋 Hi {user.first_name}! I'm nanobot.\n\n"
             "Send me a message and I'll respond!\n"
-            "Type /help to see available commands.",
+            "Type /help to see available commands."
         )
 
     async def _on_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /help command, bypassing ACL so all users can access it."""
         if not update.message:
             return
-        await self._reply_in_topic(
-            update.message,
+        await update.message.reply_text(
             "🐈 nanobot commands:\n"
             "/new — Start a new conversation\n"
             "/stop — Stop the current task\n"
+            "/dream — Trigger dream memory processing\n"
+            "/dream-log — Show latest dream diff\n"
+            "/dream-restore — Restore a dream snapshot\n"
             "/model — Show or switch the LLM model\n"
-            "/model temp — Show/set temperature (0.0-2.0)\n"
             "/tts — Control TTS settings (on/off, voice, provider)\n"
             "/trace — Toggle agent trace output (on/off/status)\n"
             "/stats — Show token usage statistics\n"
             "/stats topic — Show token usage for this topic\n"
             "/restart — Restart the bot\n"
             "/status — Show bot status\n"
-            "/help — Show available commands",
+            "/help — Show available commands"
         )
 
     async def _on_tts_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1060,7 +969,7 @@ class TelegramChannel(BaseChannel):
 
         # Check if user is allowed
         if not self.is_allowed(self._sender_id(update.effective_user)):
-            await self._reply_in_topic(update.message, "❌ You are not authorized to use this bot.")
+            await update.message.reply_text("❌ You are not authorized to use this bot.")
             return
 
         # Parse command arguments
@@ -1079,8 +988,7 @@ class TelegramChannel(BaseChannel):
             )
 
         if not args:
-            await self._reply_in_topic(
-                update.message,
+            await update.message.reply_text(
                 _tts_status_msg(
                     scope_key,
                     "Usage:\n"
@@ -1090,7 +998,7 @@ class TelegramChannel(BaseChannel):
                     "/tts voice [name] — Change voice\n"
                     "/tts provider [edge/openai/riva] — Change provider\n"
                     "/tts status — Show current settings",
-                ),
+                )
             )
             return
 
@@ -1101,17 +1009,17 @@ class TelegramChannel(BaseChannel):
                 self._chat_tts_overrides[scope_key] = {}
             self._chat_tts_overrides[scope_key]["enabled"] = True
             save_tts_overrides(self._chat_tts_overrides)
-            await self._reply_in_topic(update.message, "🔊 TTS enabled for this chat/topic.")
+            await update.message.reply_text("🔊 TTS enabled for this chat/topic.")
 
         elif command == "off":
             if scope_key not in self._chat_tts_overrides:
                 self._chat_tts_overrides[scope_key] = {}
             self._chat_tts_overrides[scope_key]["enabled"] = False
             save_tts_overrides(self._chat_tts_overrides)
-            await self._reply_in_topic(update.message, "🔇 TTS disabled for this chat/topic.")
+            await update.message.reply_text("🔇 TTS disabled for this chat/topic.")
 
         elif command == "status":
-            await self._reply_in_topic(update.message, _tts_status_msg(scope_key))
+            await update.message.reply_text(_tts_status_msg(scope_key))
 
         elif command == "voices":
             # List available voices for current provider, with optional locale filter
@@ -1121,15 +1029,15 @@ class TelegramChannel(BaseChannel):
             current_voice = override.get("voice", self.tts_manager.config.voice)
             locale_filter = args[1].lower() if len(args) > 1 else None
 
-            await self._reply_in_topic(update.message, f"⏳ Fetching voices for {provider_name}...")
+            await update.message.reply_text(f"⏳ Fetching voices for {provider_name}...")
 
             try:
                 result = await self.tts_manager.get_supported_voices(provider_name)
                 voices = result.get("voices", [])
 
                 if not voices:
-                    await self._reply_in_topic(
-                        update.message, "❌ No voices available or provider unreachable."
+                    await update.message.reply_text(
+                        "❌ No voices available or provider unreachable."
                     )
                     return
 
@@ -1148,10 +1056,9 @@ class TelegramChannel(BaseChannel):
                         ]
 
                     if not voices:
-                        await self._reply_in_topic(
-                            update.message,
+                        await update.message.reply_text(
                             f"No voices found for that locale.\n"
-                            f"Try: /tts voices en-US  or  /tts voices zh-CN",
+                            f"Try: /tts voices en-US  or  /tts voices zh-CN"
                         )
                         return
 
@@ -1246,11 +1153,11 @@ class TelegramChannel(BaseChannel):
                         if len(voices) > 30:
                             lines.append(f"\n+{len(voices) - 30} more")
 
-                await self._reply_in_topic(update.message, "\n".join(lines))
+                await update.message.reply_text("\n".join(lines))
 
             except Exception as e:
                 logger.error("Failed to list voices: {}", e)
-                await self._reply_in_topic(update.message, "❌ Failed to fetch voices.")
+                await update.message.reply_text("❌ Failed to fetch voices.")
 
         elif command == "voice" and len(args) > 1:
             # Change voice
@@ -1259,7 +1166,7 @@ class TelegramChannel(BaseChannel):
                 self._chat_tts_overrides[scope_key] = {}
             self._chat_tts_overrides[scope_key]["voice"] = new_voice
             save_tts_overrides(self._chat_tts_overrides)
-            await self._reply_in_topic(update.message, f"🎙️ Voice changed to: {new_voice}")
+            await update.message.reply_text(f"🎙️ Voice changed to: {new_voice}")
 
         elif command == "provider" and len(args) > 1:
             # Change provider
@@ -1269,23 +1176,20 @@ class TelegramChannel(BaseChannel):
                     self._chat_tts_overrides[scope_key] = {}
                 self._chat_tts_overrides[scope_key]["provider"] = new_provider
                 save_tts_overrides(self._chat_tts_overrides)
-                await self._reply_in_topic(
-                    update.message, f"🔄 TTS provider changed to: {new_provider}"
-                )
+                await update.message.reply_text(f"🔄 TTS provider changed to: {new_provider}")
             else:
-                await self._reply_in_topic(
-                    update.message, "❌ Invalid provider. Use 'edge', 'openai', or 'riva'."
+                await update.message.reply_text(
+                    "❌ Invalid provider. Use 'edge', 'openai', or 'riva'."
                 )
         else:
-            await self._reply_in_topic(
-                update.message,
+            await update.message.reply_text(
                 "❓ Unknown command. Usage:\n"
                 "/tts on — Enable TTS\n"
                 "/tts off — Disable TTS\n"
                 "/tts voices [locale] — List available voices\n"
                 "/tts voice [name] — Change voice\n"
                 "/tts provider [edge/openai/riva] — Change provider\n"
-                "/tts status — Show current settings",
+                "/tts status — Show current settings"
             )
 
     async def _on_trace_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1298,7 +1202,7 @@ class TelegramChannel(BaseChannel):
 
         # Check if user is allowed
         if not self.is_allowed(self._sender_id(update.effective_user)):
-            await self._reply_in_topic(update.message, "❌ You are not authorized to use this bot.")
+            await update.message.reply_text("❌ You are not authorized to use this bot.")
             return
 
         # Parse command arguments
@@ -1306,9 +1210,8 @@ class TelegramChannel(BaseChannel):
 
         if not args:
             status = "on" if self._trace_enabled.get(chat_id_str, False) else "off"
-            await self._reply_in_topic(
-                update.message,
-                f"🔍 Trace mode: {status}\n\nUsage:\n/trace on — Show intermediate thoughts\n/trace off — Hide intermediate thoughts\n/trace status — Show current status",
+            await update.message.reply_text(
+                f"🔍 Trace mode: {status}\n\nUsage:\n/trace on — Show intermediate thoughts\n/trace off — Hide intermediate thoughts\n/trace status — Show current status"
             )
             return
 
@@ -1316,28 +1219,25 @@ class TelegramChannel(BaseChannel):
 
         if command == "on":
             self._trace_enabled[chat_id_str] = True
-            await self._reply_in_topic(
-                update.message,
-                "🔍 Trace mode **enabled** for this chat.\nIntermediate thoughts will now appear prefixed with 🤖",
+            await update.message.reply_text(
+                "🔍 Trace mode **enabled** for this chat.\nIntermediate thoughts will now appear prefixed with 🤖"
             )
         elif command == "off":
             self._trace_enabled[chat_id_str] = False
-            await self._reply_in_topic(
-                update.message,
-                "🔍 Trace mode **disabled** for this chat.\nIntermediate thoughts will be hidden (only shown in logs).",
+            await update.message.reply_text(
+                "🔍 Trace mode **disabled** for this chat.\nIntermediate thoughts will be hidden (only shown in logs)."
             )
         elif command == "status":
             status = "on" if self._trace_enabled.get(chat_id_str, False) else "off"
-            await self._reply_in_topic(
-                update.message, f"🔍 Trace mode is currently **{status}** for this chat."
+            await update.message.reply_text(
+                f"🔍 Trace mode is currently **{status}** for this chat."
             )
         else:
-            await self._reply_in_topic(
-                update.message,
+            await update.message.reply_text(
                 "❓ Unknown command. Usage:\n"
                 "/trace on — Show intermediate thoughts\n"
                 "/trace off — Hide intermediate thoughts\n"
-                "/trace status — Show current status",
+                "/trace status — Show current status"
             )
 
     @staticmethod
@@ -1350,7 +1250,7 @@ class TelegramChannel(BaseChannel):
     def _derive_topic_session_key(message) -> str | None:
         """Derive topic-scoped session key for non-private Telegram chats."""
         message_thread_id = getattr(message, "message_thread_id", None)
-        if message.chat.type == "private" or message_thread_id is None:
+        if message_thread_id is None:
             return None
         return f"telegram:{message.chat_id}:topic:{message_thread_id}"
 
@@ -1358,14 +1258,6 @@ class TelegramChannel(BaseChannel):
     def _get_thread_id(message) -> int | None:
         """Extract the Telegram topic thread id if present."""
         return getattr(message, "message_thread_id", None)
-
-    @staticmethod
-    async def _reply_in_topic(message, text: str, **kwargs) -> None:
-        """Reply to a message, preserving topic thread context if present."""
-        thread_id = getattr(message, "message_thread_id", None)
-        if thread_id:
-            kwargs["message_thread_id"] = thread_id
-        await message.reply_text(text, **kwargs)
 
     def _resolve_debounce_lane(self, message) -> str:
         """Scope debounce buffering by chat + topic."""
@@ -1387,15 +1279,33 @@ class TelegramChannel(BaseChannel):
         }
 
     @staticmethod
-    def _extract_reply_context(message) -> str | None:
+    async def _extract_reply_context(message) -> str | None:
         """Extract text from the message being replied to, if any."""
         reply = getattr(message, "reply_to_message", None)
         if not reply:
             return None
-        text = getattr(reply, "text", None) or getattr(reply, "caption", None) or ""
-        if len(text) > TELEGRAM_REPLY_CONTEXT_MAX_LEN:
-            text = text[:TELEGRAM_REPLY_CONTEXT_MAX_LEN] + "..."
-        return f"[Reply to: {text}]" if text else None
+        snippet = None
+        reply_text = getattr(reply, "text", None)
+        reply_caption = getattr(reply, "caption", None)
+        if isinstance(reply_text, str) and reply_text:
+            snippet = reply_text.strip()
+        elif isinstance(reply_caption, str) and reply_caption:
+            snippet = reply_caption.strip()
+        if not snippet:
+            return None
+        if len(snippet) > TELEGRAM_REPLY_CONTEXT_MAX_LEN:
+            snippet = snippet[:TELEGRAM_REPLY_CONTEXT_MAX_LEN] + "..."
+        from_user = getattr(reply, "from_user", None)
+        label = None
+        if from_user is not None:
+            username = getattr(from_user, "username", None)
+            first_name = getattr(from_user, "first_name", None)
+            if username:
+                label = f"@{username}"
+            elif first_name:
+                label = first_name
+        prefix = f"[Reply to {label}: " if label else "[Reply to: "
+        return prefix + snippet + "]"
 
     async def _download_message_media(
         self, msg, *, add_failure_content: bool = False
@@ -1433,7 +1343,7 @@ class TelegramChannel(BaseChannel):
                 getattr(media_file, "mime_type", None),
                 getattr(media_file, "file_name", None),
             )
-            media_dir = get_media_dir("telegram", workspace=self._workspace_path)
+            media_dir = get_media_dir("telegram")
             unique_id = getattr(media_file, "file_unique_id", media_file.file_id)
             file_path = media_dir / f"{unique_id}{ext}"
             await file.download_to_drive(str(file_path))
@@ -1684,10 +1594,19 @@ class TelegramChannel(BaseChannel):
         message = update.message
         user = update.effective_user
         self._remember_thread_context(message)
+        text = message.text or ""
+        if text.startswith("/"):
+            parts = text.split(None, 1)
+            command = parts[0]
+            rest = parts[1] if len(parts) > 1 else ""
+            if "@" in command:
+                command = command.split("@", 1)[0]
+            text = f"{command} {rest}".strip()
+        text = self._normalize_telegram_command(text)
         await self._handle_message(
             sender_id=self._sender_id(user),
             chat_id=str(message.chat_id),
-            content=message.text or "",
+            content=text,
             metadata=self._build_message_metadata(message, user),
             session_key=self._derive_topic_session_key(message),
         )
@@ -1729,6 +1648,9 @@ class TelegramChannel(BaseChannel):
             content_parts.append(str(message.text))
         if message.caption:
             content_parts.append(str(message.caption))
+        location = getattr(message, "location", None)
+        if location is not None:
+            content_parts.append(f"[location: {location.latitude}, {location.longitude}]")
 
         # Download current message media
         current_media_paths, current_media_parts = await self._download_message_media(
@@ -1742,7 +1664,7 @@ class TelegramChannel(BaseChannel):
         # Reply context: text and/or media from the replied-to message
         reply = getattr(message, "reply_to_message", None)
         if reply is not None:
-            reply_ctx = self._extract_reply_context(message)
+            reply_ctx = await self._extract_reply_context(message)
             reply_media, reply_media_parts = await self._download_message_media(reply)
             if reply_media:
                 media_paths = reply_media + media_paths
@@ -1794,7 +1716,7 @@ class TelegramChannel(BaseChannel):
                     self._start_typing(comp_key, thread_id)
                 except TypeError:
                     self._start_typing(comp_key)
-                await self._add_reaction(str_chat_id, message.message_id, self._pick_react_emoji())
+                await self._add_reaction(str_chat_id, message.message_id, self.config.react_emoji)
             buf = self._media_group_buffers[key]
             if content and content != "[empty message]":
                 buf["contents"].append(content)
@@ -1808,7 +1730,7 @@ class TelegramChannel(BaseChannel):
             self._start_typing(comp_key, thread_id)
         except TypeError:
             self._start_typing(comp_key)
-        await self._add_reaction(str_chat_id, message.message_id, self._pick_react_emoji())
+        await self._add_reaction(str_chat_id, message.message_id, self.config.react_emoji)
 
         # Scope session per topic to isolate conversation context
         session_key = self._derive_topic_session_key(message)
@@ -1830,6 +1752,17 @@ class TelegramChannel(BaseChannel):
                     existing_media_group.get("companion_text"),
                     content,
                 )
+            return
+
+        if not getattr(message, "media_group_id", None):
+            await self._handle_message(
+                sender_id=sender_id,
+                chat_id=str_chat_id,
+                content=content,
+                media=media_paths,
+                metadata=msg_metadata,
+                session_key=session_key,
+            )
             return
 
         is_forward = bool(getattr(message, "forward_origin", None))
@@ -1900,15 +1833,23 @@ class TelegramChannel(BaseChannel):
             self._media_group_tasks.pop(key, None)
 
     async def _add_ack_reaction(self, chat_id: int, message_id: int) -> None:
-        """Add an emoji reaction to acknowledge message receipt (non-blocking)."""
+        """Add a random emoji reaction to acknowledge message receipt (non-blocking)."""
         if not self._app:
             return
 
-        emoji = self._pick_react_emoji()
-        if not emoji:
-            return
-
         try:
+            react = self.config.react_emoji
+            if isinstance(react, list):
+                react = [emoji for emoji in react if isinstance(emoji, str) and emoji]
+                if not react:
+                    return
+                import random
+
+                emoji = random.choice(react)
+            else:
+                emoji = react if isinstance(react, str) else ""
+                if not emoji:
+                    return
             if HAS_REACTION_TYPE:
                 await self._app.bot.set_message_reaction(
                     chat_id=chat_id,
@@ -1917,6 +1858,7 @@ class TelegramChannel(BaseChannel):
                     is_big=False,
                 )
             else:
+                # Fallback for older versions
                 await self._app.bot.set_message_reaction(
                     chat_id=chat_id,
                     message_id=message_id,
@@ -1925,6 +1867,7 @@ class TelegramChannel(BaseChannel):
                 )
             logger.debug("Added ACK reaction {} to message {}", emoji, message_id)
         except Exception as e:
+            # Reactions might not be supported in all chats, so just log at debug level
             logger.debug("Failed to add ACK reaction to message {}: {}", message_id, e)
 
     async def _send_thinking_message(
@@ -1941,7 +1884,7 @@ class TelegramChannel(BaseChannel):
             # Use composite key for both chat_id and thread_id
             comp_key = self._composite_key(str(chat_id), thread_id)
             thread_kwargs: dict = {}
-            if thread_id is not None:
+            if thread_id:
                 thread_kwargs["message_thread_id"] = thread_id
             thinking_msg = await self._app.bot.send_message(
                 chat_id=chat_id,
@@ -1964,18 +1907,7 @@ class TelegramChannel(BaseChannel):
         if task and not task.done():
             task.cancel()
 
-    def _pick_react_emoji(self) -> str | None:
-        """Pick an emoji from react_emoji config (random if list, None if empty/disabled)."""
-        react_emoji = self.config.react_emoji
-        if isinstance(react_emoji, str):
-            return react_emoji if react_emoji else None
-        if not react_emoji:
-            return None
-        if len(react_emoji) == 1:
-            return react_emoji[0]
-        return random.choice(react_emoji)
-
-    async def _add_reaction(self, chat_id: str, message_id: int, emoji: str | None) -> None:
+    async def _add_reaction(self, chat_id: str, message_id: int, emoji: str) -> None:
         """Add emoji reaction to a message (best-effort, non-blocking)."""
         if not self._app or not emoji:
             return
@@ -1995,7 +1927,7 @@ class TelegramChannel(BaseChannel):
         try:
             while self._app:
                 kwargs: dict = {"chat_id": int(raw_chat_id), "action": "typing"}
-                if thread_id is not None:
+                if thread_id:
                     kwargs["message_thread_id"] = thread_id
                 await self._app.bot.send_chat_action(**kwargs)
                 await asyncio.sleep(4)
@@ -2014,7 +1946,7 @@ class TelegramChannel(BaseChannel):
 
         # Check if user is allowed
         if not self.is_allowed(self._sender_id(update.effective_user)):
-            await self._reply_in_topic(update.message, "❌ You are not authorized to use this bot.")
+            await update.message.reply_text("❌ You are not authorized to use this bot.")
             return
 
         # Parse command arguments
@@ -2097,15 +2029,20 @@ class TelegramChannel(BaseChannel):
                     else:
                         response = "📊 No token usage statistics found for this chat."
 
-            await self._reply_in_topic(update.message, response, parse_mode="HTML")
+            await update.message.reply_text(response, parse_mode="HTML")
 
         except Exception as e:
             logger.error("Failed to fetch stats: {}", e)
-            await self._reply_in_topic(update.message, "❌ Failed to fetch token usage statistics.")
+            await update.message.reply_text("❌ Failed to fetch token usage statistics.")
 
     async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Log polling / handler errors instead of silently swallowing them."""
-        logger.error("Telegram error: {}", context.error)
+        error = context.error
+        message = str(error) or error.__class__.__name__
+        if error.__class__.__name__ == "NetworkError":
+            logger.warning("Telegram network issue: {}", message)
+        else:
+            logger.error("Telegram error: {}", message)
 
     def _get_extension(
         self,

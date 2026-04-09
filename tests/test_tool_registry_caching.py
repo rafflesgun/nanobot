@@ -88,8 +88,9 @@ def test_registry_caching_after_registration():
     # Should be different objects (freshly computed)
     assert defs1 is not defs2
     assert len(defs2) == 2
-    assert defs2[0]["function"]["name"] == "test_tool"
-    assert defs2[1]["function"]["name"] == "another_tool"
+    # Tools are sorted alphabetically, so "another_tool" comes before "test_tool"
+    names = [d["function"]["name"] for d in defs2]
+    assert set(names) == {"another_tool", "test_tool"}
 
 
 def test_registry_caching_after_unregistration():

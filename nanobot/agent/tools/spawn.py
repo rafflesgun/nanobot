@@ -15,16 +15,26 @@ class SpawnTool(Tool):
         self._manager = manager
         self._origin_channel = "cli"
         self._origin_chat_id = "direct"
-        self._origin_thread_id: int | None = None
         self._session_key = "cli:direct"
+        self._origin_thread_id: int | None = None
         self._model_override: str | None = None
 
-    def set_context(self, channel: str, chat_id: str, model_override: str | None = None, thread_id: int | None = None) -> None:
+    def set_context(
+        self,
+        channel: str,
+        chat_id: str,
+        model_override: str | None = None,
+        thread_id: int | None = None,
+    ) -> None:
         """Set the origin context for subagent announcements."""
         self._origin_channel = channel
         self._origin_chat_id = chat_id
+        self._session_key = (
+            f"{channel}:{chat_id}:topic:{thread_id}"
+            if thread_id is not None
+            else f"{channel}:{chat_id}"
+        )
         self._origin_thread_id = thread_id
-        self._session_key = f"{channel}:{chat_id}"
         self._model_override = model_override
 
     @property
@@ -46,7 +56,9 @@ class SpawnTool(Tool):
                 f"{profile['id']}: {profile.get('description') or profile.get('label') or 'configured profile'}"
                 for profile in profiles
             )
-            description += f" Available configured subagents: {advertised}. Use subagent_id to select one."
+            description += (
+                f" Available configured subagents: {advertised}. Use subagent_id to select one."
+            )
         return description
 
     @property
@@ -70,7 +82,13 @@ class SpawnTool(Tool):
             "required": ["task"],
         }
 
-    async def execute(self, task: str, label: str | None = None, subagent_id: str | None = None, **kwargs: Any) -> str:
+    async def execute(
+        self,
+        task: str,
+        label: str | None = None,
+        subagent_id: str | None = None,
+        **kwargs: Any,
+    ) -> str:
         """Spawn a subagent to execute the given task."""
         return await self._manager.spawn(
             task=task,

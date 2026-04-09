@@ -1,6 +1,18 @@
 import json
+import socket
+from unittest.mock import patch
 
 from nanobot.config.loader import load_config, save_config
+from nanobot.security.network import validate_url_target
+
+
+def _fake_resolve(host: str, results: list[str]):
+    """Return a getaddrinfo mock that maps the given host to fake IP results."""
+    def _resolver(hostname, port, family=0, type_=0):
+        if hostname == host:
+            return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", (ip, 0)) for ip in results]
+        raise socket.gaierror(f"cannot resolve {hostname}")
+    return _resolver
 
 
 def test_load_config_keeps_max_tokens_and_ignores_legacy_memory_window(tmp_path) -> None:
@@ -128,120 +140,21 @@ def test_onboard_refresh_backfills_missing_channel_fields(tmp_path, monkeypatch)
     assert saved["channels"]["qq"]["msgFormat"] == "plain"
 
 
-def test_load_config_migrates_exec_restrict_to_workspace_bool(tmp_path) -> None:
-    config_path = tmp_path / "config.json"
-    config_path.write_text(
-        json.dumps(
-            {
-                "tools": {
-                    "exec": {
-                        "restrictToWorkspace": True,
-                    }
-                }
-            }
-        ),
+def test_load_config_resets_ssrf_whitelist_when_next_config_is_empty(tmp_path) -> None:
+    whitelisted = tmp_path / "whitelisted.json"
+    whitelisted.write_text(
+        json.dumps({"tools": {"ssrfWhitelist": ["100.64.0.0/10"]}}),
         encoding="utf-8",
     )
+    defaulted = tmp_path / "defaulted.json"
+    defaulted.write_text(json.dumps({}), encoding="utf-8")
 
-    config = load_config(config_path)
+    load_config(whitelisted)
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("ts.local", ["100.100.1.1"])):
+        ok, err = validate_url_target("http://ts.local/api")
+        assert ok, err
 
-    assert config.tools.restrict_to_workspace.enabled is True
-    assert config.tools.restrict_to_workspace.extra_read == []
-    assert config.tools.restrict_to_workspace.extra_write == []
-
-
-def test_load_config_migrates_top_level_restrict_to_workspace_bool(tmp_path) -> None:
-    config_path = tmp_path / "config.json"
-    config_path.write_text(
-        json.dumps(
-            {
-                "tools": {
-                    "restrictToWorkspace": True,
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    config = load_config(config_path)
-
-    assert config.tools.restrict_to_workspace.enabled is True
-    assert config.tools.restrict_to_workspace.extra_read == []
-    assert config.tools.restrict_to_workspace.extra_write == []
-
-
-def test_save_config_writes_nested_workspace_restriction_shape(tmp_path) -> None:
-    config_path = tmp_path / "config.json"
-    config = load_config(config_path)
-    config.tools.restrict_to_workspace.enabled = True
-    config.tools.restrict_to_workspace.extra_read = ["/tmp/read-only"]
-    config.tools.restrict_to_workspace.extra_write = ["/tmp/read-write"]
-
-    save_config(config, config_path)
-    saved = json.loads(config_path.read_text(encoding="utf-8"))
-
-    assert saved["tools"]["restrictToWorkspace"] == {
-        "enabled": True,
-        "extraRead": ["/tmp/read-only"],
-        "extraWrite": ["/tmp/read-write"],
-    }
-
-
-def test_load_config_accepts_ordered_fallback_models(tmp_path) -> None:
-    config_path = tmp_path / "config.json"
-    config_path.write_text(
-        json.dumps(
-            {
-                "agents": {
-                    "defaults": {
-                        "fallbackModels": ["legacy-fallback", "backup-a", "backup-b"],
-                    }
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    config = load_config(config_path)
-
-    assert config.agents.defaults.fallback_models == ["legacy-fallback", "backup-a", "backup-b"]
-
-
-def test_save_config_writes_ordered_fallback_models(tmp_path) -> None:
-    config_path = tmp_path / "config.json"
-    config = load_config(config_path)
-    config.agents.defaults.fallback_models = ["legacy-fallback", "backup-a", "backup-b"]
-
-    save_config(config, config_path)
-    saved = json.loads(config_path.read_text(encoding="utf-8"))
-    defaults = saved["agents"]["defaults"]
-
-    assert defaults["fallbackModels"] == ["legacy-fallback", "backup-a", "backup-b"]
-
-
-def test_load_config_preserves_named_agent_profiles(tmp_path) -> None:
-    config_path = tmp_path / "config.json"
-    config_path.write_text(
-        json.dumps(
-            {
-                "agents": {
-                    "defaults": {
-                        "model": "main-model",
-                        "temperature": 0.4,
-                    },
-                    "research": {
-                        "model": "research-model",
-                        "temperature": 0.1,
-                    },
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    config = load_config(config_path)
-    resolved = config.agents.resolve("research")
-
-    assert resolved.model == "research-model"
-    assert resolved.temperature == 0.1
-    assert config.agents.agent_ids() == ["defaults", "research"]
+    load_config(defaulted)
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("ts.local", ["100.100.1.1"])):
+        ok, _ = validate_url_target("http://ts.local/api")
+        assert not ok

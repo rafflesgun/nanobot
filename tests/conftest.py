@@ -1,7 +1,12 @@
 import os
 import shutil
+from pathlib import Path
 
 import pytest
+from dotenv import load_dotenv
+
+
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 
 def pytest_collection_modifyitems(config, items):
@@ -12,7 +17,9 @@ def pytest_collection_modifyitems(config, items):
         has_riva_client = False
 
     has_riva_env = bool(os.getenv("NVIDIA_API_KEY"))
-    needs_riva = pytest.mark.skip(reason="Riva integration test requires riva client and NVIDIA_API_KEY")
+    needs_riva = pytest.mark.skip(
+        reason="Riva integration test requires riva client and NVIDIA_API_KEY"
+    )
 
     if has_riva_client and has_riva_env:
         return

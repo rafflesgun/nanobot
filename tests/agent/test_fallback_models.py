@@ -24,7 +24,6 @@ def _make_loop(tmp_path, *, fallback_models=None) -> AgentLoop:
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="Fallback models need to be integrated at AgentRunner level after PR #2733 merge")
 async def test_process_direct_tries_ordered_fallback_models_until_one_succeeds(tmp_path) -> None:
     loop = _make_loop(
         tmp_path,
@@ -76,3 +75,28 @@ async def test_process_direct_does_not_fallback_on_non_provider_error(tmp_path) 
 
     assert seen_models == ["primary-model"]
 
+
+@pytest.mark.asyncio
+async def test_process_direct_falls_back_on_bare_429_error(tmp_path) -> None:
+    loop = _make_loop(
+        tmp_path,
+        fallback_models=["fallback-model"],
+    )
+
+    seen_models: list[str] = []
+
+    async def _chat_with_retry(**kwargs):
+        model = kwargs["model"]
+        seen_models.append(model)
+        if model == "primary-model":
+            raise RuntimeError("429 rate limit")
+        return LLMResponse(content=f"reply via {model}", tool_calls=[])
+
+    loop.provider.chat_with_retry = _chat_with_retry
+    loop.provider.chat_stream_with_retry = AsyncMock()
+
+    response = await loop.process_direct("hello", session_key="cli:test")
+
+    assert response is not None
+    assert response.content == "reply via fallback-model"
+    assert seen_models == ["primary-model", "fallback-model"]

@@ -3,18 +3,28 @@
 from __future__ import annotations
 
 import asyncio
+import httpx
 import hashlib
+import importlib.util
 import os
-import re
 import secrets
 import string
 import uuid
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
-import httpx
 import json_repair
-from openai import AsyncOpenAI
+
+if os.environ.get("LANGFUSE_SECRET_KEY") and importlib.util.find_spec("langfuse"):
+    from langfuse.openai import AsyncOpenAI
+else:
+    if os.environ.get("LANGFUSE_SECRET_KEY"):
+        import logging
+        logging.getLogger(__name__).warning(
+            "LANGFUSE_SECRET_KEY is set but langfuse is not installed; "
+            "install with `pip install langfuse` to enable tracing"
+        )
+    from openai import AsyncOpenAI
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
@@ -23,6 +33,7 @@ if TYPE_CHECKING:
 
 _ALLOWED_MSG_KEYS = frozenset({
     "role", "content", "tool_calls", "tool_call_id", "name",
+    "reasoning_content", "extra_content",
 })
 _ALNUM = string.ascii_letters + string.digits
 
@@ -38,99 +49,6 @@ _DEFAULT_OPENROUTER_HEADERS = {
 def _short_tool_id() -> str:
     """9-char alphanumeric ID compatible with all providers (incl. Mistral)."""
     return "".join(secrets.choice(_ALNUM) for _ in range(9))
-
-
-# Kimi K2 tool call special tokens
-_KIMI_TC_SECTION_BEGIN = "<|tool_calls_section_begin|>"
-_KIMI_TC_SECTION_END = "<|tool_calls_section_end|>"
-_KIMI_TC_BEGIN = "<|tool_call_begin|>"
-_KIMI_TC_END = "<|tool_call_end|>"
-_KIMI_TC_ARG_BEGIN = "<|tool_call_argument_begin|>"
-
-# Regex patterns for Kimi K2 tool call parsing
-_KIMI_TC_SECTION_PATTERN = re.compile(
-    rf"{re.escape(_KIMI_TC_SECTION_BEGIN)}(.*?){re.escape(_KIMI_TC_SECTION_END)}",
-    re.DOTALL,
-)
-_KIMI_TC_PATTERN = re.compile(
-    rf"{re.escape(_KIMI_TC_BEGIN)}(.*?){re.escape(_KIMI_TC_END)}",
-    re.DOTALL,
-)
-# Matches "functions.func_name:idx" or just "func_name:idx"
-_KIMI_FUNC_ID_PATTERN = re.compile(r"^(?:functions\.)?([^:]+):(\d+)$")
-
-
-def _parse_kimi_tool_calls(text: str) -> list[ToolCallRequest]:
-    """Parse Kimi K2 style tool calls from raw text.
-
-    Kimi K2 emits tool calls as special tokens in the response content when
-    the API doesn't properly parse them into the standard tool_calls field.
-
-    Format:
-        <|tool_calls_section_begin|>
-        <|tool_call_begin|>functions.func_name:0<|tool_call_argument_begin|>{"arg": "value"}<|tool_call_end|>
-        <|tool_calls_section_end|>
-    """
-    tool_calls: list[ToolCallRequest] = []
-
-    # First try: Find the tool calls section (standard format)
-    section_match = _KIMI_TC_SECTION_PATTERN.search(text)
-    if section_match:
-        section_content = section_match.group(1)
-    else:
-        # Fallback: Look for tool calls directly in text (some APIs omit section wrapper)
-        if _KIMI_TC_BEGIN not in text:
-            return tool_calls
-        section_content = text
-
-    # Parse individual tool calls
-    for tc_match in _KIMI_TC_PATTERN.finditer(section_content):
-        tc_content = tc_match.group(1).strip()
-
-        # Split by argument marker
-        if _KIMI_TC_ARG_BEGIN not in tc_content:
-            continue
-
-        func_id_part, args_part = tc_content.split(_KIMI_TC_ARG_BEGIN, 1)
-        func_id = func_id_part.strip()
-        args_str = args_part.strip()
-
-        # Parse function ID (functions.name:idx or name:idx)
-        func_name = func_id
-        func_match = _KIMI_FUNC_ID_PATTERN.match(func_id)
-        if func_match:
-            func_name = func_match.group(1)
-
-        # Parse arguments JSON
-        try:
-            args = json_repair.loads(args_str) if args_str else {}
-        except Exception:
-            args = {}
-
-        tool_calls.append(ToolCallRequest(
-            id=_short_tool_id(),
-            name=func_name,
-            arguments=args if isinstance(args, dict) else {},
-        ))
-
-    return tool_calls
-
-
-def _strip_kimi_tool_call_tokens(text: str) -> str:
-    """Remove Kimi K2 tool call tokens from text, keeping other content."""
-    if _KIMI_TC_SECTION_BEGIN not in text and _KIMI_TC_BEGIN not in text:
-        return text
-
-    # First try to remove the entire tool calls section
-    if _KIMI_TC_SECTION_BEGIN in text:
-        result = _KIMI_TC_SECTION_PATTERN.sub("", text)
-    else:
-        result = text
-
-    # Also remove any orphaned tool call tokens (without section wrapper)
-    result = _KIMI_TC_PATTERN.sub("", result)
-
-    return result.strip()
 
 
 def _get(obj: Any, key: str) -> Any:
@@ -229,9 +147,9 @@ class OpenAICompatProvider(LLMProvider):
         self._client = AsyncOpenAI(
             api_key=api_key or "no-key",
             base_url=effective_base,
+            default_headers=default_headers,
             max_retries=0,
             timeout=httpx.Timeout(180.0, connect=10.0),
-            default_headers=default_headers,
         )
 
     def _setup_env(self, api_key: str, api_base: str | None) -> None:
@@ -248,8 +166,9 @@ class OpenAICompatProvider(LLMProvider):
             resolved = env_val.replace("{api_key}", api_key).replace("{api_base}", effective_base)
             os.environ.setdefault(env_name, resolved)
 
-    @staticmethod
+    @classmethod
     def _apply_cache_control(
+        cls,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]] | None]:
@@ -277,7 +196,8 @@ class OpenAICompatProvider(LLMProvider):
         new_tools = tools
         if tools:
             new_tools = list(tools)
-            new_tools[-1] = {**new_tools[-1], "cache_control": cache_marker}
+            for idx in cls._tool_cache_marker_indices(new_tools):
+                new_tools[idx] = {**new_tools[idx], "cache_control": cache_marker}
         return new_messages, new_tools
 
     @staticmethod
@@ -318,6 +238,21 @@ class OpenAICompatProvider(LLMProvider):
     # Build kwargs
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _supports_temperature(
+        model_name: str,
+        reasoning_effort: str | None = None,
+    ) -> bool:
+        """Return True when the model accepts a temperature parameter.
+
+        GPT-5 family and reasoning models (o1/o3/o4) reject temperature
+        when reasoning_effort is set to anything other than ``"none"``.
+        """
+        if reasoning_effort and reasoning_effort.lower() != "none":
+            return False
+        name = model_name.lower()
+        return not any(token in name for token in ("gpt-5", "o1", "o3", "o4"))
+
     def _build_kwargs(
         self,
         messages: list[dict[str, Any]],
@@ -342,13 +277,14 @@ class OpenAICompatProvider(LLMProvider):
         kwargs: dict[str, Any] = {
             "model": model_name,
             "messages": self._sanitize_messages(self._sanitize_empty_content(messages)),
-            "temperature": temperature,
         }
 
-        if spec and getattr(spec, "supports_max_completion_tokens", False):
-            kwargs["max_completion_tokens"] = max(1, max_tokens)
-        else:
-            kwargs["max_tokens"] = max(1, max_tokens)
+        # GPT-5 and reasoning models (o1/o3/o4) reject temperature when
+        # reasoning_effort is active.  Only include it when safe.
+        if self._supports_temperature(model_name, reasoning_effort):
+            kwargs["temperature"] = temperature
+
+        kwargs["max_completion_tokens"] = max(1, max_tokens)
 
         if spec:
             model_lower = model_name.lower()
@@ -359,6 +295,24 @@ class OpenAICompatProvider(LLMProvider):
 
         if reasoning_effort:
             kwargs["reasoning_effort"] = reasoning_effort
+
+        # Provider-specific thinking parameters.
+        # Only sent when reasoning_effort is explicitly configured so that
+        # the provider default is preserved otherwise.
+        if spec and reasoning_effort is not None:
+            thinking_enabled = reasoning_effort.lower() != "minimal"
+            extra: dict[str, Any] | None = None
+            if spec.name == "dashscope":
+                extra = {"enable_thinking": thinking_enabled}
+            elif spec.name in (
+                "volcengine", "volcengine_coding_plan",
+                "byteplus", "byteplus_coding_plan",
+            ):
+                extra = {
+                    "thinking": {"type": "enabled" if thinking_enabled else "disabled"}
+                }
+            if extra:
+                kwargs.setdefault("extra_body", {}).update(extra)
 
         if tools:
             kwargs["tools"] = tools
@@ -482,9 +436,13 @@ class OpenAICompatProvider(LLMProvider):
                 content = self._extract_text_content(
                     response_map.get("content") or response_map.get("output_text")
                 )
+                reasoning_content = self._extract_text_content(
+                    response_map.get("reasoning_content")
+                )
                 if content is not None:
                     return LLMResponse(
                         content=content,
+                        reasoning_content=reasoning_content,
                         finish_reason=str(response_map.get("finish_reason") or "stop"),
                         usage=self._extract_usage(response_map),
                     )
@@ -496,7 +454,12 @@ class OpenAICompatProvider(LLMProvider):
             finish_reason = str(choice0.get("finish_reason") or "stop")
 
             raw_tool_calls: list[Any] = []
+            # StepFun Plan: fallback to reasoning field when content is empty
+            if not content and msg0.get("reasoning"):
+                content = self._extract_text_content(msg0.get("reasoning"))
             reasoning_content = msg0.get("reasoning_content")
+            if not reasoning_content and msg0.get("reasoning"):
+                reasoning_content = self._extract_text_content(msg0.get("reasoning"))
             for ch in choices:
                 ch_map = self._maybe_mapping(ch) or {}
                 m = self._maybe_mapping(ch_map.get("message")) or {}
@@ -527,24 +490,6 @@ class OpenAICompatProvider(LLMProvider):
                     function_provider_specific_fields=fn_prov,
                 ))
 
-            # Kimi K2: Also parse tool calls from content if present (API may not parse them)
-            if content and (_KIMI_TC_SECTION_BEGIN in content or _KIMI_TC_BEGIN in content):
-                kimi_tool_calls = _parse_kimi_tool_calls(content)
-                if kimi_tool_calls:
-                    parsed_tool_calls.extend(kimi_tool_calls)
-                    content = _strip_kimi_tool_call_tokens(content)
-                    if parsed_tool_calls:
-                        finish_reason = "tool_calls"
-
-            # Kimi K2: Also check reasoning_content for tool call tokens (streaming bug)
-            if reasoning_content and (_KIMI_TC_SECTION_BEGIN in reasoning_content or _KIMI_TC_BEGIN in reasoning_content):
-                kimi_tool_calls = _parse_kimi_tool_calls(reasoning_content)
-                if kimi_tool_calls:
-                    parsed_tool_calls.extend(kimi_tool_calls)
-                    reasoning_content = _strip_kimi_tool_call_tokens(reasoning_content)
-                    if parsed_tool_calls:
-                        finish_reason = "tool_calls"
-
             return LLMResponse(
                 content=content,
                 tool_calls=parsed_tool_calls,
@@ -570,6 +515,8 @@ class OpenAICompatProvider(LLMProvider):
                     finish_reason = ch.finish_reason
             if not content and m.content:
                 content = m.content
+            if not content and getattr(m, "reasoning", None):
+                content = m.reasoning
 
         tool_calls = []
         for tc in raw_tool_calls:
@@ -586,24 +533,9 @@ class OpenAICompatProvider(LLMProvider):
                 function_provider_specific_fields=fn_prov,
             ))
 
-        # Kimi K2: Also parse tool calls from content if present (API may not parse them)
         reasoning_content = getattr(msg, "reasoning_content", None) or None
-        if content and (_KIMI_TC_SECTION_BEGIN in content or _KIMI_TC_BEGIN in content):
-            kimi_tool_calls = _parse_kimi_tool_calls(content)
-            if kimi_tool_calls:
-                tool_calls.extend(kimi_tool_calls)
-                content = _strip_kimi_tool_call_tokens(content)
-                if tool_calls:
-                    finish_reason = "tool_calls"
-
-        # Kimi K2: Also check reasoning_content for tool call tokens (streaming bug)
-        if reasoning_content and (_KIMI_TC_SECTION_BEGIN in reasoning_content or _KIMI_TC_BEGIN in reasoning_content):
-            kimi_tool_calls = _parse_kimi_tool_calls(reasoning_content)
-            if kimi_tool_calls:
-                tool_calls.extend(kimi_tool_calls)
-                reasoning_content = _strip_kimi_tool_call_tokens(reasoning_content)
-                if tool_calls:
-                    finish_reason = "tool_calls"
+        if not reasoning_content and getattr(msg, "reasoning", None):
+            reasoning_content = msg.reasoning
 
         return LLMResponse(
             content=content,
@@ -616,6 +548,7 @@ class OpenAICompatProvider(LLMProvider):
     @classmethod
     def _parse_chunks(cls, chunks: list[Any]) -> LLMResponse:
         content_parts: list[str] = []
+        reasoning_parts: list[str] = []
         tc_bufs: dict[int, dict[str, Any]] = {}
         finish_reason = "stop"
         usage: dict[str, int] = {}
@@ -669,6 +602,11 @@ class OpenAICompatProvider(LLMProvider):
                 text = cls._extract_text_content(delta.get("content"))
                 if text:
                     content_parts.append(text)
+                text = cls._extract_text_content(delta.get("reasoning_content"))
+                if not text:
+                    text = cls._extract_text_content(delta.get("reasoning"))
+                if text:
+                    reasoning_parts.append(text)
                 for idx, tc in enumerate(delta.get("tool_calls") or []):
                     _accum_tc(tc, idx)
                 usage = cls._extract_usage(chunk_map) or usage
@@ -683,55 +621,100 @@ class OpenAICompatProvider(LLMProvider):
             delta = choice.delta
             if delta and delta.content:
                 content_parts.append(delta.content)
+            if delta:
+                reasoning = getattr(delta, "reasoning_content", None)
+                if not reasoning:
+                    reasoning = getattr(delta, "reasoning", None)
+                if reasoning:
+                    reasoning_parts.append(reasoning)
             for tc in (delta.tool_calls or []) if delta else []:
                 _accum_tc(tc, getattr(tc, "index", 0))
 
-        # Build the combined content
-        combined_content = "".join(content_parts) or None
-
-        # Parse tool calls from buffers
-        parsed_tool_calls = [
-            ToolCallRequest(
-                id=b["id"] or _short_tool_id(),
-                name=b["name"],
-                arguments=json_repair.loads(b["arguments"]) if b["arguments"] else {},
-                extra_content=b.get("extra_content"),
-                provider_specific_fields=b.get("prov"),
-                function_provider_specific_fields=b.get("fn_prov"),
-            )
-            for b in tc_bufs.values()
-        ]
-
-        # Kimi K2: Also parse tool calls from content if present (streaming may emit them as text)
-        if combined_content and (_KIMI_TC_SECTION_BEGIN in combined_content or _KIMI_TC_BEGIN in combined_content):
-            kimi_tool_calls = _parse_kimi_tool_calls(combined_content)
-            if kimi_tool_calls:
-                parsed_tool_calls.extend(kimi_tool_calls)
-                combined_content = _strip_kimi_tool_call_tokens(combined_content)
-                if parsed_tool_calls:
-                    finish_reason = "tool_calls"
-
         return LLMResponse(
-            content=combined_content,
-            tool_calls=parsed_tool_calls,
+            content="".join(content_parts) or None,
+            tool_calls=[
+                ToolCallRequest(
+                    id=b["id"] or _short_tool_id(),
+                    name=b["name"],
+                    arguments=json_repair.loads(b["arguments"]) if b["arguments"] else {},
+                    extra_content=b.get("extra_content"),
+                    provider_specific_fields=b.get("prov"),
+                    function_provider_specific_fields=b.get("fn_prov"),
+                )
+                for b in tc_bufs.values()
+            ],
             finish_reason=finish_reason,
             usage=usage,
+            reasoning_content="".join(reasoning_parts) or None,
         )
+
+    @classmethod
+    def _extract_error_metadata(cls, e: Exception) -> dict[str, Any]:
+        response = getattr(e, "response", None)
+        headers = getattr(response, "headers", None)
+        payload = (
+            getattr(e, "body", None)
+            or getattr(e, "doc", None)
+            or getattr(response, "text", None)
+        )
+        if payload is None and response is not None:
+            response_json = getattr(response, "json", None)
+            if callable(response_json):
+                try:
+                    payload = response_json()
+                except Exception:
+                    payload = None
+        error_type, error_code = LLMProvider._extract_error_type_code(payload)
+
+        status_code = getattr(e, "status_code", None)
+        if status_code is None and response is not None:
+            status_code = getattr(response, "status_code", None)
+
+        should_retry: bool | None = None
+        if headers is not None:
+            raw = headers.get("x-should-retry")
+            if isinstance(raw, str):
+                lowered = raw.strip().lower()
+                if lowered == "true":
+                    should_retry = True
+                elif lowered == "false":
+                    should_retry = False
+
+        error_kind: str | None = None
+        error_name = e.__class__.__name__.lower()
+        if "timeout" in error_name:
+            error_kind = "timeout"
+        elif "connection" in error_name:
+            error_kind = "connection"
+
+        return {
+            "error_status_code": int(status_code) if status_code is not None else None,
+            "error_kind": error_kind,
+            "error_type": error_type,
+            "error_code": error_code,
+            "error_retry_after_s": cls._extract_retry_after_from_headers(headers),
+            "error_should_retry": should_retry,
+        }
 
     @staticmethod
     def _handle_error(e: Exception) -> LLMResponse:
-        # Try multiple attributes to extract error body from OpenAI SDK exceptions
         body = (
-            getattr(e, "body", None)
-            or getattr(e, "doc", None)
+            getattr(e, "doc", None)
+            or getattr(e, "body", None)
             or getattr(getattr(e, "response", None), "text", None)
         )
-        # If body is a dict, format it nicely
-        if isinstance(body, dict):
-            import json
-            body = json.dumps(body, ensure_ascii=False)
-        msg = f"Error: {str(body).strip()[:500]}" if body and str(body).strip() else f"Error calling LLM: {e}"
-        return LLMResponse(content=msg, finish_reason="error")
+        body_text = body if isinstance(body, str) else str(body) if body is not None else ""
+        msg = f"Error: {body_text.strip()[:500]}" if body_text.strip() else f"Error calling LLM: {e}"
+        response = getattr(e, "response", None)
+        retry_after = LLMProvider._extract_retry_after_from_headers(getattr(response, "headers", None))
+        if retry_after is None:
+            retry_after = LLMProvider._extract_retry_after(msg)
+        return LLMResponse(
+            content=msg,
+            finish_reason="error",
+            retry_after=retry_after,
+            **OpenAICompatProvider._extract_error_metadata(e),
+        )
 
     # ------------------------------------------------------------------
     # Public API
@@ -754,14 +737,6 @@ class OpenAICompatProvider(LLMProvider):
         try:
             return self._parse(await self._client.chat.completions.create(**kwargs))
         except Exception as e:
-            # Log the kwargs that caused the error for debugging
-            from loguru import logger
-            logger.warning(
-                "LLM API error with model={}, kwargs_keys={}: {}",
-                kwargs.get("model"),
-                list(kwargs.keys()),
-                str(e)[:200],
-            )
             return self._handle_error(e)
 
     async def chat_stream(
@@ -780,25 +755,8 @@ class OpenAICompatProvider(LLMProvider):
             reasoning_effort, tool_choice,
         )
         kwargs["stream"] = True
-        # stream_options can cause 500 errors with some providers (e.g., MiniMax)
-        # Set NANOBOT_NO_STREAM_OPTIONS=1 to disable
-        if not os.environ.get("NANOBOT_NO_STREAM_OPTIONS"):
-            kwargs["stream_options"] = {"include_usage": True}
+        kwargs["stream_options"] = {"include_usage": True}
         idle_timeout_s = int(os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "90"))
-
-        # Log request details for debugging provider issues
-        from loguru import logger
-        logger.debug(
-            "LLM stream request: model={}, max_tokens={}, temperature={}, "
-            "tools_count={}, stream_options={}, reasoning_effort={}",
-            kwargs.get("model"),
-            kwargs.get("max_tokens") or kwargs.get("max_completion_tokens"),
-            kwargs.get("temperature"),
-            len(tools) if tools else 0,
-            kwargs.get("stream_options"),
-            reasoning_effort,
-        )
-
         try:
             stream = await self._client.chat.completions.create(**kwargs)
             chunks: list[Any] = []
@@ -824,16 +782,9 @@ class OpenAICompatProvider(LLMProvider):
                     f"{idle_timeout_s} seconds"
                 ),
                 finish_reason="error",
+                error_kind="timeout",
             )
         except Exception as e:
-            # Log the kwargs that caused the error for debugging
-            from loguru import logger
-            logger.warning(
-                "LLM stream API error with model={}, kwargs_keys={}: {}",
-                kwargs.get("model"),
-                list(kwargs.keys()),
-                str(e)[:200],
-            )
             return self._handle_error(e)
 
     def get_default_model(self) -> str:
