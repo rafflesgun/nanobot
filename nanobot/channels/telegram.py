@@ -200,6 +200,7 @@ class _StreamBuf:
     message_id: int | None = None
     last_edit: float = 0.0
     thread_id: int | None = None
+    stream_id: str | None = None
     prev_message_ids: list[int] = field(default_factory=list)
 
 
@@ -749,6 +750,7 @@ class TelegramChannel(BaseChannel):
                 )
             except Exception as e2:
                 logger.error("Error sending Telegram message: {}", e2)
+                raise
 
     def _get_tts_override(self, chat_id: str, thread_id: int | None = None) -> dict[str, Any]:
         """Resolve TTS overrides with topic-specific settings taking precedence."""
@@ -871,10 +873,13 @@ class TelegramChannel(BaseChannel):
         thread_id = meta.get("message_thread_id")
         comp_key = self._composite_key(chat_id, thread_id)
         thread_kwargs = {"message_thread_id": thread_id} if thread_id is not None else {}
+        stream_id = meta.get("_stream_id")
 
         if meta.get("_stream_end"):
-            buf = self._stream_bufs.pop(comp_key, None)
+            buf = self._stream_bufs.get(comp_key)
             if not buf or not buf.message_id or not buf.text:
+                return
+            if stream_id is not None and buf.stream_id not in (None, stream_id):
                 return
             self._stop_typing(comp_key)
             thinking_msg_id = self._thinking_messages.pop(comp_key, None)
@@ -896,6 +901,16 @@ class TelegramChannel(BaseChannel):
                     parse_mode="HTML",
                 )
             except Exception as e:
+                if self._is_not_modified_error(e):
+                    self._stream_bufs.pop(comp_key, None)
+                    await self._maybe_send_tts(
+                        chat_id=int_chat_id,
+                        text=buf.text,
+                        reply_params=None,
+                        thread_kwargs=thread_kwargs,
+                        metadata=meta,
+                    )
+                    return
                 logger.debug("Final stream edit failed (HTML), trying plain: {}", e)
                 try:
                     await self._call_with_retry(
@@ -905,7 +920,19 @@ class TelegramChannel(BaseChannel):
                         text=buf.text,
                     )
                 except Exception as e2:
+                    if self._is_not_modified_error(e2):
+                        self._stream_bufs.pop(comp_key, None)
+                        await self._maybe_send_tts(
+                            chat_id=int_chat_id,
+                            text=buf.text,
+                            reply_params=None,
+                            thread_kwargs=thread_kwargs,
+                            metadata=meta,
+                        )
+                        return
                     logger.warning("Final stream edit failed: {}", e2)
+                    raise
+            self._stream_bufs.pop(comp_key, None)
             await self._maybe_send_tts(
                 chat_id=int_chat_id,
                 text=buf.text,
@@ -916,9 +943,14 @@ class TelegramChannel(BaseChannel):
             return
 
         buf = self._stream_bufs.get(comp_key)
-        if buf is None:
-            buf = _StreamBuf(thread_id=thread_id)
+        if buf is not None and stream_id is not None and buf.stream_id not in (None, stream_id):
+            buf = _StreamBuf(thread_id=thread_id, stream_id=stream_id)
             self._stream_bufs[comp_key] = buf
+        if buf is None:
+            buf = _StreamBuf(thread_id=thread_id, stream_id=stream_id)
+            self._stream_bufs[comp_key] = buf
+        elif stream_id is not None:
+            buf.stream_id = stream_id
         buf.text += delta
 
         if not buf.text.strip():
@@ -1012,7 +1044,9 @@ class TelegramChannel(BaseChannel):
                 )
                 buf.last_edit = now
             except Exception as e:
-                if not self._is_not_modified_error(e):
+                if self._is_not_modified_error(e):
+                    buf.last_edit = now
+                else:
                     logger.debug("Stream edit failed: {}", e)
 
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2105,6 +2139,11 @@ class TelegramChannel(BaseChannel):
 
     async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Log polling / handler errors instead of silently swallowing them."""
+        from telegram.error import NetworkError
+
+        if isinstance(context.error, NetworkError):
+            logger.warning("Telegram network issue: {}", context.error)
+            return
         logger.error("Telegram error: {}", context.error)
 
     def _get_extension(

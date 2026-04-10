@@ -628,6 +628,7 @@ class AgentLoop:
         on_progress: Callable[..., Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
+        on_turn_saved: Callable[[list[dict]], Awaitable[None]] | None = None,
         *,
         session: Session | None = None,
         channel: str = "cli",
@@ -636,7 +637,7 @@ class AgentLoop:
         thread_id: int | None = None,
         model_override: str | None = None,
         temperature_override: float | None = None,
-    ) -> tuple[str | None, list[str], list[dict]]:
+    ) -> tuple[str | None, list[str], list[dict], dict[str, int]]:
         """Run the agent iteration loop.
 
         *on_stream*: called with each content delta during streaming.
@@ -670,8 +671,12 @@ class AgentLoop:
 
         async def _checkpoint(payload: dict[str, Any]) -> None:
             if session is None:
+                if on_turn_saved:
+                    await on_turn_saved(payload.get("messages", initial_messages))
                 return
             self._set_runtime_checkpoint(session, payload)
+            if on_turn_saved:
+                await on_turn_saved(payload.get("messages", initial_messages))
 
         # Try with fallback models if configured
         models_to_try = [effective_model] + self._ordered_fallback_models(effective_model)
@@ -713,6 +718,8 @@ class AgentLoop:
                     logger.warning("Max iterations ({}) reached", self.max_iterations)
                 elif result.stop_reason == "error":
                     logger.error("LLM returned error: {}", (result.final_content or "")[:200])
+                if on_turn_saved:
+                    await on_turn_saved(result.messages)
                 return result.final_content, result.tools_used, result.messages
 
             except Exception as e:

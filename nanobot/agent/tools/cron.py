@@ -77,7 +77,10 @@ class CronTool(Tool):
                     "description": "Action to perform",
                 },
                 "name": {"type": "string", "description": "Optional short name for the job"},
-                "message": {"type": "string", "description": "Instruction for the agent to execute when the job triggers (e.g., 'Send a reminder to WeChat: xxx' or 'Check system status and report')"},
+                "message": {
+                    "type": "string",
+                    "description": "Instruction for the agent to execute when the job triggers (e.g., 'Send a reminder to WeChat: xxx' or 'Check system status and report')",
+                },
                 "every_seconds": {
                     "type": "integer",
                     "description": "Interval in seconds (for recurring tasks)",
@@ -103,7 +106,7 @@ class CronTool(Tool):
                 "deliver": {
                     "type": "boolean",
                     "description": "Whether to deliver the execution result to the user channel (default true)",
-                    "default": True
+                    "default": True,
                 },
                 "job_id": {"type": "string", "description": "Job ID (for remove)"},
             },
@@ -136,13 +139,22 @@ class CronTool(Tool):
     def _add_job(
         self,
         name: str | None,
-        message: str,
-        every_seconds: int | None,
+        message: str | int | None,
+        every_seconds: int | str | None,
         cron_expr: str | None,
         tz: str | None,
-        at: str | None,
+        at: str | None = None,
         deliver: bool = True,
     ) -> str:
+        if isinstance(message, int) or message is None:
+            at = tz
+            tz = cron_expr
+            cron_expr = every_seconds if isinstance(every_seconds, str) else None
+            every_seconds = message if isinstance(message, int) else None
+            message = name
+
+        message = message or ""
+        every_seconds = every_seconds if isinstance(every_seconds, int) else None
         if not message:
             return "Error: message is required for add"
         if not self._channel or not self._chat_id:

@@ -16,7 +16,7 @@ understand intended behavior quickly.
 | Group commands via @mention                 | ✅     | channels/telegram.py → _on_message                     | manual                                 | `@BotName /command` → text message path       |
 | Configured subagents via `spawn(subagent_id)` | ✅   | config/schema.py, cli/commands.py, agent/loop.py, agent/subagent.py, agent/tools/spawn.py | tests/agent/test_configured_subagents.py, tests/agent/test_task_cancel.py | named `agents.*` profiles inherit from `agents.defaults` |
 | Ordered fallback models on provider errors  | ✅     | agent/loop.py, config/schema.py, cli/commands.py, agent/subagent.py | tests/agent/test_fallback_models.py, tests/config/test_config_migration.py | `fallback_models: []` (list, tried in order) |
-| "Thinking…" placeholder (PM only)           | ✅     | channels/telegram.py → _send_thinking_message          | tests/test_thinking_message.py         | skipped when `is_group == True`               |
+| "Thinking…" placeholder (PM only)           | ✅     | channels/telegram.py → _send_thinking_message, send_delta; utils/runtime.py | tests/test_thinking_message.py, tests/test_runtime_error_formatting.py | skipped when `is_group == True`; terminal provider errors must clear placeholder |
 | Typing indicator & ACK reaction             | ✅     | channels/telegram.py                                   | tests/test_typing_ack.py               | typing per chat+thread, `react_emoji` can be str or list |
 | Heartbeat results → DM / private only       | ✅     | cli/commands.py, heartbeat/service.py                  | test_heartbeat_service.py + targeted tests | skips negative IDs and topic sub-sessions  |
 | Heartbeat runs stateless by default         | ✅     | cli/commands.py, config/schema.py, agent/loop.py, heartbeat/service.py | tests/agent/test_heartbeat_service.py, tests/cli/test_commands.py | `heartbeat.keep_recent_messages = 0` |
@@ -451,6 +451,7 @@ pytest tests/agent/test_context_prompt_cache.py tests/agent/test_loop_save_turn.
 ### 17–21. Other smaller features (summary)
 
 - Thinking draft message → PM only (`if is_group: return`)
+- Terminal provider errors must still clear the Telegram thinking placeholder; keep `is_provider_error_message()` broad enough to catch JSON-shaped provider payloads like `Error: {"message": ..., "type": ...}` so the error path replaces the draft instead of leaving the chat stuck on "Thinking"
 - Typing + ACK reaction → per composite key (chat+thread)
 - `react_emoji` config → string for fixed emoji, list for random selection from pool, empty string/list to disable
 - Media downloads → `workspace/media/telegram/` when workspace is configured (accessible within workspace restrictions)

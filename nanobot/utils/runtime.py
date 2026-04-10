@@ -15,13 +15,11 @@ EMPTY_FINAL_RESPONSE_MESSAGE = (
 )
 
 PROVIDER_ERROR_FRIENDLY = (
-    "⚠️ The AI service is temporarily unavailable. "
-    "Please try again in a moment."
+    "⚠️ The AI service is temporarily unavailable. Please try again in a moment."
 )
 
 PROVIDER_ERROR_FRIENDLY_CRON = (
-    "⚠️ Scheduled task encountered a temporary service error. "
-    "It will retry automatically."
+    "⚠️ Scheduled task encountered a temporary service error. It will retry automatically."
 )
 
 
@@ -30,9 +28,12 @@ def is_provider_error_message(content: str | None) -> bool:
     if not content:
         return False
     content_lower = content.lower()
-    return (
-        content.startswith("Error:")
-        and ('"error"' in content or "bad_response" in content_lower or "unknown error" in content_lower)
+    return content.startswith("Error:") and (
+        '"error"' in content
+        or '"type"' in content
+        or '"message"' in content
+        or "bad_response" in content_lower
+        or "unknown error" in content_lower
     )
 
 
@@ -41,6 +42,7 @@ def format_provider_error(content: str | None, is_cron: bool = False) -> str:
     if not is_provider_error_message(content):
         return content or ""
     return PROVIDER_ERROR_FRIENDLY_CRON if is_cron else PROVIDER_ERROR_FRIENDLY
+
 
 FINALIZATION_RETRY_PROMPT = (
     "You have already finished the tool work. Do not call any more tools. "

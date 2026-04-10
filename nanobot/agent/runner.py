@@ -34,6 +34,8 @@ _DEFAULT_MAX_ITERATIONS_MESSAGE = (
 )
 _DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
 _SNIP_SAFETY_BUFFER = 1024
+
+
 @dataclass(slots=True)
 class AgentRunSpec:
     """Configuration for a single agent execution."""
@@ -132,7 +134,9 @@ class AgentRunner:
                         "model": spec.model,
                         "assistant_message": assistant_message,
                         "completed_tool_results": [],
-                        "pending_tool_calls": [tc.to_openai_tool_call() for tc in response.tool_calls],
+                        "pending_tool_calls": [
+                            tc.to_openai_tool_call() for tc in response.tool_calls
+                        ],
                     },
                 )
 
@@ -227,11 +231,13 @@ class AgentRunner:
                 await hook.after_iteration(context)
                 break
 
-            messages.append(build_assistant_message(
-                clean,
-                reasoning_content=response.reasoning_content,
-                thinking_blocks=response.thinking_blocks,
-            ))
+            messages.append(
+                build_assistant_message(
+                    clean,
+                    reasoning_content=response.reasoning_content,
+                    thinking_blocks=response.thinking_blocks,
+                )
+            )
             await self._emit_checkpoint(
                 spec,
                 {
@@ -278,6 +284,14 @@ class AgentRunner:
             "retry_mode": spec.provider_retry_mode,
             "on_retry_wait": spec.progress_callback,
         }
+        if spec.progress_callback is not None:
+
+            def _on_retry(attempt: int, total: int) -> None:
+                asyncio.create_task(
+                    spec.progress_callback(f"Retrying... (attempt {attempt}/{total})")
+                )
+
+            kwargs["on_retry"] = _on_retry
         if spec.temperature is not None:
             kwargs["temperature"] = spec.temperature
         if spec.max_tokens is not None:
@@ -299,6 +313,7 @@ class AgentRunner:
             tools=spec.tools.get_definitions(),
         )
         if hook.wants_streaming():
+
             async def _stream(delta: str) -> None:
                 await hook.on_stream(context, delta)
 
@@ -352,13 +367,19 @@ class AgentRunner:
         tool_results: list[tuple[Any, dict[str, str], BaseException | None]] = []
         for batch in batches:
             if spec.concurrent_tools and len(batch) > 1:
-                tool_results.extend(await asyncio.gather(*(
-                    self._run_tool(spec, tool_call, external_lookup_counts)
-                    for tool_call in batch
-                )))
+                tool_results.extend(
+                    await asyncio.gather(
+                        *(
+                            self._run_tool(spec, tool_call, external_lookup_counts)
+                            for tool_call in batch
+                        )
+                    )
+                )
             else:
                 for tool_call in batch:
-                    tool_results.append(await self._run_tool(spec, tool_call, external_lookup_counts))
+                    tool_results.append(
+                        await self._run_tool(spec, tool_call, external_lookup_counts)
+                    )
 
         results: list[Any] = []
         events: list[dict[str, str]] = []
@@ -407,7 +428,11 @@ class AgentRunner:
                 "status": "error",
                 "detail": prep_error.split(": ", 1)[-1][:120],
             }
-            return prep_error + _HINT, event, RuntimeError(prep_error) if spec.fail_on_tool_error else None
+            return (
+                prep_error + _HINT,
+                event,
+                RuntimeError(prep_error) if spec.fail_on_tool_error else None,
+            )
         try:
             if tool is not None:
                 result = await tool.execute(**params)
@@ -524,9 +549,13 @@ class AgentRunner:
         if not messages or not spec.context_window_tokens:
             return messages
 
-        provider_max_tokens = getattr(getattr(self.provider, "generation", None), "max_tokens", 4096)
-        max_output = spec.max_tokens if isinstance(spec.max_tokens, int) else (
-            provider_max_tokens if isinstance(provider_max_tokens, int) else 4096
+        provider_max_tokens = getattr(
+            getattr(self.provider, "generation", None), "max_tokens", 4096
+        )
+        max_output = (
+            spec.max_tokens
+            if isinstance(spec.max_tokens, int)
+            else (provider_max_tokens if isinstance(provider_max_tokens, int) else 4096)
         )
         budget = spec.context_block_limit or (
             spec.context_window_tokens - max_output - _SNIP_SAFETY_BUFFER
@@ -567,7 +596,7 @@ class AgentRunner:
                 if message.get("role") == "user":
                     user_idx = i
                     break
-            
+
             if user_idx is not None:
                 # Start from first user message
                 kept = kept[user_idx:]
@@ -576,30 +605,20 @@ class AgentRunner:
                 if start and start < len(kept):
                     kept = kept[start:]
             else:
-                # No user message in kept - this means we only have tool results
-                # We need to keep a valid message chain: user -> assistant -> tool_results
+                # No user message in kept. Keep a legal suffix from the kept slice
+                # instead of resurrecting stale tool chains from trimmed history.
                 logger.warning(
-                    "History snip would remove all user messages; keeping last valid chain"
+                    "History snip would remove all user messages; keeping last legal suffix"
                 )
-                # Find the last user message and following assistant with tool_calls
-                for i in range(len(non_system) - 1, -1, -1):
-                    if non_system[i].get("role") == "user":
-                        # Found user, rebuild from here
-                        kept = []
-                        for j in range(i, len(non_system)):
-                            kept.append(non_system[j])
-                        break
-                
-                # Verify the rebuilt chain has a user message
-                has_user = any(m.get("role") == "user" for m in kept)
-                if not has_user:
-                    # Fallback: just use the last few messages from non_system
-                    logger.warning("Could not rebuild valid chain, using last 4 messages")
-                    kept = non_system[-min(len(non_system), 4):]
+                start = find_legal_message_start(kept)
+                if start is not None and start < len(kept):
+                    kept = kept[start:]
+                else:
+                    kept = kept[-1:] if kept else []
         else:
             # Nothing kept, use last few messages
-            kept = non_system[-min(len(non_system), 4):]
-        
+            kept = non_system[-min(len(non_system), 4) :]
+
         return system_messages + kept
 
     def _partition_tool_batches(
@@ -626,4 +645,3 @@ class AgentRunner:
         if current:
             batches.append(current)
         return batches
-
