@@ -23,6 +23,8 @@ from pydantic import Field
 
 import importlib.util
 
+from lark_oapi.core.const import FEISHU_DOMAIN, LARK_DOMAIN
+
 FEISHU_AVAILABLE = importlib.util.find_spec("lark_oapi") is not None
 
 # Message type display mapping
@@ -320,9 +322,11 @@ class FeishuChannel(BaseChannel):
         self._loop = asyncio.get_running_loop()
 
         # Create Lark client for sending messages
+        domain = LARK_DOMAIN
         self._client = lark.Client.builder() \
             .app_id(self.config.app_id) \
             .app_secret(self.config.app_secret) \
+            .domain(domain) \
             .log_level(lark.LogLevel.INFO) \
             .build()
         builder = lark.EventDispatcherHandler.builder(
@@ -348,6 +352,7 @@ class FeishuChannel(BaseChannel):
         self._ws_client = lark.ws.Client(
             self.config.app_id,
             self.config.app_secret,
+            domain=domain,
             event_handler=event_handler,
             log_level=lark.LogLevel.INFO
         )
