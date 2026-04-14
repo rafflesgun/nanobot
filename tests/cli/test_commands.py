@@ -573,6 +573,47 @@ def test_agent_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: Pa
     assert seen["cron_store"] == config.workspace_path / "cron" / "jobs.json"
 
 
+def test_agent_passes_configured_fallback_models_to_loop(monkeypatch, tmp_path: Path) -> None:
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    config = Config()
+    config.agents.defaults.fallback_models = ["fallback-a", "fallback-b"]
+    seen: dict[str, object] = {}
+
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
+    monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
+
+    class _FakeCron:
+        def __init__(self, _store_path: Path) -> None:
+            return None
+
+    class _FakeAgentLoop:
+        def __init__(self, *args, **kwargs) -> None:
+            seen["fallback_models"] = kwargs.get("fallback_models")
+
+        async def process_direct(self, *_args, **_kwargs):
+            return OutboundMessage(channel="cli", chat_id="direct", content="ok")
+
+        async def close_mcp(self) -> None:
+            return None
+
+    monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
+    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr(
+        "nanobot.cli.commands._print_agent_response", lambda *_args, **_kwargs: None
+    )
+
+    result = runner.invoke(app, ["agent", "-m", "hello", "-c", str(config_file)])
+
+    assert result.exit_code == 0
+    assert seen["fallback_models"] == ["fallback-a", "fallback-b"]
+
+
 def test_agent_workspace_override_does_not_migrate_legacy_cron(monkeypatch, tmp_path: Path) -> None:
     config_file = tmp_path / "instance" / "config.json"
     config_file.parent.mkdir(parents=True)
@@ -987,6 +1028,54 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
             content="Time to stretch.",
         )
     )
+
+
+def test_gateway_passes_configured_fallback_models_to_loop(monkeypatch, tmp_path: Path) -> None:
+    config_file = _write_instance_config(tmp_path)
+    config = Config()
+    config.agents.defaults.fallback_models = ["fallback-a", "fallback-b"]
+    seen: dict[str, object] = {}
+
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
+    monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
+    monkeypatch.setattr("nanobot.session.manager.SessionManager", lambda _workspace: object())
+
+    class _FakeCron:
+        def __init__(self, _store_path: Path) -> None:
+            self.on_job = None
+
+    class _FakeAgentLoop:
+        def __init__(self, *args, **kwargs) -> None:
+            seen["fallback_models"] = kwargs.get("fallback_models")
+            self.model = "test-model"
+            self.tools = {}
+            self.dream = MagicMock()
+            self.dream.run = AsyncMock()
+
+        async def close_mcp(self) -> None:
+            return None
+
+        async def run(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+    class _StopAfterCronSetup:
+        def __init__(self, *_args, **_kwargs) -> None:
+            raise _StopGatewayError("stop")
+
+    monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
+    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _StopAfterCronSetup)
+
+    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+
+    assert isinstance(result.exception, _StopGatewayError)
+    assert seen["fallback_models"] == ["fallback-a", "fallback-b"]
 
 
 def test_gateway_cron_delivery_preserves_telegram_thread_id(monkeypatch, tmp_path: Path) -> None:

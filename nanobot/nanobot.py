@@ -58,9 +58,7 @@ class Nanobot:
 
         config: Config = resolve_config_env_vars(load_config(resolved))
         if workspace is not None:
-            config.agents.defaults.workspace = str(
-                Path(workspace).expanduser().resolve()
-            )
+            config.agents.defaults.workspace = str(Path(workspace).expanduser().resolve())
 
         provider = _make_provider(config)
         bus = MessageBus()
@@ -71,6 +69,7 @@ class Nanobot:
             provider=provider,
             workspace=config.workspace_path,
             model=defaults.model,
+            fallback_models=defaults.fallback_models,
             max_iterations=defaults.max_tool_iterations,
             context_window_tokens=defaults.context_window_tokens,
             context_block_limit=defaults.context_block_limit,
@@ -107,7 +106,8 @@ class Nanobot:
             self._loop._extra_hooks = list(hooks)
         try:
             response = await self._loop.process_direct(
-                message, session_key=session_key,
+                message,
+                session_key=session_key,
             )
         finally:
             self._loop._extra_hooks = prev
@@ -147,9 +147,7 @@ def _make_provider(config: Any) -> Any:
     elif backend == "azure_openai":
         from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 
-        provider = AzureOpenAIProvider(
-            api_key=p.api_key, api_base=p.api_base, default_model=model
-        )
+        provider = AzureOpenAIProvider(api_key=p.api_key, api_base=p.api_base, default_model=model)
     elif backend == "anthropic":
         from nanobot.providers.anthropic_provider import AnthropicProvider
 
