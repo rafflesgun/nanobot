@@ -41,8 +41,8 @@ async def test_ack_reaction_with_thread():
     await channel._add_ack_reaction(chat_id=123456, message_id=789)
 
     call_args = channel._app.bot.set_message_reaction.call_args
-    assert call_args.kwargs.get('chat_id') == 123456
-    assert call_args.kwargs.get('message_id') == 789
+    assert call_args.kwargs.get("chat_id") == 123456
+    assert call_args.kwargs.get("message_id") == 789
 
 
 @pytest.mark.asyncio
@@ -59,7 +59,7 @@ async def test_ack_reaction_error_handling():
     channel._app.bot.set_message_reaction = AsyncMock(side_effect=Exception("API Error"))
 
     await channel._add_ack_reaction(chat_id=123456, message_id=789)
-    
+
     channel._app.bot.set_message_reaction.assert_called_once()
 
 
@@ -67,7 +67,12 @@ async def test_ack_reaction_error_handling():
 async def test_ack_reaction_disabled_when_empty_list():
     """Empty react_emoji list should disable ACK reaction."""
     channel = TelegramChannel(
-        config={"group_policy": "mention", "token": "fake_token", "allowFrom": ["*"], "react_emoji": []},
+        config={
+            "group_policy": "mention",
+            "token": "fake_token",
+            "allowFrom": ["*"],
+            "react_emoji": [],
+        },
         bus=AsyncMock(),
     )
     channel._app = AsyncMock()
@@ -83,7 +88,12 @@ async def test_ack_reaction_disabled_when_empty_list():
 async def test_ack_reaction_disabled_when_empty_string():
     """Empty react_emoji string should disable ACK reaction."""
     channel = TelegramChannel(
-        config={"group_policy": "mention", "token": "fake_token", "allowFrom": ["*"], "react_emoji": ""},
+        config={
+            "group_policy": "mention",
+            "token": "fake_token",
+            "allowFrom": ["*"],
+            "react_emoji": "",
+        },
         bus=AsyncMock(),
     )
     channel._app = AsyncMock()
@@ -99,7 +109,12 @@ async def test_ack_reaction_disabled_when_empty_string():
 async def test_ack_reaction_single_emoji():
     """Single emoji in list should always use that emoji."""
     channel = TelegramChannel(
-        config={"group_policy": "mention", "token": "fake_token", "allowFrom": ["*"], "react_emoji": ["🔥"]},
+        config={
+            "group_policy": "mention",
+            "token": "fake_token",
+            "allowFrom": ["*"],
+            "react_emoji": ["🔥"],
+        },
         bus=AsyncMock(),
     )
     channel._app = AsyncMock()
@@ -109,7 +124,7 @@ async def test_ack_reaction_single_emoji():
     await channel._add_ack_reaction(chat_id=123456, message_id=789)
 
     call_args = channel._app.bot.set_message_reaction.call_args
-    reaction = call_args.kwargs.get('reaction')
+    reaction = call_args.kwargs.get("reaction")
     assert reaction is not None
     assert reaction[0].emoji == "🔥"
 
@@ -119,7 +134,12 @@ async def test_ack_reaction_random_from_list():
     """Multiple emojis should pick randomly from the list."""
     emojis = ["⚡️", "👌", "👀"]
     channel = TelegramChannel(
-        config={"group_policy": "mention", "token": "fake_token", "allowFrom": ["*"], "react_emoji": emojis},
+        config={
+            "group_policy": "mention",
+            "token": "fake_token",
+            "allowFrom": ["*"],
+            "react_emoji": emojis,
+        },
         bus=AsyncMock(),
     )
     channel._app = AsyncMock()
@@ -129,7 +149,34 @@ async def test_ack_reaction_random_from_list():
     await channel._add_ack_reaction(chat_id=123456, message_id=789)
 
     call_args = channel._app.bot.set_message_reaction.call_args
-    reaction = call_args.kwargs.get('reaction')
+    reaction = call_args.kwargs.get("reaction")
+    assert reaction is not None
+    assert reaction[0].emoji in emojis
+
+
+@pytest.mark.asyncio
+async def test_add_reaction_random_from_list():
+    """Generic reaction path should normalize list config to a single emoji."""
+    emojis = ["⚡️", "👌", "👀"]
+    channel = TelegramChannel(
+        config={
+            "group_policy": "mention",
+            "token": "fake_token",
+            "allowFrom": ["*"],
+            "react_emoji": emojis,
+        },
+        bus=AsyncMock(),
+    )
+    channel._app = AsyncMock()
+    channel._app.bot = AsyncMock()
+    channel._app.bot.set_message_reaction = AsyncMock()
+
+    await channel._add_reaction(chat_id="123456", message_id=789, emoji=channel.config.react_emoji)
+
+    call_args = channel._app.bot.set_message_reaction.call_args
+    assert call_args.kwargs.get("chat_id") == 123456
+    assert call_args.kwargs.get("message_id") == 789
+    reaction = call_args.kwargs.get("reaction")
     assert reaction is not None
     assert reaction[0].emoji in emojis
 
@@ -192,7 +239,7 @@ async def test_typing_indicator_stopped():
 
     # Stop typing
     channel._stop_typing(comp_key="123:private")
-    
+
     # Task should be removed
     assert "123:private" not in channel._typing_tasks
     # Note: We can't test send_chat_action.called since it's in a background loop
@@ -214,11 +261,11 @@ async def test_typing_indicator_multiple_chats():
     # Start typing for two different chats
     channel._start_typing(comp_key="123:private", thread_id=None)
     channel._start_typing(comp_key="456:private", thread_id=None)
-    
+
     assert "123:private" in channel._typing_tasks
     assert "456:private" in channel._typing_tasks
     assert len(channel._typing_tasks) == 2
-    
+
     # Stop one chat
     channel._stop_typing(comp_key="123:private")
     assert "123:private" not in channel._typing_tasks
@@ -241,12 +288,12 @@ async def test_typing_indicator_cancelled_task():
     # Start typing
     channel._start_typing(comp_key="123:private", thread_id=None)
     task = channel._typing_tasks["123:private"]
-    
+
     # Cancel the task
     task.cancel()
-    
+
     # Give asyncio a chance to process the cancellation
     await asyncio.sleep(0)
-    
+
     # Check that task is cancelled
     assert task.cancelled() or task.done()

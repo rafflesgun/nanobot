@@ -1911,15 +1911,23 @@ class TelegramChannel(BaseChannel):
         if task and not task.done():
             task.cancel()
 
-    async def _add_reaction(self, chat_id: str, message_id: int, emoji: str) -> None:
+    async def _add_reaction(self, chat_id: str, message_id: int, emoji: str | list[str]) -> None:
         """Add emoji reaction to a message (best-effort, non-blocking)."""
         if not self._app or not emoji:
+            return
+
+        if isinstance(emoji, list):
+            emoji = next((item for item in emoji if isinstance(item, str) and item), "")
+        elif not isinstance(emoji, str):
+            emoji = ""
+
+        if not emoji:
             return
         try:
             await self._app.bot.set_message_reaction(
                 chat_id=int(chat_id),
                 message_id=message_id,
-                reaction=[ReactionTypeEmoji(emoji=emoji)],
+                reaction=[ReactionTypeEmoji(emoji)],
             )
         except Exception as e:
             logger.debug("Telegram reaction failed: {}", e)
