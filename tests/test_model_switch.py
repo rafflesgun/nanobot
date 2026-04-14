@@ -33,16 +33,16 @@ async def test_model_show_current():
             workspace=Path("/tmp/test"),
             model="gpt-4o",
         )
-    
+
     # Test the _handle_model_command method directly
     msg = AsyncMock()
     msg.channel = "telegram"
     msg.chat_id = "123"
     msg.metadata = {}
-    
+
     with patch("nanobot.agent.loop.save_model_overrides"):
         response = loop._handle_model_command(msg, "test:session", "/model")
-    
+
     assert "Current model: `gpt-4o`" in response.content
     assert "session override" not in response.content  # Should not be an override
 
@@ -61,7 +61,7 @@ async def test_model_switch_and_use():
             workspace=Path("/tmp/test"),
             model="gpt-4o",
         )
-    
+
     session_key = "test:session"
 
     # Switch model using the internal method
@@ -69,14 +69,14 @@ async def test_model_switch_and_use():
     msg.channel = "telegram"
     msg.chat_id = "123"
     msg.metadata = {}
-    
+
     with patch("nanobot.agent.loop.save_model_overrides"):
         loop._handle_model_command(msg, session_key, "/model claude-3.5-sonnet")
 
     assert loop._model_overrides[session_key] == "claude-3.5-sonnet"
 
     # Verify that _run_agent_loop uses the override
-    final_content, tools_used, all_msgs = await loop._run_agent_loop(
+    final_content, tools_used, all_msgs, _, _ = await loop._run_agent_loop(
         [{"role": "user", "content": "hello"}],
         model_override=loop._model_overrides.get(session_key),
     )
@@ -84,7 +84,7 @@ async def test_model_switch_and_use():
     # Check that provider.chat_with_retry was called with the overridden model
     assert provider.chat_with_retry.called
     call_args = provider.chat_with_retry.call_args
-    assert call_args.kwargs['model'] == "claude-3.5-sonnet"
+    assert call_args.kwargs["model"] == "claude-3.5-sonnet"
 
 
 @pytest.mark.asyncio
@@ -101,7 +101,7 @@ async def test_model_revert_to_default():
             workspace=Path("/tmp/test"),
             model="gpt-4o",
         )
-    
+
     session_key = "test:session"
 
     # Set override
@@ -112,7 +112,7 @@ async def test_model_revert_to_default():
     msg.channel = "telegram"
     msg.chat_id = "123"
     msg.metadata = {}
-    
+
     with patch("nanobot.agent.loop.save_model_overrides"):
         loop._handle_model_command(msg, session_key, "/model reset")
 
@@ -133,7 +133,7 @@ async def test_model_override_with_backticks():
             workspace=Path("/tmp/test"),
             model="gpt-4o",
         )
-    
+
     session_key = "test:session"
 
     # Switch model using backticks
@@ -141,7 +141,7 @@ async def test_model_override_with_backticks():
     msg.channel = "telegram"
     msg.chat_id = "123"
     msg.metadata = {}
-    
+
     with patch("nanobot.agent.loop.save_model_overrides"):
         loop._handle_model_command(msg, session_key, "/model `claude-3.5-sonnet`")
 
@@ -162,7 +162,7 @@ async def test_model_override_in_process_message():
             workspace=Path("/tmp/test"),
             model="gpt-4o",
         )
-    
+
     # Simulate processing a /model command message
     msg = AsyncMock()
     msg.channel = "telegram"
@@ -170,12 +170,12 @@ async def test_model_override_in_process_message():
     msg.chat_id = "123"
     msg.content = "/model gpt-4-turbo"
     msg.metadata = {}
-    
+
     # This should trigger the model command handling logic
     # We'll test the actual _process_message flow
     with patch("nanobot.agent.loop.save_model_overrides"):
         response = await loop._process_message(msg, session_key="test:session")
-    
+
     # The response should contain confirmation of the model switch
     assert response is not None
     assert "Model switched to" in response.content
@@ -219,7 +219,7 @@ async def test_fallback_models_on_error():
     msg.content = "Hello"
     msg.metadata = {}
 
-    final_content, tools_used, all_msgs = await loop._run_agent_loop(
+    final_content, tools_used, all_msgs, _, _ = await loop._run_agent_loop(
         [{"role": "user", "content": "hello"}],
     )
 
@@ -254,7 +254,7 @@ async def test_no_fallback_on_user_abort():
             fallback_models=["fallback-model"],
         )
 
-    final_content, tools_used, all_msgs = await loop._run_agent_loop(
+    final_content, tools_used, all_msgs, _, _ = await loop._run_agent_loop(
         [{"role": "user", "content": "hello"}],
     )
 
@@ -290,16 +290,19 @@ async def test_model_override_in_system_message():
     msg.metadata = {}
 
     # Process the system message
-    with patch.object(loop, "_save_turn"), \
-         patch.object(loop, "_clear_runtime_checkpoint"), \
-         patch.object(loop.sessions, "save"):
+    with (
+        patch.object(loop, "_save_turn"),
+        patch.object(loop, "_clear_runtime_checkpoint"),
+        patch.object(loop.sessions, "save"),
+    ):
         await loop._process_message(msg)
 
     # Verify that provider was called with the overridden model
     assert provider.chat_with_retry.called
     call_args = provider.chat_with_retry.call_args
-    assert call_args.kwargs['model'] == "claude-3.5-sonnet", \
+    assert call_args.kwargs["model"] == "claude-3.5-sonnet", (
         "System message should use model override for the session"
+    )
 
 
 # =============================================================================
@@ -313,8 +316,10 @@ async def test_temp_show_current():
     bus = AsyncMock()
     provider = _make_mock_provider()
 
-    with patch("nanobot.agent.loop.load_model_overrides", return_value={}), \
-         patch("nanobot.agent.loop.load_temperature_overrides", return_value={}):
+    with (
+        patch("nanobot.agent.loop.load_model_overrides", return_value={}),
+        patch("nanobot.agent.loop.load_temperature_overrides", return_value={}),
+    ):
         loop = AgentLoop(
             bus=bus,
             provider=provider,
@@ -341,8 +346,10 @@ async def test_temp_set_and_use():
     bus = AsyncMock()
     provider = _make_mock_provider()
 
-    with patch("nanobot.agent.loop.load_model_overrides", return_value={}), \
-         patch("nanobot.agent.loop.load_temperature_overrides", return_value={}):
+    with (
+        patch("nanobot.agent.loop.load_model_overrides", return_value={}),
+        patch("nanobot.agent.loop.load_temperature_overrides", return_value={}),
+    ):
         loop = AgentLoop(
             bus=bus,
             provider=provider,
@@ -365,7 +372,7 @@ async def test_temp_set_and_use():
     assert "Temperature set to `0.5`" in response.content
 
     # Verify that _run_agent_loop uses the temperature override
-    final_content, tools_used, all_msgs = await loop._run_agent_loop(
+    final_content, tools_used, all_msgs, _, _ = await loop._run_agent_loop(
         [{"role": "user", "content": "hello"}],
         temperature_override=loop._temperature_overrides.get(session_key),
     )
@@ -373,7 +380,7 @@ async def test_temp_set_and_use():
     # Check that provider.chat_with_retry was called with the temperature
     assert provider.chat_with_retry.called
     call_args = provider.chat_with_retry.call_args
-    assert call_args.kwargs.get('temperature') == 0.5
+    assert call_args.kwargs.get("temperature") == 0.5
 
 
 @pytest.mark.asyncio
@@ -382,8 +389,10 @@ async def test_temp_revert_to_default():
     bus = AsyncMock()
     provider = _make_mock_provider()
 
-    with patch("nanobot.agent.loop.load_model_overrides", return_value={}), \
-         patch("nanobot.agent.loop.load_temperature_overrides", return_value={}):
+    with (
+        patch("nanobot.agent.loop.load_model_overrides", return_value={}),
+        patch("nanobot.agent.loop.load_temperature_overrides", return_value={}),
+    ):
         loop = AgentLoop(
             bus=bus,
             provider=provider,
@@ -415,8 +424,10 @@ async def test_temp_invalid_value():
     bus = AsyncMock()
     provider = _make_mock_provider()
 
-    with patch("nanobot.agent.loop.load_model_overrides", return_value={}), \
-         patch("nanobot.agent.loop.load_temperature_overrides", return_value={}):
+    with (
+        patch("nanobot.agent.loop.load_model_overrides", return_value={}),
+        patch("nanobot.agent.loop.load_temperature_overrides", return_value={}),
+    ):
         loop = AgentLoop(
             bus=bus,
             provider=provider,
@@ -442,8 +453,10 @@ async def test_temp_invalid_format():
     bus = AsyncMock()
     provider = _make_mock_provider()
 
-    with patch("nanobot.agent.loop.load_model_overrides", return_value={}), \
-         patch("nanobot.agent.loop.load_temperature_overrides", return_value={}):
+    with (
+        patch("nanobot.agent.loop.load_model_overrides", return_value={}),
+        patch("nanobot.agent.loop.load_temperature_overrides", return_value={}),
+    ):
         loop = AgentLoop(
             bus=bus,
             provider=provider,
@@ -468,8 +481,10 @@ async def test_temp_shows_override_status():
     bus = AsyncMock()
     provider = _make_mock_provider()
 
-    with patch("nanobot.agent.loop.load_model_overrides", return_value={}), \
-         patch("nanobot.agent.loop.load_temperature_overrides", return_value={}):
+    with (
+        patch("nanobot.agent.loop.load_model_overrides", return_value={}),
+        patch("nanobot.agent.loop.load_temperature_overrides", return_value={}),
+    ):
         loop = AgentLoop(
             bus=bus,
             provider=provider,
@@ -498,8 +513,10 @@ async def test_temp_persists_across_sessions():
     bus = AsyncMock()
     provider = _make_mock_provider()
 
-    with patch("nanobot.agent.loop.load_model_overrides", return_value={}), \
-         patch("nanobot.agent.loop.load_temperature_overrides", return_value={}):
+    with (
+        patch("nanobot.agent.loop.load_model_overrides", return_value={}),
+        patch("nanobot.agent.loop.load_temperature_overrides", return_value={}),
+    ):
         loop = AgentLoop(
             bus=bus,
             provider=provider,
@@ -516,6 +533,7 @@ async def test_temp_persists_across_sessions():
     msg.content = "/model temp 0.7"
 
     saved_overrides = {}
+
     def mock_save(overrides):
         saved_overrides.update(overrides)
 

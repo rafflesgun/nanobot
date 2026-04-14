@@ -20,7 +20,7 @@ try:
     HAS_REACTION_TYPE = True
 except ImportError:
     HAS_REACTION_TYPE = False
-from telegram.error import TimedOut
+from telegram.error import BadRequest, NetworkError, TimedOut
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
@@ -665,6 +665,10 @@ class TelegramChannel(BaseChannel):
                 )
                 await asyncio.sleep(delay)
 
+    @staticmethod
+    def _is_not_modified_error(exc: Exception) -> bool:
+        return isinstance(exc, BadRequest) and "message is not modified" in str(exc).lower()
+
     async def _send_text(
         self,
         chat_id: int,
@@ -683,7 +687,7 @@ class TelegramChannel(BaseChannel):
                 reply_parameters=reply_params,
                 **(thread_kwargs or {}),
             )
-        except Exception as e:
+        except BadRequest as e:
             logger.warning("HTML parse failed, falling back to plain text: {}", e)
             try:
                 await self._call_with_retry(
@@ -835,26 +839,24 @@ class TelegramChannel(BaseChannel):
                     text=edit_text,
                     parse_mode="HTML",
                 )
-            except Exception as e:
-                if e.__class__.__name__ == "BadRequest" and "not modified" in str(e).lower():
+            except BadRequest as e:
+                if self._is_not_modified_error(e):
+                    logger.debug("Final stream edit already applied for {}", chat_id)
                     self._stream_bufs.pop(comp_key, None)
-                else:
-                    logger.debug("Final stream edit failed (HTML), trying plain: {}", e)
-                    try:
-                        await self._call_with_retry(
-                            self._app.bot.edit_message_text,
-                            chat_id=int_chat_id,
-                            message_id=buf.message_id,
-                            text=buf.text[:TELEGRAM_MAX_MESSAGE_LEN],
-                        )
-                    except Exception as e2:
-                        if (
-                            e2.__class__.__name__ == "BadRequest"
-                            and "not modified" in str(e2).lower()
-                        ):
-                            self._stream_bufs.pop(comp_key, None)
-                        else:
-                            raise
+                    return
+                logger.debug("Final stream edit failed (HTML), trying plain: {}", e)
+                try:
+                    await self._call_with_retry(
+                        self._app.bot.edit_message_text,
+                        chat_id=int_chat_id,
+                        message_id=buf.message_id,
+                        text=buf.text[:TELEGRAM_MAX_MESSAGE_LEN],
+                    )
+                except Exception as e2:
+                    if self._is_not_modified_error(e2):
+                        logger.debug("Final stream plain edit already applied for {}", chat_id)
+                    else:
+                        raise
             if len(buf.text) > TELEGRAM_MAX_MESSAGE_LEN:
                 for chunk in split_message(
                     buf.text[TELEGRAM_MAX_MESSAGE_LEN:], TELEGRAM_MAX_MESSAGE_LEN

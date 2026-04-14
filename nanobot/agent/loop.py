@@ -14,10 +14,12 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 
+from nanobot.agent.autocompact import AutoCompact
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.hook import AgentHook, AgentHookContext, CompositeHook
 from nanobot.agent.memory import Consolidator, Dream
-from nanobot.agent.runner import AgentRunSpec, AgentRunner
+from nanobot.agent.runner import _PERSISTED_MODEL_ERROR_PLACEHOLDER
+from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunSpec, AgentRunner
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
@@ -40,7 +42,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
-from nanobot.utils.helpers import image_placeholder_text, truncate_text
+from nanobot.utils.helpers import image_placeholder_text, truncate_text as truncate_text_fn
 from nanobot.utils.runtime import (
     EMPTY_FINAL_RESPONSE_MESSAGE,
     format_provider_error,
@@ -180,6 +182,7 @@ class AgentLoop:
     """
 
     _RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
+    _PENDING_USER_TURN_KEY = "pending_user_turn"
 
     def __init__(
         self,
@@ -200,9 +203,11 @@ class AgentLoop:
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
+        session_ttl_minutes: int = 0,
         hooks: list[AgentHook] | None = None,
         fallback_models: list[str] | None = None,
         unified_session: bool = False,
+        disabled_skills: list[str] | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebToolsConfig
 
@@ -240,7 +245,7 @@ class AgentLoop:
         self._extra_hooks: list[AgentHook] = hooks or []
         self.stats_manager = StatsManager(workspace)
 
-        self.context = ContextBuilder(workspace, timezone=timezone)
+        self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.runner = AgentRunner(provider)
@@ -253,16 +258,19 @@ class AgentLoop:
             max_tool_result_chars=self.max_tool_result_chars,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
+            disabled_skills=disabled_skills,
         )
         self._unified_session = unified_session
         self._running = False
         self._mcp_servers = mcp_servers or {}
-        self._mcp_stack: AsyncExitStack | None = None
+        self._mcp_stacks: dict[str, AsyncExitStack] = {}
         self._mcp_connected = False
         self._mcp_connecting = False
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._background_tasks: list[asyncio.Task] = []
         self._session_locks: dict[str, asyncio.Lock] = {}
+        # Per-session pending queues for mid-turn message injection.
+        self._pending_queues: dict[str, asyncio.Queue] = {}
         # NANOBOT_MAX_CONCURRENT_REQUESTS: <=0 means unlimited; default 3.
         _max = int(os.environ.get("NANOBOT_MAX_CONCURRENT_REQUESTS", "3"))
         self._concurrency_gate: asyncio.Semaphore | None = (
@@ -279,6 +287,11 @@ class AgentLoop:
             max_completion_tokens=provider.generation.max_tokens,
         )
         self.memory_consolidator = self.consolidator
+        self.auto_compact = AutoCompact(
+            sessions=self.sessions,
+            consolidator=self.consolidator,
+            session_ttl_minutes=session_ttl_minutes,
+        )
         self.dream = Dream(
             store=self.context.memory,
             provider=provider,
@@ -311,6 +324,7 @@ class AgentLoop:
                     restrict_to_workspace=self.restrict_to_workspace,
                     sandbox=self.exec_config.sandbox,
                     path_append=self.exec_config.path_append,
+                    allowed_env_keys=self.exec_config.allowed_env_keys,
                 )
             )
         if self.web_config.enable:
@@ -333,18 +347,17 @@ class AgentLoop:
         from nanobot.agent.tools.mcp import connect_mcp_servers
 
         try:
-            self._mcp_stack = AsyncExitStack()
-            await self._mcp_stack.__aenter__()
-            await connect_mcp_servers(self._mcp_servers, self.tools, self._mcp_stack)
-            self._mcp_connected = True
+            self._mcp_stacks = await connect_mcp_servers(self._mcp_servers, self.tools)
+            if self._mcp_stacks:
+                self._mcp_connected = True
+            else:
+                logger.warning("No MCP servers connected successfully (will retry next message)")
+        except asyncio.CancelledError:
+            logger.warning("MCP connection cancelled (will retry next message)")
+            self._mcp_stacks.clear()
         except BaseException as e:
             logger.error("Failed to connect MCP servers (will retry next message): {}", e)
-            if self._mcp_stack:
-                try:
-                    await self._mcp_stack.aclose()
-                except Exception:
-                    pass
-                self._mcp_stack = None
+            self._mcp_stacks.clear()
         finally:
             self._mcp_connecting = False
 
@@ -395,6 +408,12 @@ class AgentLoop:
         from nanobot.utils.tool_hints import format_tool_hints
 
         return format_tool_hints(tool_calls)
+
+    def _effective_session_key(self, msg: InboundMessage) -> str:
+        """Return the session key used for task routing and mid-turn injections."""
+        if self._unified_session and not msg.session_key_override:
+            return UNIFIED_SESSION_KEY
+        return msg.session_key
 
     def _handle_model_command(
         self, msg: InboundMessage, session_key: str, raw_content: str | None = None
@@ -610,6 +629,10 @@ class AgentLoop:
             try:
                 msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
             except asyncio.TimeoutError:
+                self.auto_compact.check_expired(
+                    self._schedule_background,
+                    active_session_keys=self._pending_queues.keys(),
+                )
                 continue
             except asyncio.CancelledError:
                 # Preserve real task cancellation so shutdown can complete cleanly.
@@ -628,13 +651,24 @@ class AgentLoop:
                 if result:
                     await self.bus.publish_outbound(result)
                 continue
-            # Compute the effective session key before dispatching
-            # This ensures /stop command can find tasks correctly when unified session is enabled
-            effective_key = (
-                UNIFIED_SESSION_KEY
-                if self._unified_session and not msg.session_key_override
-                else msg.session_key
-            )
+            effective_key = self._effective_session_key(msg)
+            if effective_key in self._pending_queues:
+                pending_msg = msg
+                if effective_key != msg.session_key:
+                    pending_msg = dataclasses.replace(msg, session_key_override=effective_key)
+                try:
+                    self._pending_queues[effective_key].put_nowait(pending_msg)
+                except asyncio.QueueFull:
+                    logger.warning(
+                        "Pending queue full for session {}, falling back to queued task",
+                        effective_key,
+                    )
+                else:
+                    logger.info(
+                        "Routed follow-up message to pending queue for session {}",
+                        effective_key,
+                    )
+                    continue
             task = asyncio.create_task(self._dispatch(msg))
             self._active_tasks.setdefault(effective_key, []).append(task)
             task.add_done_callback(
@@ -656,11 +690,12 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         message_id: str | None = None,
+        pending_queue: asyncio.Queue | None = None,
         thread_id: int | None = None,
         model_override: str | None = None,
         temperature_override: float | None = None,
         on_turn_saved: Callable[[list[dict]], Awaitable[None]] | None = None,
-    ) -> tuple[str | None, list[str], list[dict]]:
+    ) -> tuple[str | None, list[str], list[dict], str, bool]:
         """Run the agent iteration loop.
 
         *on_stream*: called with each content delta during streaming.
@@ -698,6 +733,32 @@ class AgentLoop:
                 return
             self._set_runtime_checkpoint(session, payload)
 
+        async def _drain_pending(*, limit: int = _MAX_INJECTIONS_PER_TURN) -> list[dict[str, Any]]:
+            if pending_queue is None:
+                return []
+            items: list[dict[str, Any]] = []
+            while len(items) < limit:
+                try:
+                    pending_msg = pending_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                user_content = self.context._build_user_content(
+                    pending_msg.content,
+                    pending_msg.media if pending_msg.media else None,
+                )
+                runtime_ctx = self.context._build_runtime_context(
+                    pending_msg.channel,
+                    pending_msg.chat_id,
+                    self.context.timezone,
+                    thread_id=pending_msg.metadata.get("message_thread_id"),
+                )
+                if isinstance(user_content, str):
+                    merged: str | list[dict[str, Any]] = f"{runtime_ctx}\n\n{user_content}"
+                else:
+                    merged = [{"type": "text", "text": runtime_ctx}] + user_content
+                items.append({"role": "user", "content": merged})
+            return items
+
         # Try with fallback models if configured
         models_to_try = [effective_model] + self._ordered_fallback_models(effective_model)
         last_error: Exception | None = None
@@ -724,6 +785,7 @@ class AgentLoop:
                         checkpoint_callback=_checkpoint,
                         max_repeat_lookups=self.max_repeat_lookups,
                         on_turn_saved=on_turn_saved,
+                        injection_callback=_drain_pending,
                     )
                 )
                 self._last_usage = result.usage
@@ -739,7 +801,13 @@ class AgentLoop:
                     logger.warning("Max iterations ({}) reached", self.max_iterations)
                 elif result.stop_reason == "error":
                     logger.error("LLM returned error: {}", (result.final_content or "")[:200])
-                return result.final_content, result.tools_used, result.messages
+                return (
+                    result.final_content,
+                    result.tools_used,
+                    result.messages,
+                    result.stop_reason,
+                    result.had_injections,
+                )
 
             except Exception as e:
                 last_error = e
@@ -755,14 +823,20 @@ class AgentLoop:
                         str(e)[:100],
                     )
                     continue
-                else:
-                    # Non-fallback error or last model exhausted
-                    if is_fallback_eligible:
-                        logger.error("All fallback models exhausted, last error: {}", str(e)[:200])
-                    raise
+                if is_fallback_eligible:
+                    logger.error("All fallback models exhausted, last error: {}", str(e)[:200])
+                    messages = list(initial_messages)
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": _PERSISTED_MODEL_ERROR_PLACEHOLDER,
+                        }
+                    )
+                    return str(e), [], messages, "error", False
+                raise
 
         # Should not reach here, but return error if it does
-        return str(last_error) if last_error else "Unknown error", [], []
+        return str(last_error) if last_error else "Unknown error", [], [], "error", False
 
     @staticmethod
     def _is_fallback_eligible_error_str(error_msg: str) -> bool:
@@ -789,133 +863,118 @@ class AgentLoop:
             or "bad_response_status_code" in error_msg
         )
 
-    async def run(self) -> None:
-        """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
-        self._running = True
-        await self._connect_mcp()
-        logger.info("Agent loop started")
-
-        while self._running:
-            try:
-                msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
-            except asyncio.TimeoutError:
-                continue
-            except asyncio.CancelledError:
-                # Preserve real task cancellation so shutdown can complete cleanly.
-                # Only ignore non-task CancelledError signals that may leak from integrations.
-                if not self._running or asyncio.current_task().cancelling():
-                    raise
-                continue
-            except Exception as e:
-                logger.warning("Error consuming inbound message: {}, continuing...", e)
-                continue
-
-            raw = msg.content.strip()
-            if self.commands.is_priority(raw):
-                ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw=raw, loop=self)
-                result = await self.commands.dispatch_priority(ctx)
-                if result:
-                    await self.bus.publish_outbound(result)
-                continue
-            task = asyncio.create_task(self._dispatch(msg))
-            self._active_tasks.setdefault(msg.session_key, []).append(task)
-            task.add_done_callback(
-                lambda t, k=msg.session_key: (
-                    self._active_tasks.get(k, []) and self._active_tasks[k].remove(t)
-                    if t in self._active_tasks.get(k, [])
-                    else None
-                )
-            )
-
     async def _dispatch(self, msg: InboundMessage) -> None:
         """Process a message: per-session serial, cross-session concurrent."""
-        if self._unified_session and not msg.session_key_override:
-            msg = dataclasses.replace(msg, session_key_override=UNIFIED_SESSION_KEY)
-        lock = self._session_locks.setdefault(msg.session_key, asyncio.Lock())
+        session_key = self._effective_session_key(msg)
+        if session_key != msg.session_key:
+            msg = dataclasses.replace(msg, session_key_override=session_key)
+        lock = self._session_locks.setdefault(session_key, asyncio.Lock())
         gate = self._concurrency_gate or nullcontext()
-        async with lock, gate:
-            try:
-                on_stream = on_stream_end = None
-                if msg.metadata.get("_wants_stream"):
-                    # Split one answer into distinct stream segments.
-                    stream_base_id = f"{msg.session_key}:{time.time_ns()}"
-                    stream_segment = 0
+        pending = asyncio.Queue(maxsize=20)
+        self._pending_queues[session_key] = pending
+        try:
+            async with lock, gate:
+                try:
+                    on_stream = on_stream_end = None
+                    if msg.metadata.get("_wants_stream"):
+                        stream_base_id = f"{msg.session_key}:{time.time_ns()}"
+                        stream_segment = 0
 
-                    def _current_stream_id() -> str:
-                        return f"{stream_base_id}:{stream_segment}"
+                        def _current_stream_id() -> str:
+                            return f"{stream_base_id}:{stream_segment}"
 
-                    async def on_stream(delta: str) -> None:
-                        meta = dict(msg.metadata or {})
-                        meta["_stream_delta"] = True
-                        meta["_stream_id"] = _current_stream_id()
-                        await self.bus.publish_outbound(
-                            OutboundMessage(
-                                channel=msg.channel,
-                                chat_id=msg.chat_id,
-                                content=delta,
-                                metadata=meta,
+                        async def on_stream(delta: str) -> None:
+                            meta = dict(msg.metadata or {})
+                            meta["_stream_delta"] = True
+                            meta["_stream_id"] = _current_stream_id()
+                            await self.bus.publish_outbound(
+                                OutboundMessage(
+                                    channel=msg.channel,
+                                    chat_id=msg.chat_id,
+                                    content=delta,
+                                    metadata=meta,
+                                )
                             )
-                        )
 
-                    async def on_stream_end(*, resuming: bool = False) -> None:
-                        nonlocal stream_segment
-                        meta = dict(msg.metadata or {})
-                        meta["_stream_end"] = True
-                        meta["_resuming"] = resuming
-                        meta["_stream_id"] = _current_stream_id()
+                        async def on_stream_end(*, resuming: bool = False) -> None:
+                            nonlocal stream_segment
+                            meta = dict(msg.metadata or {})
+                            meta["_stream_end"] = True
+                            meta["_resuming"] = resuming
+                            meta["_stream_id"] = _current_stream_id()
+                            await self.bus.publish_outbound(
+                                OutboundMessage(
+                                    channel=msg.channel,
+                                    chat_id=msg.chat_id,
+                                    content="",
+                                    metadata=meta,
+                                )
+                            )
+                            stream_segment += 1
+
+                    response = await self._process_message(
+                        msg,
+                        on_stream=on_stream,
+                        on_stream_end=on_stream_end,
+                        pending_queue=pending,
+                    )
+                    if response is not None:
+                        logger.debug(
+                            "Publishing response to {}/{}", response.channel, response.chat_id
+                        )
+                        await self.bus.publish_outbound(response)
+                    elif msg.channel == "cli":
                         await self.bus.publish_outbound(
                             OutboundMessage(
                                 channel=msg.channel,
                                 chat_id=msg.chat_id,
                                 content="",
-                                metadata=meta,
+                                metadata=msg.metadata or {},
                             )
                         )
-                        stream_segment += 1
-
-                response = await self._process_message(
-                    msg,
-                    on_stream=on_stream,
-                    on_stream_end=on_stream_end,
-                )
-                if response is not None:
-                    logger.debug("Publishing response to {}/{}", response.channel, response.chat_id)
-                    await self.bus.publish_outbound(response)
-                elif msg.channel == "cli":
+                    else:
+                        logger.warning("No response to publish for {}/{}", msg.channel, msg.chat_id)
+                except asyncio.CancelledError:
+                    logger.info("Task cancelled for session {}", session_key)
+                    raise
+                except Exception:
+                    logger.exception("Error processing message for session {}", session_key)
                     await self.bus.publish_outbound(
                         OutboundMessage(
                             channel=msg.channel,
                             chat_id=msg.chat_id,
-                            content="",
-                            metadata=msg.metadata or {},
+                            content="Sorry, I encountered an error.",
                         )
                     )
-                else:
-                    logger.warning("No response to publish for {}/{}", msg.channel, msg.chat_id)
-            except asyncio.CancelledError:
-                logger.info("Task cancelled for session {}", msg.session_key)
-                raise
-            except Exception:
-                logger.exception("Error processing message for session {}", msg.session_key)
-                await self.bus.publish_outbound(
-                    OutboundMessage(
-                        channel=msg.channel,
-                        chat_id=msg.chat_id,
-                        content="Sorry, I encountered an error.",
+        finally:
+            queue = self._pending_queues.pop(session_key, None)
+            if queue is not None:
+                leftover = 0
+                while True:
+                    try:
+                        item = queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+                    await self.bus.publish_inbound(item)
+                    leftover += 1
+                if leftover:
+                    logger.info(
+                        "Re-published {} leftover message(s) to bus for session {}",
+                        leftover,
+                        session_key,
                     )
-                )
 
     async def close_mcp(self) -> None:
         """Drain pending background archives, then close MCP connections."""
         if self._background_tasks:
             await asyncio.gather(*self._background_tasks, return_exceptions=True)
             self._background_tasks.clear()
-        if self._mcp_stack:
+        for name, stack in self._mcp_stacks.items():
             try:
-                await self._mcp_stack.aclose()
+                await stack.aclose()
             except (RuntimeError, BaseExceptionGroup):
-                pass  # MCP SDK cancel scope cleanup is noisy but harmless
-            self._mcp_stack = None
+                logger.debug("MCP server '{}' cleanup error (can be ignored)", name)
+        self._mcp_stacks.clear()
 
     def _schedule_background(self, coro) -> None:
         """Schedule a coroutine as a tracked background task (drained on shutdown)."""
@@ -935,6 +994,7 @@ class AgentLoop:
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
+        pending_queue: asyncio.Queue | None = None,
         *,
         ephemeral_session: bool = False,
     ) -> OutboundMessage | None:
@@ -958,6 +1018,9 @@ class AgentLoop:
             session = self.sessions.get_or_create(key)
             if self._restore_runtime_checkpoint(session):
                 self.sessions.save(session)
+            if self._restore_pending_user_turn(session):
+                self.sessions.save(session)
+            session, pending = self.auto_compact.prepare_session(session, key)
             await self.memory_consolidator.maybe_consolidate_by_tokens(session)
             self._set_tool_context(
                 channel,
@@ -974,6 +1037,7 @@ class AgentLoop:
                 channel=channel,
                 chat_id=chat_id,
                 thread_id=thread_id,
+                session_summary=pending,
                 current_role=current_role,
             )
 
@@ -981,7 +1045,7 @@ class AgentLoop:
                 self._save_turn(session, messages, 1 + len(history))
                 self.sessions.save(session)
 
-            final_content, _, all_msgs = await self._run_agent_loop(
+            run_result = await self._run_agent_loop(
                 messages,
                 session=session,
                 channel=channel,
@@ -991,11 +1055,17 @@ class AgentLoop:
                 model_override=self._model_overrides.get(key),
                 temperature_override=self._temperature_overrides.get(key),
                 on_turn_saved=_on_turn_saved_sys,
+                pending_queue=pending_queue,
             )
+            if len(run_result) >= 3:
+                final_content, _, all_msgs = run_result[:3]
+            else:
+                raise ValueError("_run_agent_loop returned unexpected result shape")
             self._save_turn(session, all_msgs, 1 + len(history))
+            self._clear_pending_user_turn(session)
             self._clear_runtime_checkpoint(session)
             self.sessions.save(session)
-            self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
+            self._schedule_background(self.consolidator.maybe_consolidate_by_tokens(session))
             is_cron = msg.channel == "cron"
             metadata = {}
             if thread_id is not None:
@@ -1017,6 +1087,12 @@ class AgentLoop:
             session = self.sessions.get_or_create(key)
         if session and self._restore_runtime_checkpoint(session):
             self.sessions.save(session)
+        if session and self._restore_pending_user_turn(session):
+            self.sessions.save(session)
+        if session:
+            session, pending = self.auto_compact.prepare_session(session, key)
+        else:
+            pending = None
 
         # Slash commands
         raw = msg.content.strip()
@@ -1048,6 +1124,7 @@ class AgentLoop:
         initial_messages = self.context.build_messages(
             history=history,
             current_message=msg.content,
+            session_summary=pending,
             media=msg.media if msg.media else None,
             channel=msg.channel,
             chat_id=msg.chat_id,
@@ -1067,12 +1144,14 @@ class AgentLoop:
                 )
             )
 
-        async def _on_turn_saved_final(messages: list[dict]) -> None:
-            if session is not None:
-                self._save_turn(session, messages, 1 + len(history))
-                self.sessions.save(session)
+        user_persisted_early = False
+        if session is not None and isinstance(msg.content, str) and msg.content.strip():
+            session.add_message("user", msg.content)
+            self._mark_pending_user_turn(session)
+            self.sessions.save(session)
+            user_persisted_early = True
 
-        final_content, _, all_msgs = await self._run_agent_loop(
+        final_content, _, all_msgs, stop_reason, had_injections = await self._run_agent_loop(
             initial_messages,
             on_progress=on_progress or _bus_progress,
             on_stream=on_stream,
@@ -1084,28 +1163,30 @@ class AgentLoop:
             thread_id=msg.metadata.get("message_thread_id"),
             model_override=self._model_overrides.get(key),
             temperature_override=self._temperature_overrides.get(key),
-            on_turn_saved=_on_turn_saved_final,
+            pending_queue=pending_queue,
         )
 
         if final_content is None or not final_content.strip():
             final_content = EMPTY_FINAL_RESPONSE_MESSAGE
 
         if session is not None:
-            self._save_turn(session, all_msgs, 1 + len(history))
+            save_skip = 1 + len(history) + (1 if user_persisted_early else 0)
+            self._save_turn(session, all_msgs, save_skip)
+            self._clear_pending_user_turn(session)
             self._clear_runtime_checkpoint(session)
             self.sessions.save(session)
-            self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
+            self._schedule_background(self.consolidator.maybe_consolidate_by_tokens(session))
 
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
-            return None
+            if not had_injections or stop_reason == "empty_final_response":
+                return None
 
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
 
         meta = dict(msg.metadata or {})
-        if on_stream is not None:
+        if on_stream is not None and stop_reason != "error":
             meta["_streamed"] = True
-            # Mark if this is an error message (should be sent even if streamed)
             if is_provider_error_message(final_content):
                 meta["_streamed_error"] = True
         return OutboundMessage(
@@ -1119,7 +1200,7 @@ class AgentLoop:
         self,
         content: list[dict[str, Any]],
         *,
-        truncate_text: bool = False,
+        should_truncate_text: bool = False,
         drop_runtime: bool = False,
     ) -> list[dict[str, Any]]:
         """Strip volatile multimodal payloads before writing session history."""
@@ -1146,8 +1227,8 @@ class AgentLoop:
 
             if block.get("type") == "text" and isinstance(block.get("text"), str):
                 text = block["text"]
-                if truncate_text and len(text) > self.max_tool_result_chars:
-                    text = truncate_text(text, self.max_tool_result_chars)
+                if should_truncate_text and len(text) > self.max_tool_result_chars:
+                    text = truncate_text_fn(text, self.max_tool_result_chars)
                 filtered.append({**block, "text": text})
                 continue
 
@@ -1166,9 +1247,9 @@ class AgentLoop:
                 continue  # skip empty assistant messages — they poison session context
             if role == "tool":
                 if isinstance(content, str) and len(content) > self.max_tool_result_chars:
-                    entry["content"] = truncate_text(content, self.max_tool_result_chars)
+                    entry["content"] = truncate_text_fn(content, self.max_tool_result_chars)
                 elif isinstance(content, list):
-                    filtered = self._sanitize_persisted_blocks(content, truncate_text=True)
+                    filtered = self._sanitize_persisted_blocks(content, should_truncate_text=True)
                     if not filtered:
                         continue
                     entry["content"] = filtered
@@ -1176,12 +1257,20 @@ class AgentLoop:
                 if isinstance(content, str) and content.startswith(
                     ContextBuilder._RUNTIME_CONTEXT_TAG
                 ):
-                    # Strip the runtime-context prefix, keep only the user text.
-                    parts = content.split("\n\n", 1)
-                    if len(parts) > 1 and parts[1].strip():
-                        entry["content"] = parts[1]
+                    end_marker = ContextBuilder._RUNTIME_CONTEXT_END
+                    end_pos = content.find(end_marker)
+                    if end_pos >= 0:
+                        after = content[end_pos + len(end_marker) :].lstrip("\n")
+                        if after:
+                            entry["content"] = after
+                        else:
+                            continue
                     else:
-                        continue
+                        after_tag = content[len(ContextBuilder._RUNTIME_CONTEXT_TAG) :].lstrip("\n")
+                        if after_tag.strip():
+                            entry["content"] = after_tag
+                        else:
+                            continue
                 if isinstance(content, list):
                     filtered = self._sanitize_persisted_blocks(content, drop_runtime=True)
                     if not filtered:
@@ -1195,6 +1284,12 @@ class AgentLoop:
         """Persist the latest in-flight turn state into session metadata."""
         session.metadata[self._RUNTIME_CHECKPOINT_KEY] = payload
         self.sessions.save(session)
+
+    def _mark_pending_user_turn(self, session: Session) -> None:
+        session.metadata[self._PENDING_USER_TURN_KEY] = True
+
+    def _clear_pending_user_turn(self, session: Session) -> None:
+        session.metadata.pop(self._PENDING_USER_TURN_KEY, None)
 
     def _clear_runtime_checkpoint(self, session: Session) -> None:
         if self._RUNTIME_CHECKPOINT_KEY in session.metadata:
@@ -1262,7 +1357,27 @@ class AgentLoop:
                 break
         session.messages.extend(restored_messages[overlap:])
 
+        self._clear_pending_user_turn(session)
         self._clear_runtime_checkpoint(session)
+        return True
+
+    def _restore_pending_user_turn(self, session: Session) -> bool:
+        from datetime import datetime
+
+        if not session.metadata.get(self._PENDING_USER_TURN_KEY):
+            return False
+
+        if session.messages and session.messages[-1].get("role") == "user":
+            session.messages.append(
+                {
+                    "role": "assistant",
+                    "content": "Error: Task interrupted before a response was generated.",
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
+            session.updated_at = datetime.now()
+
+        self._clear_pending_user_turn(session)
         return True
 
     async def process_direct(

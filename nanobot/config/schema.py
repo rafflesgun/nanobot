@@ -27,28 +27,28 @@ class WhatsAppConfig(Base):
 
 class TTSConfig(Base):
     """TTS configuration for all channels."""
-    
+
     enabled: bool = False
     provider: str = "edge"  # "edge", "openai", "riva"
     voice: str = "en-US-AriaNeural"
     rate: str = "+0%"
     pitch: str = "+0%"
     volume: str = "+0%"
-    
+
     # ── Per-provider credentials (independent of LLM keys) ──
     openai_api_key: str | None = None
-    riva_api_key: str | None = None           # mainly for NVIDIA Cloud Functions
-    
+    riva_api_key: str | None = None  # mainly for NVIDIA Cloud Functions
+
     # OpenAI-specific parameters
     openai_model: str = "tts-1"
     openai_quality: str = "low"
     openai_speed: float = 1.0
-    
+
     # NVIDIA Riva / NVCF specific
     riva_server_url: str = "localhost:50051"
     riva_use_ssl: bool = False
     riva_ssl_cert: str | None = None
-    riva_function_id: str | None = None       # NVCF function ID when using cloud
+    riva_function_id: str | None = None  # NVCF function ID when using cloud
 
 
 class TelegramConfig(Base):
@@ -61,10 +61,10 @@ class TelegramConfig(Base):
         None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
     )
     reply_to_message: bool = False  # If true, bot replies quote the original message
-    react_emoji: str | list[str] = Field(
-        default_factory=lambda: ["⚡️", "👌", "👀", "🔥", "👍"]
+    react_emoji: str | list[str] = Field(default_factory=lambda: ["⚡️", "👌", "👀", "🔥", "👍"])
+    group_policy: Literal["open", "mention"] = (
+        "mention"  # "mention" responds when @mentioned or replied to, "open" responds to all
     )
-    group_policy: Literal["open", "mention"] = "mention"  # "mention" responds when @mentioned or replied to, "open" responds to all
     connection_pool_size: int = 32
     pool_timeout: float = 5.0
     streaming: bool = True
@@ -258,7 +258,9 @@ class ChannelsConfig(Base):
     send_progress: bool = True  # stream agent's text progress to the channel
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
     show_usage: bool = False  # show token usage hints in responses
-    send_max_retries: int = Field(default=3, ge=0, le=10)  # Max delivery attempts (initial send included)
+    send_max_retries: int = Field(
+        default=3, ge=0, le=10
+    )  # Max delivery attempts (initial send included)
     transcription_provider: str = "groq"  # Voice transcription backend: "groq" or "openai"
 
 
@@ -295,7 +297,9 @@ class AgentDefaults(Base):
 
     workspace: str = "~/.nanobot/workspace"
     model: str = "anthropic/claude-opus-4-5"
-    fallback_models: list[str] = Field(default_factory=list)  # Fallback models tried in order on failure
+    fallback_models: list[str] = Field(
+        default_factory=list
+    )  # Fallback models tried in order on failure
     provider: str = (
         "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
     )
@@ -305,11 +309,24 @@ class AgentDefaults(Base):
     temperature: float = 0.1
     max_tool_iterations: int = 200
     max_tool_result_chars: int = 16_000
-    max_repeat_lookups: int = 2  # Max times same tool call allowed before blocking (prevents infinite loops)
+    max_repeat_lookups: int = (
+        2  # Max times same tool call allowed before blocking (prevents infinite loops)
+    )
     provider_retry_mode: Literal["standard", "persistent"] = "standard"
     reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
-    unified_session: bool = False  # Share one session across all channels (single-user multi-device)
+    unified_session: bool = (
+        False  # Share one session across all channels (single-user multi-device)
+    )
+    disabled_skills: list[str] = Field(
+        default_factory=list
+    )  # Skill names to exclude from loading (e.g. ["summarize", "skill-creator"])
+    session_ttl_minutes: int = Field(
+        default=0,
+        ge=0,
+        validation_alias=AliasChoices("idleCompactAfterMinutes", "sessionTtlMinutes"),
+        serialization_alias="idleCompactAfterMinutes",
+    )  # Auto-compact idle threshold in minutes (0 = disabled)
     dream: DreamConfig = Field(default_factory=DreamConfig)
     reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
 
@@ -361,7 +378,9 @@ class ProvidersConfig(Base):
     """Configuration for LLM providers."""
 
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
-    azure_openai: ProviderConfig = Field(default_factory=ProviderConfig)  # Azure OpenAI (model = deployment name)
+    azure_openai: ProviderConfig = Field(
+        default_factory=ProviderConfig
+    )  # Azure OpenAI (model = deployment name)
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
     openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -379,11 +398,21 @@ class ProvidersConfig(Base):
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
     siliconflow: ProviderConfig = Field(default_factory=ProviderConfig)  # SiliconFlow (硅基流动)
     volcengine: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine (火山引擎)
-    volcengine_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine Coding Plan
-    byteplus: ProviderConfig = Field(default_factory=ProviderConfig)  # BytePlus (VolcEngine international)
-    byteplus_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)  # BytePlus Coding Plan
-    openai_codex: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # OpenAI Codex (OAuth)
-    github_copilot: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # Github Copilot (OAuth)
+    volcengine_coding_plan: ProviderConfig = Field(
+        default_factory=ProviderConfig
+    )  # VolcEngine Coding Plan
+    byteplus: ProviderConfig = Field(
+        default_factory=ProviderConfig
+    )  # BytePlus (VolcEngine international)
+    byteplus_coding_plan: ProviderConfig = Field(
+        default_factory=ProviderConfig
+    )  # BytePlus Coding Plan
+    openai_codex: ProviderConfig = Field(
+        default_factory=ProviderConfig, exclude=True
+    )  # OpenAI Codex (OAuth)
+    github_copilot: ProviderConfig = Field(
+        default_factory=ProviderConfig, exclude=True
+    )  # Github Copilot (OAuth)
 
 
 class HeartbeatConfig(Base):
@@ -437,6 +466,11 @@ class ExecToolConfig(Base):
     timeout: int = 60
     path_append: str = ""
     sandbox: str = ""
+    sandbox: str = ""  # sandbox backend: "" (none) or "bwrap"
+    allowed_env_keys: list[str] = Field(
+        default_factory=list
+    )  # Env var names to pass through to subprocess (e.g. ["GOPATH", "JAVA_HOME"])
+
 
 class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""
@@ -448,14 +482,21 @@ class MCPServerConfig(Base):
     url: str = ""  # HTTP/SSE: endpoint URL
     headers: dict[str, str] = Field(default_factory=dict)  # HTTP/SSE: custom headers
     tool_timeout: int = 30  # seconds before a tool call is cancelled
-    enabled_tools: list[str] = Field(default_factory=lambda: ["*"])  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all tools; [] = no tools
+    enabled_tools: list[str] = Field(
+        default_factory=lambda: ["*"]
+    )  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all tools; [] = no tools
+
 
 class WorkspaceRestrictionConfig(Base):
     """Configuration for workspace restriction."""
 
     enabled: bool = False  # If true, restrict all tool access to workspace directory
-    extra_write: list[str] = Field(default_factory=list)  # Additional paths allowed for writing and reading when enabled
-    extra_read: list[str] = Field(default_factory=list)  # Additional paths allowed for reading when enabled
+    extra_write: list[str] = Field(
+        default_factory=list
+    )  # Additional paths allowed for writing and reading when enabled
+    extra_read: list[str] = Field(
+        default_factory=list
+    )  # Additional paths allowed for reading when enabled
 
 
 class ToolsConfig(Base):
@@ -463,7 +504,9 @@ class ToolsConfig(Base):
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
-    restrict_to_workspace: WorkspaceRestrictionConfig = Field(default_factory=WorkspaceRestrictionConfig)
+    restrict_to_workspace: WorkspaceRestrictionConfig = Field(
+        default_factory=WorkspaceRestrictionConfig
+    )
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     ssrf_whitelist: list[str] = Field(default_factory=list)
 
@@ -549,22 +592,30 @@ class Config(BaseSettings):
                 return p, spec.name
         return None, None
 
-    def get_provider(self, model: str | None = None, agent: AgentDefaults | None = None) -> ProviderConfig | None:
+    def get_provider(
+        self, model: str | None = None, agent: AgentDefaults | None = None
+    ) -> ProviderConfig | None:
         """Get matched provider config (api_key, api_base, extra_headers). Falls back to first available."""
         p, _ = self._match_provider(model, agent=agent)
         return p
 
-    def get_provider_name(self, model: str | None = None, agent: AgentDefaults | None = None) -> str | None:
+    def get_provider_name(
+        self, model: str | None = None, agent: AgentDefaults | None = None
+    ) -> str | None:
         """Get the registry name of the matched provider (e.g. "deepseek", "openrouter")."""
         _, name = self._match_provider(model, agent=agent)
         return name
 
-    def get_api_key(self, model: str | None = None, agent: AgentDefaults | None = None) -> str | None:
+    def get_api_key(
+        self, model: str | None = None, agent: AgentDefaults | None = None
+    ) -> str | None:
         """Get API key for the given model. Falls back to first available key."""
         p = self.get_provider(model, agent=agent)
         return p.api_key if p else None
 
-    def get_api_base(self, model: str | None = None, agent: AgentDefaults | None = None) -> str | None:
+    def get_api_base(
+        self, model: str | None = None, agent: AgentDefaults | None = None
+    ) -> str | None:
         """Get API base URL for the given model. Applies default URLs for gateway/local providers."""
         from nanobot.providers.registry import find_by_name
 

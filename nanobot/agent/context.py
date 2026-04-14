@@ -20,12 +20,17 @@ class ContextBuilder:
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
     _MAX_RECENT_HISTORY = 50
+    _RUNTIME_CONTEXT_END = "[/Runtime Context]"
 
-    def __init__(self, workspace: Path, timezone: str | None = None):
+    def __init__(
+        self, workspace: Path, timezone: str | None = None, disabled_skills: list[str] | None = None
+    ):
         self.workspace = workspace
         self.timezone = timezone
         self.memory = MemoryStore(workspace)
-        self.skills = SkillsLoader(workspace)
+        self.skills = SkillsLoader(
+            workspace, disabled_skills=set(disabled_skills) if disabled_skills else None
+        )
 
     def build_system_prompt(
         self,
@@ -85,16 +90,25 @@ class ContextBuilder:
         chat_id: str | None,
         timezone: str | None = None,
         thread_id: int | str | None = None,
+        session_summary: str | None = None,
     ) -> str:
         """Build untrusted runtime metadata block for injection before the user message."""
         lines = [f"Current Time: {current_time_str(timezone)}"]
         if channel and chat_id:
-            lines.extend([f"Channel: {channel}"])
+            lines.append(f"Channel: {channel}")
             if channel == "telegram":
                 normalized_thread_id = 0 if thread_id is None else thread_id
                 lines.append(f"Thread ID: {normalized_thread_id}")
             lines.append(f"Chat ID: {chat_id}")
-        return ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines)
+        if session_summary:
+            lines += ["", "[Resumed Session]", session_summary]
+        return (
+            ContextBuilder._RUNTIME_CONTEXT_TAG
+            + "\n"
+            + "\n".join(lines)
+            + "\n"
+            + ContextBuilder._RUNTIME_CONTEXT_END
+        )
 
     @staticmethod
     def _merge_message_content(left: Any, right: Any) -> str | list[dict[str, Any]]:
@@ -135,9 +149,16 @@ class ContextBuilder:
         chat_id: str | None = None,
         thread_id: int | str | None = None,
         current_role: str = "user",
+        session_summary: str | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
-        runtime_ctx = self._build_runtime_context(channel, chat_id, self.timezone, thread_id)
+        runtime_ctx = self._build_runtime_context(
+            channel,
+            chat_id,
+            self.timezone,
+            thread_id=thread_id,
+            session_summary=session_summary,
+        )
         user_content = self._build_user_content(current_message, media)
 
         # Merge runtime context and user content into a single user message
