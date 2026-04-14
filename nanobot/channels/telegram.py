@@ -419,7 +419,7 @@ class TelegramChannel(BaseChannel):
         await self._app.updater.start_polling(
             allowed_updates=["message"],
             drop_pending_updates=True,  # Ignore old messages on startup
-            error_callback=self._on_error,
+            error_callback=self._on_polling_error,
         )
 
         # Keep running until stopped
@@ -2047,6 +2047,14 @@ class TelegramChannel(BaseChannel):
             logger.warning("Telegram network issue: {}", message)
         else:
             logger.error("Telegram error: {}", message)
+
+    def _on_polling_error(self, error: Exception) -> None:
+        """PTB polling requires a plain callback, not a coroutine function."""
+        message = str(error) or error.__class__.__name__
+        if error.__class__.__name__ == "NetworkError":
+            logger.warning("Telegram polling network issue: {}", message)
+        else:
+            logger.error("Telegram polling error: {}", message)
 
     def _get_extension(
         self,
