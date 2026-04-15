@@ -221,3 +221,42 @@ async def test_subagent_manager_uses_model_override_for_spawned_run(tmp_path, mo
     await asyncio.gather(*mgr._running_tasks.values())
 
     mgr.runner.run.assert_awaited()
+
+
+def test_agent_loop_passes_loaded_agents_config_to_subagent_manager(tmp_path, monkeypatch) -> None:
+    from nanobot.agent.loop import AgentLoop
+
+    captured: dict[str, object] = {}
+
+    class _FakeSubagentManager:
+        def __init__(self, *args, **kwargs) -> None:
+            captured["agents_config"] = kwargs.get("agents_config")
+
+    provider = MagicMock()
+    provider.get_default_model.return_value = "provider-default"
+    provider.generation = GenerationSettings(max_tokens=1111)
+
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "model": "infini-kimi-k25",
+                    "timezone": "Asia/Kuala_Lumpur",
+                }
+            }
+        }
+    )
+
+    monkeypatch.setattr("nanobot.agent.loop.SubagentManager", _FakeSubagentManager)
+
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model=config.agents.defaults.model,
+        timezone=config.agents.defaults.timezone,
+        agents_config=config.agents,
+    )
+
+    assert loop.model == "infini-kimi-k25"
+    assert captured["agents_config"] is config.agents
