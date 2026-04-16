@@ -737,6 +737,7 @@ class AgentRunner:
         except asyncio.CancelledError:
             raise
         except BaseException as exc:
+            logger.debug("Tool result: {} -> ERROR: {}", tool_call.name, str(exc)[:500])
             event = {
                 "name": tool_call.name,
                 "status": "error",
@@ -747,6 +748,7 @@ class AgentRunner:
             return f"Error: {type(exc).__name__}: {exc}", event, None
 
         if isinstance(result, str) and result.startswith("Error"):
+            logger.debug("Tool result: {} -> {}", tool_call.name, result[:500])
             event = {
                 "name": tool_call.name,
                 "status": "error",
@@ -757,6 +759,7 @@ class AgentRunner:
             return result + _HINT, event, None
 
         detail = "" if result is None else str(result)
+        logger.debug("Tool result: {} -> {}", tool_call.name, detail[:500])
         detail = detail.replace("\n", " ").strip()
         if not detail:
             detail = "(empty)"
