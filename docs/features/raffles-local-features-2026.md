@@ -15,7 +15,7 @@ understand intended behavior quickly.
 | Telegram groups → mention-only mode         | ✅     | channels/telegram.py                                   | manual + group_policy test             | `group_policy = "mention"` (default)          |
 | Group commands via @mention                 | ✅     | channels/telegram.py → _on_message                     | manual                                 | `@BotName /command` → text message path       |
 | Configured subagents via `spawn(subagent_id)` | ✅   | config/schema.py, cli/commands.py, agent/loop.py, agent/subagent.py, agent/tools/spawn.py | tests/agent/test_configured_subagents.py, tests/agent/test_task_cancel.py | named `agents.*` profiles inherit from `agents.defaults` |
-| Ordered fallback models on provider errors  | ✅     | agent/loop.py, config/schema.py, cli/commands.py, agent/subagent.py | tests/agent/test_fallback_models.py, tests/config/test_config_migration.py | `fallback_models: []` (list, tried in order, includes bare `429`) |
+| Ordered fallback models on provider errors  | ✅     | agent/loop.py, config/schema.py, cli/commands.py, agent/subagent.py | tests/agent/test_fallback_models.py, tests/config/test_config_migration.py | `fallback_models: []` (list, tried in order, includes bare `429` and plain `temporarily unavailable`) |
 | "Thinking…" placeholder (PM only)           | ✅     | channels/telegram.py → _send_thinking_message          | tests/test_thinking_message.py         | skipped when `is_group == True`               |
 | Typing indicator & ACK reaction             | ✅     | channels/telegram.py                                   | tests/test_typing_ack.py               | typing per chat+thread, `react_emoji` can be str or list |
 | Heartbeat results → DM / private only       | ✅     | cli/commands.py, heartbeat/service.py                  | test_heartbeat_service.py + targeted tests | skips negative IDs and topic sub-sessions  |
@@ -25,7 +25,7 @@ understand intended behavior quickly.
 | Media downloads → workspace/media/          | ✅     | channels/telegram.py, config/paths.py                  | tests/test_media_download.py, tests/test_simple_features.py | falls back to `~/.nanobot/media` when no workspace |
 | Built-in `ipinfo` skill                     | ✅     | skills/ipinfo/SKILL.md, skills/README.md               | tests/agent/test_builtin_skills.py     | requires `curl`, no API key                   |
 | OpenAI compat uses `max_completion_tokens` only | ✅  | providers/openai_compat_provider.py                    | tests/providers/test_litellm_kwargs.py | no duplicate `max_tokens` field               |
-| SDK retries disabled + surfaced to progress | ✅     | providers/base.py, providers/*, agent/loop.py         | tests/providers/test_provider_retry.py | provider SDK retries forced to `0`            |
+| SDK retries disabled + surfaced to progress | ✅     | providers/base.py, providers/*, agent/loop.py         | tests/providers/test_provider_retry.py, tests/agent/test_task_cancel.py | provider SDK retries forced to `0`; retry logs include request id/model/inflight and agent gate occupancy |
 | Fine-grained workspace allowlist for tools   | ✅     | config/schema.py, config/loader.py, cli/commands.py, agent/loop.py, agent/subagent.py, agent/tools/shell.py | tests/config/test_config_migration.py, tests/tools/test_exec_security.py | `restrictToWorkspace = { enabled, extraRead, extraWrite }` |
 | Telegram forwarded message debounce         | ✅     | channels/telegram.py                                   | tests/channels/test_telegram_channel.py | 80ms lane = `chat_id:thread_id`              |
 | **TTS voice notes (Edge + OpenAI + Riva)**  | ✅     | providers/tts.py, tts/manager.py, channels/telegram.py, utils/audio.py | tests/test_tts.py (new)                | `tts.enabled = false` (default), text sent before TTS, 30s timeout, overrides persist across restart |
@@ -144,10 +144,11 @@ pytest tests/agent/test_configured_subagents.py tests/agent/test_task_cancel.py 
   - 403 errors (quota exhaustion, rate limiting, access denied)
   - Timeout errors (network or server delays)
   - Invalid model errors (incorrect model specifications)
-  - Provider-specific errors like "free tier exhausted" or "AllocationQuota" limits
+- Provider-specific errors like "free tier exhausted" or "AllocationQuota" limits
 - Transparent operation - users don't need to manually switch models
 - Falls back only when specific provider errors are detected
 - Preserves the original primary error if the whole fallback chain fails
+- Emits debug logs for the ordered fallback chain and names the next fallback model when a switch happens
 
 **Files**
 - nanobot/config/schema.py → AgentDefaults.fallback_models (list[str])
@@ -160,6 +161,7 @@ Preserve the loop-level fallback helper that tries the ordered chain and keeps t
 - 'provider returned error'
 - '502' in error_msg
 - '503' in error_msg
+- 'temporarily unavailable' in error_msg
 - 'timeout' in error_msg
 - '404' in error_msg
 - '403' in error_msg
@@ -174,6 +176,7 @@ Keep the list-based fallback config:
 - `fallback_models` is a list of model names tried in order
 - Skip duplicates and skip the already-selected primary model
 - The effective primary model is `model_override` when present, otherwise the configured default model
+- Keep the debug logs that show the ordered fallback chain and the next fallback model selected after an eligible failure
 
 **Config example**
 ```json
@@ -198,6 +201,9 @@ pytest tests/agent/test_fallback_models.py tests/config/test_config_migration.py
 - Native SDK retries are disabled for both `AsyncOpenAI` and `AsyncAnthropic`
 - Provider retry helpers accept an `on_retry(attempt, total)` callback
 - `AgentLoop` forwards retry attempts to progress sinks as `Retrying... (attempt x/y)`
+- Provider retry diagnostics log request start/end with request id, model, streaming flag, retry mode, and provider in-flight request count
+- Provider retry warnings include request id, model, and provider in-flight request count so account-level concurrency failures are visible in logs
+- Agent dispatch logs include semaphore occupancy as `active=<n>/<limit>` when entering and leaving the top-level concurrency gate
 
 **Files to protect during conflicts**
 - `nanobot/providers/openai_compat_provider.py`
@@ -209,6 +215,8 @@ pytest tests/agent/test_fallback_models.py tests/config/test_config_migration.py
 Keep the SDK constructors with `max_retries=0` and explicit `httpx.Timeout(180.0, connect=10.0)`.  
 Keep `OpenAICompatProvider._build_kwargs()` using `max_completion_tokens` only.  
 Preserve the additive `on_retry` callback wiring in both retry helpers and the loop progress bridge.
+Preserve the provider in-flight diagnostics and request ids in `LLMProvider.chat_with_retry()` / `chat_stream_with_retry()`.  
+Preserve the agent concurrency-gate occupancy logs in `AgentLoop._dispatch()`.
 
 **Quick validation**
 ```bash

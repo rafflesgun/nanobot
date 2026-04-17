@@ -894,8 +894,22 @@ class AgentLoop:
         gate = self._concurrency_gate or nullcontext()
         pending = asyncio.Queue(maxsize=20)
         self._pending_queues[session_key] = pending
+        gate_limit: int | None = None
+        if self._concurrency_gate is not None:
+            gate_limit = getattr(self._concurrency_gate, "_value", 0) + len(
+                getattr(self._concurrency_gate, "_waiters", []) or []
+            )
         try:
             async with lock, gate:
+                if self._concurrency_gate is not None:
+                    current_value = getattr(self._concurrency_gate, "_value", 0)
+                    active = max(0, (gate_limit or 0) - current_value)
+                    logger.debug(
+                        "Entered agent concurrency gate for session {}: active={}/{}",
+                        session_key,
+                        active,
+                        gate_limit,
+                    )
                 try:
                     on_stream = on_stream_end = None
                     if msg.metadata.get("_wants_stream"):
@@ -968,6 +982,16 @@ class AgentLoop:
                             content="Sorry, I encountered an error.",
                         )
                     )
+                finally:
+                    if self._concurrency_gate is not None:
+                        current_value = getattr(self._concurrency_gate, "_value", 0)
+                        active = max(0, (gate_limit or 0) - current_value - 1)
+                        logger.debug(
+                            "Released agent concurrency gate for session {}: active={}/{}",
+                            session_key,
+                            active,
+                            gate_limit,
+                        )
         finally:
             queue = self._pending_queues.pop(session_key, None)
             if queue is not None:
