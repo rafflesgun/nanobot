@@ -779,7 +779,10 @@ class AgentLoop:
         models_to_try = [effective_model] + self._ordered_fallback_models(effective_model)
         last_error: Exception | None = None
 
-        for model in models_to_try:
+        if len(models_to_try) > 1:
+            logger.debug("Fallback model chain for {}: {}", effective_model, models_to_try)
+
+        for idx, model in enumerate(models_to_try):
             try:
                 result = await self.runner.run(
                     AgentRunSpec(
@@ -833,10 +836,12 @@ class AgentLoop:
                 is_fallback_eligible = self._is_fallback_eligible_error_str(error_msg)
 
                 if is_fallback_eligible and model != models_to_try[-1]:
+                    next_model = models_to_try[idx + 1]
                     logger.warning(
-                        "Model {} failed with: {}, trying fallback model",
+                        "Model {} failed with: {}, trying fallback model {}",
                         model,
                         str(e)[:100],
+                        next_model,
                     )
                     continue
                 if is_fallback_eligible:
@@ -864,6 +869,7 @@ class AgentLoop:
             or "500" in error_msg
             or "400" in error_msg
             or "429" in error_msg
+            or "temporarily unavailable" in error_msg
             or "timeout" in error_msg
             or "timed out" in error_msg
             or "404" in error_msg

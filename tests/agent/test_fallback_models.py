@@ -100,3 +100,31 @@ async def test_process_direct_falls_back_on_bare_429_error(tmp_path) -> None:
     assert response is not None
     assert response.content == "reply via fallback-model"
     assert seen_models == ["primary-model", "fallback-model"]
+
+
+@pytest.mark.asyncio
+async def test_process_direct_falls_back_on_temporarily_unavailable_error(tmp_path) -> None:
+    loop = _make_loop(
+        tmp_path,
+        fallback_models=["fallback-model"],
+    )
+
+    seen_models: list[str] = []
+
+    async def _chat_with_retry(**kwargs):
+        model = kwargs["model"]
+        seen_models.append(model)
+        if model == "primary-model":
+            raise RuntimeError(
+                "Error: {'message': 'Service temporarily unavailable', 'type': 'api_error', 'param': '', 'code': None}"
+            )
+        return LLMResponse(content=f"reply via {model}", tool_calls=[])
+
+    loop.provider.chat_with_retry = _chat_with_retry
+    loop.provider.chat_stream_with_retry = AsyncMock()
+
+    response = await loop.process_direct("hello", session_key="cli:test")
+
+    assert response is not None
+    assert response.content == "reply via fallback-model"
+    assert seen_models == ["primary-model", "fallback-model"]
