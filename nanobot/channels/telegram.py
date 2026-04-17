@@ -735,6 +735,9 @@ class TelegramChannel(BaseChannel):
         if meta.get("command_response", False):
             is_command_response = True
             logger.debug("Skipping TTS for command response")
+        elif meta.get("render_as") == "text":
+            is_command_response = True
+            logger.debug("Skipping TTS for text-rendered command response")
         else:
             content_stripped = text.strip()
             if (

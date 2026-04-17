@@ -15,17 +15,20 @@ class ToolRegistry:
     def __init__(self):
         self._tools: dict[str, Tool] = {}
         self._definitions_cache: list[dict[str, Any]] | None = None
+        self._cached_definitions: list[dict[str, Any]] | None = None
 
     def register(self, tool: Tool) -> None:
         """Register a tool."""
         self._tools[tool.name] = tool
         self._definitions_cache = None
+        self._cached_definitions = None
 
     def unregister(self, name: str) -> None:
         """Unregister a tool by name."""
         if name in self._tools:
             del self._tools[name]
             self._definitions_cache = None
+            self._cached_definitions = None
 
     def get(self, name: str) -> Tool | None:
         """Get a tool by name."""
@@ -38,8 +41,11 @@ class ToolRegistry:
     def get_definitions(self) -> list[dict[str, Any]]:
         """Get all tool definitions in OpenAI format."""
         if self._definitions_cache is None:
-            ordered = sorted(self._tools.values(), key=lambda t: (1 if t.name.startswith("mcp_") else 0, t.name))
+            ordered = sorted(
+                self._tools.values(), key=lambda t: (1 if t.name.startswith("mcp_") else 0, t.name)
+            )
             self._definitions_cache = [tool.to_schema() for tool in ordered]
+            self._cached_definitions = self._definitions_cache
         return self._definitions_cache
 
     def prepare_call(
@@ -49,23 +55,31 @@ class ToolRegistry:
     ) -> tuple[Tool | None, dict[str, Any], str | None]:
         """Resolve, cast, and validate one tool call."""
         # Guard against invalid parameter types (e.g., list instead of dict)
-        if not isinstance(params, dict) and name in ('write_file', 'read_file'):
-            return None, params, (
-                f"Error: Tool '{name}' parameters must be a JSON object, got {type(params).__name__}. "
-                "Use named parameters: tool_name(param1=\"value1\", param2=\"value2\")"
+        if not isinstance(params, dict) and name in ("write_file", "read_file"):
+            return (
+                None,
+                params,
+                (
+                    f"Error: Tool '{name}' parameters must be a JSON object, got {type(params).__name__}. "
+                    'Use named parameters: tool_name(param1="value1", param2="value2")'
+                ),
             )
 
         tool = self._tools.get(name)
         if not tool:
-            return None, params, (
-                f"Error: Tool '{name}' not found. Available: {', '.join(self.tool_names)}"
+            return (
+                None,
+                params,
+                (f"Error: Tool '{name}' not found. Available: {', '.join(self.tool_names)}"),
             )
 
         cast_params = tool.cast_params(params)
         errors = tool.validate_params(cast_params)
         if errors:
-            return tool, cast_params, (
-                f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors)
+            return (
+                tool,
+                cast_params,
+                (f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors)),
             )
         return tool, cast_params, None
 

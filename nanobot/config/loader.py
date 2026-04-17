@@ -10,6 +10,7 @@ from loguru import logger
 
 from nanobot.config.schema import Config
 
+
 def get_config_path() -> Path:
     """Get the default configuration file path."""
     return Path.home() / ".nanobot" / "config.json"
@@ -18,6 +19,7 @@ def get_config_path() -> Path:
 def get_data_dir() -> Path:
     """Get the nanobot data directory."""
     from nanobot.utils.helpers import get_data_path
+
     return get_data_path()
 
 
@@ -98,9 +100,7 @@ def _env_replace(match: re.Match[str]) -> str:
     name = match.group(1)
     value = os.environ.get(name)
     if value is None:
-        raise ValueError(
-            f"Environment variable '{name}' referenced in config is not set"
-        )
+        raise ValueError(f"Environment variable '{name}' referenced in config is not set")
     return value
 
 
@@ -114,21 +114,36 @@ def _migrate_config(data: dict) -> dict:
     # Move tools.exec.restrictToWorkspace → tools.restrictToWorkspace.enabled
     tools = data.get("tools", {})
     exec_cfg = tools.get("exec", {})
-    
+
     # 1 tools.exec.restrictToWorkspace (bool) → tools.restrictToWorkspace.enabled
     if "restrictToWorkspace" in exec_cfg and "restrictToWorkspace" not in tools:
         old_value = exec_cfg.pop("restrictToWorkspace")
         tools["restrictToWorkspace"] = {"enabled": old_value}
-    
+
+    # Move tools.myEnabled / tools.mySet → tools.my.{enable, allowSet}.
+    # The old flat keys shipped in the initial MyTool landing; wrapping them in a
+    # sub-config keeps `web` / `exec` / `my` symmetric and gives room to grow.
+    if "myEnabled" in tools or "mySet" in tools:
+        my_cfg = tools.setdefault("my", {})
+        if "myEnabled" in tools and "enable" not in my_cfg:
+            my_cfg["enable"] = tools.pop("myEnabled")
+        else:
+            tools.pop("myEnabled", None)
+        if "mySet" in tools and "allowSet" not in my_cfg:
+            my_cfg["allowSet"] = tools.pop("mySet")
+        else:
+            tools.pop("mySet", None)
+
     # 2 tools.restrictToWorkspace (bool) → tools.restrictToWorkspace.enabled
     restrict_cfg = tools.get("restrictToWorkspace", {})
     if isinstance(restrict_cfg, bool):
         tools["restrictToWorkspace"] = {"enabled": restrict_cfg}
-    
+
     return data
 
 
 _config_path_override: Path | None = None
+
 
 def set_config_path(path: Path | str | None) -> None:
     """Allow tests to override config location"""

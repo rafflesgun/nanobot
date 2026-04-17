@@ -44,9 +44,11 @@ class BaseChannel(ABC):
         try:
             if self.transcription_provider == "openai":
                 from nanobot.providers.transcription import OpenAITranscriptionProvider
+
                 provider = OpenAITranscriptionProvider(api_key=self.transcription_api_key)
             else:
                 from nanobot.providers.transcription import GroqTranscriptionProvider
+
                 provider = GroqTranscriptionProvider(api_key=self.transcription_api_key)
             return await provider.transcribe(file_path)
         except Exception as e:
@@ -95,7 +97,9 @@ class BaseChannel(ABC):
         """
         pass
 
-    async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
+    async def send_delta(
+        self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None
+    ) -> None:
         """Deliver a streaming text chunk.
 
         Override in subclasses to enable streaming. Implementations should
@@ -111,21 +115,29 @@ class BaseChannel(ABC):
     def supports_streaming(self) -> bool:
         """True when config enables streaming AND this subclass implements send_delta."""
         cfg = self.config
-        streaming = cfg.get("streaming", False) if isinstance(cfg, dict) else getattr(cfg, "streaming", False)
+        streaming = (
+            cfg.get("streaming", False)
+            if isinstance(cfg, dict)
+            else getattr(cfg, "streaming", False)
+        )
         return bool(streaming) and type(self).send_delta is not BaseChannel.send_delta
 
     def is_allowed(self, sender_id: str) -> bool:
         """Check if *sender_id* is permitted.  Empty list → deny all; ``"*"`` → allow all."""
-        allow_list = getattr(self.config, "allow_from", [])
+        if isinstance(self.config, dict):
+            if "allow_from" in self.config:
+                allow_list = self.config.get("allow_from")
+            else:
+                allow_list = self.config.get("allowFrom", [])
+        else:
+            allow_list = getattr(self.config, "allow_from", [])
         if not allow_list:
             logger.warning("{}: allow_from is empty — all access denied", self.name)
             return False
         if "*" in allow_list:
             return True
         sender_str = str(sender_id)
-        return sender_str in allow_list or any(
-            p in allow_list for p in sender_str.split("|") if p
-        )
+        return sender_str in allow_list
 
     async def _handle_message(
         self,
@@ -153,7 +165,8 @@ class BaseChannel(ABC):
             logger.warning(
                 "Access denied for sender {} on channel {}. "
                 "Add them to allowFrom list in config to grant access.",
-                sender_id, self.name,
+                sender_id,
+                self.name,
             )
             return
 

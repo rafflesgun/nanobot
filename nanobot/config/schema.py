@@ -369,7 +369,7 @@ class AgentsConfig(Base):
 class ProviderConfig(Base):
     """LLM provider configuration."""
 
-    api_key: str = ""
+    api_key: str | None = None
     api_base: str | None = None
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
 
@@ -390,10 +390,14 @@ class ProvidersConfig(Base):
     dashscope: ProviderConfig = Field(default_factory=ProviderConfig)
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     ollama: ProviderConfig = Field(default_factory=ProviderConfig)  # Ollama local models
+    lm_studio: ProviderConfig = Field(default_factory=ProviderConfig)  # LM Studio local models
     ovms: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenVINO Model Server (OVMS)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
     minimax: ProviderConfig = Field(default_factory=ProviderConfig)
+    minimax_anthropic: ProviderConfig = Field(
+        default_factory=ProviderConfig
+    )  # MiniMax Anthropic endpoint (thinking)
     mistral: ProviderConfig = Field(default_factory=ProviderConfig)
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
     siliconflow: ProviderConfig = Field(default_factory=ProviderConfig)  # SiliconFlow (硅基流动)
@@ -434,7 +438,7 @@ class ApiConfig(Base):
 class GatewayConfig(Base):
     """Gateway/server configuration."""
 
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"  # Safer default: local-only bind.
     port: int = 18790
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
@@ -499,6 +503,13 @@ class WorkspaceRestrictionConfig(Base):
     )  # Additional paths allowed for reading when enabled
 
 
+class MyToolConfig(Base):
+    """Self-inspection tool configuration."""
+
+    enable: bool = True  # register the `my` tool (agent runtime state inspection)
+    allow_set: bool = False  # let `my` modify loop state (read-only if False)
+
+
 class ToolsConfig(Base):
     """Tools configuration."""
 
@@ -507,6 +518,7 @@ class ToolsConfig(Base):
     restrict_to_workspace: WorkspaceRestrictionConfig = Field(
         default_factory=WorkspaceRestrictionConfig
     )
+    my: MyToolConfig = Field(default_factory=MyToolConfig)
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     ssrf_whitelist: list[str] = Field(default_factory=list)
 

@@ -2,14 +2,17 @@
 
 import asyncio
 import json
+import time
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
 from nanobot.utils.prompt_templates import render_template
 
+from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.runner import AgentRunSpec, AgentRunner
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
@@ -21,8 +24,51 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ExecToolConfig
 from nanobot.providers.base import LLMProvider
-from nanobot.utils.helpers import build_assistant_message
 from nanobot.utils.stats import StatsManager
+
+
+@dataclass(slots=True)
+class SubagentStatus:
+    """Real-time status of a running subagent."""
+
+    task_id: str
+    label: str
+    task_description: str
+    started_at: float
+    phase: str = "initializing"
+    iteration: int = 0
+    tool_events: list = field(default_factory=list)
+    usage: dict = field(default_factory=dict)
+    stop_reason: str | None = None
+    error: str | None = None
+
+
+class _SubagentHook(AgentHook):
+    """Hook for subagent execution — logs tool calls and updates status."""
+
+    def __init__(self, task_id: str, status: SubagentStatus | None = None) -> None:
+        super().__init__()
+        self._task_id = task_id
+        self._status = status
+
+    async def before_execute_tools(self, context: AgentHookContext) -> None:
+        for tool_call in context.tool_calls:
+            args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
+            logger.debug(
+                "Subagent [{}] executing: {} with arguments: {}",
+                self._task_id,
+                tool_call.name,
+                args_str,
+            )
+
+    async def after_iteration(self, context: AgentHookContext) -> None:
+        if self._status is None:
+            return
+        self._status.iteration = context.iteration
+        self._status.tool_events = list(context.tool_events)
+        self._status.usage = dict(context.usage)
+        if context.error:
+            self._status.error = str(context.error)
 
 
 class SubagentManager:
@@ -72,8 +118,8 @@ class SubagentManager:
         self.extra_read = extra_read or []
         self.extra_write = extra_write or []
         self.disabled_skills = set(disabled_skills or [])
-        self.disabled_skills = set(disabled_skills or [])
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
+        self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
         self.stats_manager = StatsManager(workspace)
         self.runner = AgentRunner(provider)
@@ -98,12 +144,21 @@ class SubagentManager:
             "thread_id": origin_thread_id,
         }
 
+        status = SubagentStatus(
+            task_id=task_id,
+            label=display_label,
+            task_description=task,
+            started_at=time.monotonic(),
+        )
+        self._task_statuses[task_id] = status
+
         bg_task = asyncio.create_task(
             self._run_subagent(
                 task_id,
                 task,
                 display_label,
                 origin,
+                status,
                 subagent_id=subagent_id,
                 model_override=model_override,
             )
@@ -114,6 +169,7 @@ class SubagentManager:
 
         def _cleanup(_: asyncio.Task) -> None:
             self._running_tasks.pop(task_id, None)
+            self._task_statuses.pop(task_id, None)
             if session_key and (ids := self._session_tasks.get(session_key)):
                 ids.discard(task_id)
                 if not ids:
@@ -156,11 +212,22 @@ class SubagentManager:
         task: str,
         label: str,
         origin: dict[str, str],
+        status: SubagentStatus | None = None,
         subagent_id: str | None = None,
         model_override: str | None = None,
     ) -> None:
         """Execute the subagent task and announce the result."""
+        status = status or SubagentStatus(
+            task_id=task_id,
+            label=label,
+            task_description=task,
+            started_at=time.monotonic(),
+        )
         logger.info("Subagent [{}] starting task: {}", task_id, label)
+
+        async def _on_checkpoint(payload: dict) -> None:
+            status.phase = payload.get("phase", status.phase)
+            status.iteration = payload.get("iteration", status.iteration)
 
         try:
             agent_config, provider = self._resolve_subagent_backend(subagent_id)
@@ -270,9 +337,10 @@ class SubagentManager:
                     )
 
         except Exception as e:
-            error_msg = f"Error: {str(e)}"
+            status.phase = "error"
+            status.error = str(e)
             logger.error("Subagent [{}] failed: {}", task_id, e)
-            await self._announce_result(task_id, label, task, error_msg, origin, "error")
+            await self._announce_result(task_id, label, task, f"Error: {e}", origin, "error")
 
     async def _announce_result(
         self,
@@ -346,3 +414,10 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
     def get_running_count(self) -> int:
         """Return the number of currently running subagents."""
         return len(self._running_tasks)
+
+    def get_running_count_by_session(self, session_key: str) -> int:
+        """Return the number of currently running subagents for a session."""
+        tids = self._session_tasks.get(session_key, set())
+        return sum(
+            1 for tid in tids if tid in self._running_tasks and not self._running_tasks[tid].done()
+        )

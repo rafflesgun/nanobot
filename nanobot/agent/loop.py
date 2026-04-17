@@ -18,16 +18,17 @@ from nanobot.agent.autocompact import AutoCompact
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.hook import AgentHook, AgentHookContext, CompositeHook
 from nanobot.agent.memory import Consolidator, Dream
-from nanobot.agent.runner import _PERSISTED_MODEL_ERROR_PLACEHOLDER
 from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunSpec, AgentRunner
+from nanobot.agent.runner import _PERSISTED_MODEL_ERROR_PLACEHOLDER
+from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
-from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.search import GlobTool, GrepTool
 from nanobot.agent.tools.shell import ExecTool
+from nanobot.agent.tools.self import MyTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
@@ -39,6 +40,7 @@ from nanobot.config.paths import (
     save_temperature_overrides,
 )
 from nanobot.bus.queue import MessageBus
+from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
@@ -49,9 +51,13 @@ from nanobot.utils.runtime import (
     is_provider_error_message,
 )
 from nanobot.utils.stats import StatsManager
+from nanobot.utils.document import extract_documents
+from nanobot.utils.helpers import image_placeholder_text
+from nanobot.utils.helpers import truncate_text as truncate_text_fn
+from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebToolsConfig
+    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, ToolsConfig, WebToolsConfig
     from nanobot.cron.service import CronService
 
 
@@ -103,6 +109,9 @@ class _LoopHook(AgentHook):
         if self._on_stream_end:
             await self._on_stream_end(resuming=resuming)
         self._stream_buf = ""
+
+    async def before_iteration(self, context: AgentHookContext) -> None:
+        self._loop._current_iteration = context.iteration
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         if self._on_progress:
@@ -209,9 +218,11 @@ class AgentLoop:
         fallback_models: list[str] | None = None,
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
+        tools_config: ToolsConfig | None = None,
     ):
-        from nanobot.config.schema import ExecToolConfig, WebToolsConfig
+        from nanobot.config.schema import ExecToolConfig, ToolsConfig, WebToolsConfig
 
+        _tc = tools_config or ToolsConfig()
         defaults = AgentDefaults()
         self.bus = bus
         self.channels_config = channels_config
@@ -283,7 +294,7 @@ class AgentLoop:
             provider=provider,
             model=self.model,
             sessions=self.sessions,
-            context_window_tokens=context_window_tokens,
+            context_window_tokens=self.context_window_tokens,
             build_messages=self.context.build_messages,
             get_tool_definitions=self.tools.get_definitions,
             max_completion_tokens=provider.generation.max_tokens,
@@ -300,6 +311,10 @@ class AgentLoop:
             model=self.model,
         )
         self._register_default_tools()
+        if _tc.my.enable:
+            self.tools.register(MyTool(loop=self, modify_allowed=_tc.my.allow_set))
+        self._runtime_vars: dict[str, Any] = {}
+        self._current_iteration: int = 0
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
 
@@ -373,8 +388,7 @@ class AgentLoop:
     ) -> None:
         """Update context for all tools that need routing info."""
         model_override = self._model_overrides.get(session_key) if session_key else None
-
-        for name in ("message", "spawn", "cron"):
+        for name in ("message", "spawn", "cron", "my"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
                     if name == "message":
@@ -1080,6 +1094,16 @@ class AgentLoop:
                 metadata=metadata,
             )
 
+        # Extract document text from media at the processing boundary so all
+        # channels benefit without format-specific logic in ContextBuilder.
+        if msg.media:
+            new_content, image_only = extract_documents(msg.content, msg.media)
+            if dataclasses.is_dataclass(msg):
+                msg = dataclasses.replace(msg, content=new_content, media=image_only)
+            else:
+                msg.content = new_content
+                msg.media = image_only
+
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
 
@@ -1388,6 +1412,7 @@ class AgentLoop:
         session_key: str = "cli:direct",
         channel: str = "cli",
         chat_id: str = "direct",
+        media: list[str] | None = None,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
@@ -1398,13 +1423,19 @@ class AgentLoop:
         await self._connect_mcp()
         metadata = {"message_thread_id": thread_id} if thread_id is not None else {}
         msg = InboundMessage(
-            channel=channel, sender_id="user", chat_id=chat_id, content=content, metadata=metadata
+            channel=channel,
+            sender_id="user",
+            chat_id=chat_id,
+            content=content,
+            media=media or [],
+            metadata=metadata,
         )
-        return await self._process_message(
-            msg,
-            session_key=session_key,
-            on_progress=on_progress,
-            on_stream=on_stream,
-            on_stream_end=on_stream_end,
-            ephemeral_session=ephemeral_session,
-        )
+        kwargs = {
+            "session_key": session_key,
+            "on_progress": on_progress,
+            "on_stream": on_stream,
+            "on_stream_end": on_stream_end,
+        }
+        if ephemeral_session:
+            kwargs["ephemeral_session"] = True
+        return await self._process_message(msg, **kwargs)
