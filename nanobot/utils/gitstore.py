@@ -6,6 +6,7 @@ import io
 import subprocess
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 from loguru import logger
@@ -24,6 +25,32 @@ class CommitInfo:
         return f"{header}\n(no file changes)"
 
 
+@dataclass
+class LineAge:
+    """Age of a single line based on git blame."""
+
+    age_days: int  # days since last modification
+
+
+def _compute_line_ages(annotated) -> list[LineAge]:
+    """Convert annotate results to per-line ages."""
+    now = datetime.now(tz=timezone.utc).date()
+    ages: list[LineAge] = []
+    for (commit, _tree_entry), _line_bytes in annotated:
+        dt = datetime.fromtimestamp(commit.commit_time, tz=timezone.utc).date()
+        ages.append(LineAge(age_days=(now - dt).days))
+    return ages
+
+
+def _compute_line_ages_from_timestamps(timestamps: list[int]) -> list[LineAge]:
+    """Convert UNIX timestamps to per-line ages."""
+    now = datetime.now(tz=timezone.utc).date()
+    return [
+        LineAge(age_days=(now - datetime.fromtimestamp(ts, tz=timezone.utc).date()).days)
+        for ts in timestamps
+    ]
+
+
 class GitStore:
     """Git-backed version control for memory files."""
 
@@ -39,6 +66,7 @@ class GitStore:
     def _use_dulwich(self) -> bool:
         try:
             import dulwich  # noqa: F401
+
             return True
         except Exception:
             return False
@@ -97,7 +125,9 @@ class GitStore:
                 if not st.unstaged and not any(st.staged.values()):
                     return None
                 msg_bytes = message.encode("utf-8") if isinstance(message, str) else message
-                porcelain.add(self._workspace, paths=[f.encode("utf-8") for f in self._tracked_files])
+                porcelain.add(
+                    self._workspace, paths=[f.encode("utf-8") for f in self._tracked_files]
+                )
                 sha_bytes = porcelain.commit(
                     self._workspace,
                     message=msg_bytes,
@@ -153,6 +183,28 @@ class GitStore:
         lines.append("!.gitignore")
         return "\n".join(lines) + "\n"
 
+    def _line_ages_from_git_blame(self, file_path: str) -> list[LineAge]:
+        """Compute per-line ages via system git blame porcelain output."""
+        cp = self._run_git("blame", "--line-porcelain", "--", file_path)
+        if cp.returncode != 0 or not cp.stdout.strip():
+            return []
+
+        timestamps: list[int] = []
+        current_timestamp: int | None = None
+        for line in cp.stdout.splitlines():
+            if line.startswith("author-time "):
+                try:
+                    current_timestamp = int(line.split(" ", 1)[1])
+                except ValueError:
+                    current_timestamp = None
+                continue
+            if line.startswith("\t"):
+                if current_timestamp is None:
+                    return []
+                timestamps.append(current_timestamp)
+
+        return _compute_line_ages_from_timestamps(timestamps)
+
     def log(self, max_entries: int = 20) -> list[CommitInfo]:
         if not self.is_initialized():
             return []
@@ -192,6 +244,35 @@ class GitStore:
         except Exception:
             logger.warning("Git log failed")
             return []
+
+    def line_ages(self, file_path: str) -> list[LineAge]:
+        """Compute the age of each line in a tracked file via git blame.
+
+        Returns one LineAge per line, in order.
+        Returns an empty list if the repo is not initialized, the file is
+        empty, or annotation fails.
+        """
+
+        if not self.is_initialized():
+            return []
+
+        target = self._workspace / file_path
+        if not target.exists() or target.stat().st_size == 0:
+            return []
+
+        if self._use_dulwich():
+            try:
+                from dulwich import porcelain
+
+                annotated = porcelain.annotate(str(self._workspace), file_path)
+                if annotated:
+                    return _compute_line_ages(annotated)
+            except Exception:
+                logger.warning(
+                    "Git line_ages annotate failed for {}; falling back to git blame", file_path
+                )
+
+        return self._line_ages_from_git_blame(file_path)
 
     def diff_commits(self, sha1: str, sha2: str) -> str:
         if not self.is_initialized():

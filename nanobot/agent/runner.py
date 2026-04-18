@@ -279,7 +279,7 @@ class AgentRunner:
             context.tool_calls = list(response.tool_calls)
             self._accumulate_usage(usage, raw_usage)
 
-            if response.has_tool_calls:
+            if response.should_execute_tools:
                 if hook.wants_streaming():
                     await hook.on_stream_end(context, resuming=True)
 
@@ -377,6 +377,13 @@ class AgentRunner:
                 if spec.on_turn_saved:
                     await spec.on_turn_saved(messages)
                 continue
+
+            if response.has_tool_calls:
+                logger.warning(
+                    "Ignoring tool calls under finish_reason='{}' for {}",
+                    response.finish_reason,
+                    spec.session_key or "default",
+                )
 
             clean = hook.finalize_content(context, response.content)
             if response.finish_reason != "error" and is_blank_text(clean):
@@ -573,6 +580,10 @@ class AgentRunner:
         *,
         tools: list[dict[str, Any]] | None,
     ) -> dict[str, Any]:
+        async def _on_retry_wait(message: str) -> None:
+            if spec.progress_callback:
+                await spec.progress_callback(message)
+
         kwargs: dict[str, Any] = {
             "messages": messages,
             "tools": tools,
@@ -587,6 +598,7 @@ class AgentRunner:
                     else None
                 )
             ),
+            "on_retry_wait": _on_retry_wait if spec.progress_callback else None,
         }
         if spec.temperature is not None:
             kwargs["temperature"] = spec.temperature
@@ -995,7 +1007,6 @@ class AgentRunner:
         kept.reverse()
 
         if kept:
-            # Find first user message
             user_idx = None
             for i, message in enumerate(kept):
                 if message.get("role") == "user":
@@ -1003,22 +1014,24 @@ class AgentRunner:
                     break
 
             if user_idx is not None:
-                # Start from first user message
                 kept = kept[user_idx:]
-                # Re-validate after trimming
-                start = find_legal_message_start(kept)
-                if start and start < len(kept):
-                    kept = kept[start:]
             else:
                 logger.warning(
-                    "History snip would remove all user messages; keeping last valid chain"
+                    "History snip would remove all user messages; recovering last valid user chain"
                 )
-                start = find_legal_message_start(kept)
-                if start and start < len(kept):
-                    kept = kept[start:]
-        else:
-            # Nothing kept, use last few messages
+                for idx in range(len(non_system) - 1, -1, -1):
+                    if non_system[idx].get("role") == "user":
+                        kept = non_system[idx:]
+                        break
+
+            start = find_legal_message_start(kept)
+            if start and start < len(kept):
+                kept = kept[start:]
+        if not kept:
             kept = non_system[-min(len(non_system), 4) :]
+            start = find_legal_message_start(kept)
+            if start and start < len(kept):
+                kept = kept[start:]
 
         return system_messages + kept
 

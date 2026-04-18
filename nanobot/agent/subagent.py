@@ -94,7 +94,12 @@ class SubagentManager:
         extra_write: list[str] | None = None,
         disabled_skills: list[str] | None = None,
     ):
-        from nanobot.config.schema import AgentsConfig, ExecToolConfig, WebSearchConfig
+        from nanobot.config.schema import (
+            AgentsConfig,
+            ExecToolConfig,
+            WebSearchConfig,
+            WebToolsConfig,
+        )
 
         self.provider = provider
         self.workspace = workspace
@@ -108,11 +113,13 @@ class SubagentManager:
         self.agents_config = agents_config or AgentsConfig()
         self.provider_factory = provider_factory
         if web_config is not None:
-            self.web_search_config = getattr(web_config, "search", None) or WebSearchConfig()
-            self.web_proxy = getattr(web_config, "proxy", None)
+            self.web_config = web_config
         else:
-            self.web_search_config = web_search_config or WebSearchConfig()
-            self.web_proxy = web_proxy
+            self.web_config = WebToolsConfig(
+                enable=web_search_config is not None or web_proxy is not None,
+                proxy=web_proxy,
+                search=web_search_config or WebSearchConfig(),
+            )
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
         self.extra_read = extra_read or []
@@ -264,15 +271,18 @@ class SubagentManager:
                     timeout=self.exec_config.timeout,
                     restrict_to_workspace=self.restrict_to_workspace,
                     allowed_dirs=allowed_dir,
+                    sandbox=self.exec_config.sandbox,
                     path_append=self.exec_config.path_append,
                     allowed_env_keys=self.exec_config.allowed_env_keys,
                 )
             )
             tools.register(GlobTool(workspace=self.workspace, allowed_dir=allowed_dir))
             tools.register(GrepTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
-            tools.register(WebFetchTool(proxy=self.web_proxy))
-
+            if self.web_config.enable:
+                tools.register(
+                    WebSearchTool(config=self.web_config.search, proxy=self.web_config.proxy)
+                )
+                tools.register(WebFetchTool(proxy=self.web_config.proxy))
             system_prompt = self._build_subagent_prompt()
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
