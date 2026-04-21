@@ -77,6 +77,7 @@ class AgentRunSpec:
     context_block_limit: int | None = None
     provider_retry_mode: str = "standard"
     progress_callback: Any | None = None
+    retry_wait_callback: Any | None = None
     checkpoint_callback: Any | None = None
     max_repeat_lookups: int = 2
     on_turn_saved: Any | None = None
@@ -584,6 +585,10 @@ class AgentRunner:
             if spec.progress_callback:
                 await spec.progress_callback(message)
 
+        retry_wait_callback = spec.retry_wait_callback or (
+            _on_retry_wait if spec.progress_callback else None
+        )
+
         kwargs: dict[str, Any] = {
             "messages": messages,
             "tools": tools,
@@ -598,7 +603,7 @@ class AgentRunner:
                     else None
                 )
             ),
-            "on_retry_wait": _on_retry_wait if spec.progress_callback else None,
+            "on_retry_wait": retry_wait_callback,
         }
         if spec.temperature is not None:
             kwargs["temperature"] = spec.temperature

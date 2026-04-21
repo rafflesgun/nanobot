@@ -79,30 +79,62 @@ class GitStore:
             return False
 
         self._workspace.mkdir(parents=True, exist_ok=True)
-        gitignore = self._workspace / ".gitignore"
-        gitignore.write_text(self._build_gitignore(), encoding="utf-8")
-        for rel in self._tracked_files:
-            tracked = self._workspace / rel
-            tracked.parent.mkdir(parents=True, exist_ok=True)
-            if not tracked.exists():
-                tracked.write_text("", encoding="utf-8")
+        if self._is_inside_git_repo():
+            logger.warning(
+                "Workspace {} is already inside a git repo; skipping nested repo initialization",
+                self._workspace,
+            )
+            return False
 
         try:
             if self._use_dulwich():
                 from dulwich import porcelain
 
-                porcelain.init(self._workspace)
-                porcelain.add(
-                    self._workspace,
-                    paths=[b".gitignore", *[f.encode("utf-8") for f in self._tracked_files]],
-                )
+                gitignore = self._workspace / ".gitignore"
+                dream_entries = self._build_gitignore()
+                if gitignore.exists():
+                    existing = gitignore.read_text(encoding="utf-8")
+                    existing_lines = set(existing.splitlines())
+                    new_lines = [
+                        line for line in dream_entries.splitlines() if line not in existing_lines
+                    ]
+                    if new_lines:
+                        merged = existing.rstrip("\n") + "\n" + "\n".join(new_lines) + "\n"
+                        gitignore.write_text(merged, encoding="utf-8")
+                else:
+                    gitignore.write_text(dream_entries, encoding="utf-8")
+                for rel in self._tracked_files:
+                    tracked = self._workspace / rel
+                    tracked.parent.mkdir(parents=True, exist_ok=True)
+                    if not tracked.exists():
+                        tracked.write_text("", encoding="utf-8")
+                porcelain.init(str(self._workspace))
+                porcelain.add(str(self._workspace), paths=[".gitignore"] + self._tracked_files)
                 porcelain.commit(
-                    self._workspace,
+                    str(self._workspace),
                     message=b"init: nanobot memory store",
                     author=b"nanobot <nanobot@dream>",
                     committer=b"nanobot <nanobot@dream>",
                 )
             else:
+                gitignore = self._workspace / ".gitignore"
+                dream_entries = self._build_gitignore()
+                if gitignore.exists():
+                    existing = gitignore.read_text(encoding="utf-8")
+                    existing_lines = set(existing.splitlines())
+                    new_lines = [
+                        line for line in dream_entries.splitlines() if line not in existing_lines
+                    ]
+                    if new_lines:
+                        merged = existing.rstrip("\n") + "\n" + "\n".join(new_lines) + "\n"
+                        gitignore.write_text(merged, encoding="utf-8")
+                else:
+                    gitignore.write_text(dream_entries, encoding="utf-8")
+                for rel in self._tracked_files:
+                    tracked = self._workspace / rel
+                    tracked.parent.mkdir(parents=True, exist_ok=True)
+                    if not tracked.exists():
+                        tracked.write_text("", encoding="utf-8")
                 self._run_git("init")
                 self._run_git("config", "user.name", "nanobot")
                 self._run_git("config", "user.email", "nanobot@dream")
@@ -168,6 +200,22 @@ class GitStore:
             return None
         except Exception:
             return None
+
+    def _is_inside_git_repo(self) -> bool:
+        """Check if self._workspace is already inside a git repository.
+
+        Walks up from self._workspace to the filesystem root, returning True
+        if any parent directory contains a .git entry.
+
+        Git worktrees and submodules can use a ``.git`` file instead of a
+        directory, so we must treat either form as "already inside a repo".
+        """
+        current = self._workspace.resolve()
+        while current != current.parent:
+            if (current / ".git").exists():
+                return True
+            current = current.parent
+        return False
 
     def _build_gitignore(self) -> str:
         dirs: set[str] = set()

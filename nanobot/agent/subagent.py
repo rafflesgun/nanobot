@@ -148,6 +148,7 @@ class SubagentManager:
         origin = {
             "channel": origin_channel,
             "chat_id": origin_chat_id,
+            "session_key": session_key,
             "thread_id": origin_thread_id,
         }
 
@@ -373,17 +374,27 @@ Result:
 
 Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not mention technical details like "subagent" or task IDs."""
 
-        # Inject as system message to trigger main agent
+        # Inject as system message to trigger main agent.
+        # Use session_key_override to align with the main agent's effective
+        # session key (which accounts for unified sessions) so the result is
+        # routed to the correct pending queue (mid-turn injection) instead of
+        # being dispatched as a competing independent task.
+        override = origin.get("session_key") or f"{origin['channel']}:{origin['chat_id']}"
         msg = InboundMessage(
             channel="system",
             sender_id="subagent",
             chat_id=f"{origin['channel']}:{origin['chat_id']}",
             content=announce_content,
-            metadata=(
-                {"message_thread_id": origin["thread_id"]}
-                if origin.get("thread_id") is not None
-                else {}
-            ),
+            session_key_override=override,
+            metadata={
+                **(
+                    {"message_thread_id": origin["thread_id"]}
+                    if origin.get("thread_id") is not None
+                    else {}
+                ),
+                "injected_event": "subagent_result",
+                "subagent_task_id": task_id,
+            },
         )
 
         await self.bus.publish_inbound(msg)

@@ -38,6 +38,11 @@ from nanobot.utils.audio import convert_to_ogg_opus, get_audio_duration
 from nanobot.utils.helpers import split_message
 
 TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
+# Telegram's actual API limit is 4096; we split raw markdown at 4000 as a
+# safety margin for mid-stream edits (plain text).  For _stream_end, we
+# convert to HTML first and then split at the true 4096-char boundary so
+# the final rendered message never overflows.
+TELEGRAM_HTML_MAX_LEN = 4096
 TELEGRAM_REPLY_CONTEXT_MAX_LEN = (
     TELEGRAM_MAX_MESSAGE_LEN  # Max length for reply context in user message
 )
@@ -832,14 +837,27 @@ class TelegramChannel(BaseChannel):
                     )
                 except Exception as e:
                     logger.debug("Failed to delete thinking message after stream: {}", e)
+            if reply_to_message_id := meta.get("message_id"):
+                try:
+                    await self._remove_reaction(chat_id, int(reply_to_message_id))
+                except ValueError:
+                    pass
+            thread_kwargs = {"message_thread_id": thread_id} if thread_id is not None else {}
+            raw_text = buf.text
+            html = _markdown_to_telegram_html(raw_text)
+            if len(html) <= TELEGRAM_HTML_MAX_LEN:
+                primary_html = html
+                extra_html_chunks = []
+            else:
+                html_chunks = split_message(html, TELEGRAM_HTML_MAX_LEN)
+                primary_html = html_chunks[0]
+                extra_html_chunks = html_chunks[1:]
             try:
-                html = _markdown_to_telegram_html(buf.text)
-                edit_text = html[:TELEGRAM_MAX_MESSAGE_LEN]
                 await self._call_with_retry(
                     self._app.bot.edit_message_text,
                     chat_id=int_chat_id,
                     message_id=buf.message_id,
-                    text=edit_text,
+                    text=primary_html,
                     parse_mode="HTML",
                 )
             except BadRequest as e:
@@ -848,25 +866,35 @@ class TelegramChannel(BaseChannel):
                     self._stream_bufs.pop(comp_key, None)
                     return
                 logger.debug("Final stream edit failed (HTML), trying plain: {}", e)
+                primary_plain = (
+                    split_message(raw_text, TELEGRAM_MAX_MESSAGE_LEN)[0]
+                    if len(raw_text) > TELEGRAM_MAX_MESSAGE_LEN
+                    else raw_text
+                )
                 try:
                     await self._call_with_retry(
                         self._app.bot.edit_message_text,
                         chat_id=int_chat_id,
                         message_id=buf.message_id,
-                        text=buf.text[:TELEGRAM_MAX_MESSAGE_LEN],
+                        text=primary_plain,
                     )
                 except Exception as e2:
                     if self._is_not_modified_error(e2):
                         logger.debug("Final stream plain edit already applied for {}", chat_id)
                     else:
+                        logger.warning("Final stream edit failed: {}", e2)
                         raise
-            if len(buf.text) > TELEGRAM_MAX_MESSAGE_LEN:
-                for chunk in split_message(
-                    buf.text[TELEGRAM_MAX_MESSAGE_LEN:], TELEGRAM_MAX_MESSAGE_LEN
-                ):
-                    await self._app.bot.send_message(
-                        chat_id=int_chat_id, text=chunk, **thread_kwargs
+            for extra_html_chunk in extra_html_chunks:
+                try:
+                    await self._call_with_retry(
+                        self._app.bot.send_message,
+                        chat_id=int_chat_id,
+                        text=extra_html_chunk,
+                        parse_mode="HTML",
+                        **thread_kwargs,
                     )
+                except Exception:
+                    await self._send_text(int_chat_id, extra_html_chunk)
             self._stream_bufs.pop(comp_key, None)
             await self._maybe_send_tts(
                 chat_id=int_chat_id,
@@ -919,6 +947,10 @@ class TelegramChannel(BaseChannel):
                 logger.warning("Stream initial send failed: {}", e)
                 raise
         elif (now - buf.last_edit) >= self.config.stream_edit_interval:
+            if len(buf.text) > TELEGRAM_MAX_MESSAGE_LEN:
+                await self._flush_stream_overflow(int_chat_id, buf, thread_kwargs)
+                buf.last_edit = now
+                return
             try:
                 await self._call_with_retry(
                     self._app.bot.edit_message_text,
@@ -930,6 +962,49 @@ class TelegramChannel(BaseChannel):
                 buf.last_edit = now
             except Exception:
                 pass
+
+    async def _flush_stream_overflow(
+        self,
+        chat_id: int,
+        buf: "_StreamBuf",
+        thread_kwargs: dict,
+    ) -> None:
+        """Split an oversized stream buffer mid-flight.
+
+        Edits the current stream message with the first chunk, sends any
+        intermediate chunks as standalone messages, then opens a new message
+        for the tail so subsequent deltas continue streaming into it.
+        """
+        chunks = split_message(buf.text, TELEGRAM_MAX_MESSAGE_LEN)
+        if len(chunks) <= 1:
+            return
+        try:
+            await self._call_with_retry(
+                self._app.bot.edit_message_text,
+                chat_id=chat_id,
+                message_id=buf.message_id,
+                text=chunks[0],
+            )
+        except Exception as e:
+            if not self._is_not_modified_error(e):
+                logger.warning("Stream overflow edit failed: {}", e)
+                raise
+        for chunk in chunks[1:-1]:
+            await self._call_with_retry(
+                self._app.bot.send_message,
+                chat_id=chat_id,
+                text=chunk,
+                **thread_kwargs,
+            )
+        tail = chunks[-1]
+        sent = await self._call_with_retry(
+            self._app.bot.send_message,
+            chat_id=chat_id,
+            text=tail,
+            **thread_kwargs,
+        )
+        buf.message_id = sent.message_id
+        buf.text = tail
 
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
@@ -1934,6 +2009,19 @@ class TelegramChannel(BaseChannel):
             )
         except Exception as e:
             logger.debug("Telegram reaction failed: {}", e)
+
+    async def _remove_reaction(self, chat_id: str, message_id: int) -> None:
+        """Remove emoji reaction from a message (best-effort, non-blocking)."""
+        if not self._app:
+            return
+        try:
+            await self._app.bot.set_message_reaction(
+                chat_id=int(chat_id),
+                message_id=message_id,
+                reaction=[],
+            )
+        except Exception as e:
+            logger.debug("Telegram reaction removal failed: {}", e)
 
     async def _typing_loop(self, comp_key: str, thread_id: int | None = None) -> None:
         """Repeatedly send 'typing' action until cancelled."""

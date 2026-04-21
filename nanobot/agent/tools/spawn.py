@@ -23,13 +23,14 @@ class SpawnTool(Tool):
         self,
         channel: str,
         chat_id: str,
+        effective_key: str | None = None,
         model_override: str | None = None,
         thread_id: int | None = None,
     ) -> None:
         """Set the origin context for subagent announcements."""
         self._origin_channel = channel
         self._origin_chat_id = chat_id
-        self._session_key = (
+        self._session_key = effective_key or (
             f"{channel}:{chat_id}:topic:{thread_id}"
             if thread_id is not None
             else f"{channel}:{chat_id}"

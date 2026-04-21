@@ -388,6 +388,9 @@ class AgentLoop:
     ) -> None:
         """Update context for all tools that need routing info."""
         model_override = self._model_overrides.get(session_key) if session_key else None
+        effective_key = session_key or (
+            UNIFIED_SESSION_KEY if self._unified_session else f"{channel}:{chat_id}"
+        )
         for name in ("message", "spawn", "cron", "my"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
@@ -396,7 +399,15 @@ class AgentLoop:
                     elif name == "cron":
                         tool.set_context(channel, chat_id, thread_id)
                     elif name == "spawn":
-                        tool.set_context(channel, chat_id, model_override, thread_id)
+                        tool.set_context(
+                            channel,
+                            chat_id,
+                            effective_key=effective_key,
+                            model_override=model_override,
+                            thread_id=thread_id,
+                        )
+                    else:
+                        tool.set_context(channel, chat_id)
 
     def _ordered_fallback_models(self, primary_model: str) -> list[str]:
         """Return de-duplicated fallback models in the order they should be tried."""
@@ -701,6 +712,7 @@ class AgentLoop:
         on_progress: Callable[..., Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
+        on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
         *,
         session: Session | None = None,
         channel: str = "cli",
@@ -801,6 +813,7 @@ class AgentLoop:
                         context_block_limit=self.context_block_limit,
                         provider_retry_mode=self.provider_retry_mode,
                         progress_callback=on_progress,
+                        retry_wait_callback=on_retry_wait,
                         checkpoint_callback=_checkpoint,
                         max_repeat_lookups=self.max_repeat_lookups,
                         on_turn_saved=on_turn_saved,
@@ -972,6 +985,29 @@ class AgentLoop:
                         logger.warning("No response to publish for {}/{}", msg.channel, msg.chat_id)
                 except asyncio.CancelledError:
                     logger.info("Task cancelled for session {}", session_key)
+                    # Preserve partial context from the interrupted turn so
+                    # the user does not lose tool results and assistant
+                    # messages accumulated before /stop.  The checkpoint was
+                    # already persisted to session metadata by
+                    # _emit_checkpoint during tool execution; materializing
+                    # it into session history now makes it visible in the
+                    # next conversation turn.
+                    try:
+                        key = self._effective_session_key(msg)
+                        session = self.sessions.get_or_create(key)
+                        if self._restore_runtime_checkpoint(session):
+                            self._clear_pending_user_turn(session)
+                            self.sessions.save(session)
+                            logger.info(
+                                "Restored partial context for cancelled session {}",
+                                key,
+                            )
+                    except Exception:
+                        logger.debug(
+                            "Could not restore checkpoint for cancelled session {}",
+                            session_key,
+                            exc_info=True,
+                        )
                     raise
                 except Exception:
                     logger.exception("Error processing message for session {}", session_key)
@@ -1067,7 +1103,18 @@ class AgentLoop:
             if self._restore_pending_user_turn(session):
                 self.sessions.save(session)
             session, pending = self.auto_compact.prepare_session(session, key)
-            await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+            await self.consolidator.maybe_consolidate_by_tokens(
+                session,
+                session_summary=pending,
+            )
+            # Persist subagent follow-ups into durable history BEFORE prompt
+            # assembly. ContextBuilder merges adjacent same-role messages for
+            # provider compatibility, which previously caused the follow-up to
+            # disappear from session.messages while still being visible to the
+            # LLM via the merged prompt. See _persist_subagent_followup.
+            is_subagent = msg.sender_id == "subagent"
+            if is_subagent and self._persist_subagent_followup(session, msg):
+                self.sessions.save(session)
             self._set_tool_context(
                 channel,
                 chat_id,
@@ -1076,10 +1123,13 @@ class AgentLoop:
                 session_key=key,
             )
             history = session.get_history(max_messages=0)
-            current_role = "assistant" if msg.sender_id == "subagent" else "user"
+            current_role = "assistant" if is_subagent else "user"
+
+            # Subagent content is already in `history` above; passing it again
+            # as current_message would double-project it into the prompt.
             messages = self.context.build_messages(
                 history=history,
-                current_message=msg.content,
+                current_message="" if is_subagent else msg.content,
                 channel=channel,
                 chat_id=chat_id,
                 thread_id=thread_id,
@@ -1162,8 +1212,11 @@ class AgentLoop:
             )
             return result
 
-        if session:
-            await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+        if session is not None:
+            await self.consolidator.maybe_consolidate_by_tokens(
+                session,
+                session_summary=pending,
+            )
 
         self._set_tool_context(
             msg.channel,
@@ -1200,6 +1253,24 @@ class AgentLoop:
                 )
             )
 
+        async def _on_retry_wait(content: str) -> None:
+            meta = dict(msg.metadata or {})
+            meta["_retry_wait"] = True
+            await self.bus.publish_outbound(
+                OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=content,
+                    metadata=meta,
+                )
+            )
+
+        # Persist the triggering user message immediately, before running the
+        # agent loop. If the process is killed mid-turn (OOM, SIGKILL, self-
+        # restart, etc.), the existing runtime_checkpoint preserves the
+        # in-flight assistant/tool state but NOT the user message itself, so
+        # the user's prompt is silently lost on recovery. Saving it up front
+        # makes recovery possible from the session log alone.
         user_persisted_early = False
         if session is not None and isinstance(msg.content, str) and msg.content.strip():
             session.add_message("user", msg.content)
@@ -1212,6 +1283,7 @@ class AgentLoop:
             on_progress=on_progress or _bus_progress,
             on_stream=on_stream,
             on_stream_end=on_stream_end,
+            on_retry_wait=_on_retry_wait,
             session=session,
             channel=msg.channel,
             chat_id=msg.chat_id,
@@ -1335,6 +1407,30 @@ class AgentLoop:
             entry.setdefault("timestamp", datetime.now().isoformat())
             session.messages.append(entry)
         session.updated_at = datetime.now()
+
+    def _persist_subagent_followup(self, session: Session, msg: InboundMessage) -> bool:
+        """Persist subagent follow-ups before prompt assembly so history stays durable.
+
+        Returns True if a new entry was appended; False if the follow-up was
+        deduped (same ``subagent_task_id`` already in session) or carries no
+        content worth persisting.
+        """
+        if not msg.content:
+            return False
+        task_id = msg.metadata.get("subagent_task_id") if isinstance(msg.metadata, dict) else None
+        if task_id and any(
+            m.get("injected_event") == "subagent_result" and m.get("subagent_task_id") == task_id
+            for m in session.messages
+        ):
+            return False
+        session.add_message(
+            "assistant",
+            msg.content,
+            sender_id=msg.sender_id,
+            injected_event="subagent_result",
+            subagent_task_id=task_id,
+        )
+        return True
 
     def _set_runtime_checkpoint(self, session: Session, payload: dict[str, Any]) -> None:
         """Persist the latest in-flight turn state into session metadata."""

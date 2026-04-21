@@ -404,6 +404,8 @@ class ProvidersConfig(Base):
         default_factory=ProviderConfig
     )  # MiniMax Anthropic endpoint (thinking)
     mistral: ProviderConfig = Field(default_factory=ProviderConfig)
+    stepfun: ProviderConfig = Field(default_factory=ProviderConfig)  # Step Fun (阶跃星辰)
+    xiaomi_mimo: ProviderConfig = Field(default_factory=ProviderConfig)  # Xiaomi MIMO (小米)
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
     siliconflow: ProviderConfig = Field(default_factory=ProviderConfig)  # SiliconFlow (硅基流动)
     volcengine: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine (火山引擎)
@@ -416,6 +418,7 @@ class ProvidersConfig(Base):
     byteplus_coding_plan: ProviderConfig = Field(
         default_factory=ProviderConfig
     )  # BytePlus Coding Plan
+    qianfan: ProviderConfig = Field(default_factory=ProviderConfig)  # Qianfan (百度千帆)
     openai_codex: ProviderConfig = Field(
         default_factory=ProviderConfig, exclude=True
     )  # OpenAI Codex (OAuth)
@@ -633,17 +636,15 @@ class Config(BaseSettings):
     def get_api_base(
         self, model: str | None = None, agent: AgentDefaults | None = None
     ) -> str | None:
-        """Get API base URL for the given model. Applies default URLs for gateway/local providers."""
+        """Get API base URL for the given model. Falls back to the provider default when present."""
         from nanobot.providers.registry import find_by_name
 
         p, name = self._match_provider(model, agent=agent)
         if p and p.api_base:
             return p.api_base
-        # Only gateways get a default api_base here. Standard providers
-        # resolve their base URL from the registry in the provider constructor.
         if name:
             spec = find_by_name(name)
-            if spec and (spec.is_gateway or spec.is_local) and spec.default_api_base:
+            if spec and spec.default_api_base:
                 return spec.default_api_base
         return None
 
