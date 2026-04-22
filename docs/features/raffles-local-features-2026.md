@@ -43,6 +43,7 @@ understand intended behavior quickly.
 | **Incremental session saving (#2219)**      | ✅     | agent/loop.py, agent/subagent.py                       | tests/test_loop_incremental_save.py    | save offset tracks persisted content          |
 | **Repeated tool call protection**           | ✅     | agent/runner.py, utils/runtime.py, config/schema.py    | tests/agent/test_runner.py             | `maxRepeatLookups: 2` blocks infinite loops   |
 | **Learning loop upgrades (recall + reviewable skills)** | ✅ | session/search.py, agent/tools/session_search.py, agent/skills_manager.py, agent/tools/skill_manage.py, agent/skill_proposals.py, agent/memory.py, command/builtin.py | tests/agent/test_session_search.py, tests/tools/test_session_search_tool.py, tests/command/test_builtin_recall.py, tests/agent/test_skills_manager.py, tests/tools/test_skill_manage_tool.py, tests/agent/test_skill_proposals.py, tests/agent/test_dream.py | `/recall` excludes current session by default; Dream writes proposals to `memory/skill-proposals/`; `skill_manage` mutates workspace skills only |
+| **`nanobot doctor` deployment diagnostics** | ✅ | doctor/types.py, doctor/service.py, doctor/checks/*.py, cli/commands.py | tests/doctor/*.py, tests/cli/test_commands.py | `nanobot doctor` local checks by default; `--live` adds bounded provider/MCP probes; `--json` for scripting; exit 1 on failures |
 | Web search enhancements merged into main   | ℹ️     | agent/tools/web.py, README.md                          | tests/tools/test_web_search_tool.py    | Multi-provider search now upstream (`brave`, `tavily`, `duckduckgo`, `searxng`, `jina`) |
 | Runtime hardening (PR #2733)               | ℹ️     | agent/runner.py, agent/hook.py, agent/loop.py          | tests/agent/test_runner.py             | Now upstream: AgentRunner, checkpoints, tool batching, provider retry |
 
@@ -806,4 +807,39 @@ print(len(_parse_kimi_tool_calls(test)), 'tool calls parsed')
 **Quick validation**
 ```bash
 pytest tests/agent/test_session_search.py tests/tools/test_session_search_tool.py tests/command/test_builtin_recall.py tests/agent/test_skills_manager.py tests/tools/test_skill_manage_tool.py tests/agent/test_skill_proposals.py tests/agent/test_dream.py -q
+```
+
+### 28. `nanobot doctor` deployment diagnostics
+
+**Core behavior**
+- `nanobot doctor` runs fast, deterministic, read-only checks for deployment readiness
+- `nanobot doctor --live` adds bounded provider auth and MCP connectivity probes
+- `nanobot doctor --json` produces machine-readable output for scripting
+- Exit code 1 when any check fails; warnings alone do not fail
+- Designed for `docker exec <container> nanobot doctor` as the primary operator workflow
+
+**Check coverage**
+- Config: existence, JSON parsing, schema validation, env-var resolution
+- Workspace: existence, writability, runtime subdirectory readiness
+- Providers: default provider config presence, optional live auth/reachability probe
+- Channels: required config fields for enabled channels only
+- Dream: memory dir, skill proposal dir, `.dream_cursor` parent
+- Skills: workspace skills and proposal directory readiness
+- MCP: config block shape, enabled-tools sanity, optional live connectivity probe
+
+**Files to protect during conflicts**
+- `nanobot/doctor/types.py`
+- `nanobot/doctor/service.py`
+- `nanobot/doctor/checks/*.py`
+- `nanobot/cli/commands.py` (the `doctor` command block)
+
+**Resolution priority**
+1. Keep live probe failures as real `fail` results, not warnings.
+2. Keep the MCP live probe bounded by an explicit timeout.
+3. Keep the workspace skill-proposals check pointing at the real runtime path `memory/skill-proposals`, not a flat `skill_proposals` directory.
+4. Keep the CLI thin: `DoctorService` owns aggregation, the CLI only renders and sets exit code.
+
+**Quick validation**
+```bash
+pytest tests/doctor -q && pytest tests/cli/test_commands.py -q -k doctor
 ```
