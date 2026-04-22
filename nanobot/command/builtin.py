@@ -187,6 +187,38 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
     )
 
 
+async def cmd_recall(ctx: CommandContext) -> OutboundMessage:
+    """Search prior sessions for related work."""
+    from nanobot.session.search import SessionSearchService
+
+    query = ctx.args.strip()
+    if not query:
+        content = "Usage: `/recall <query>`"
+    else:
+        service = SessionSearchService(ctx.loop.workspace)
+        hits = service.search(query, limit=3, exclude_session_key=ctx.key)
+        if not hits:
+            content = f'No prior session matches found for "{query}".'
+        else:
+            lines = [f'## Session recall for "{query}"', ""]
+            for hit in hits:
+                lines.append(f"- Session: `{hit.session_key}`")
+                if hit.last_timestamp:
+                    lines.append(f"  Last activity: {hit.last_timestamp}")
+                lines.append(f"  Excerpt: {hit.excerpt}")
+                lines.append("")
+            content = "\n".join(lines).rstrip()
+    metadata = {"render_as": "text"}
+    if (thread_id := ctx.msg.metadata.get("message_thread_id")) is not None:
+        metadata["message_thread_id"] = thread_id
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content=content,
+        metadata=metadata,
+    )
+
+
 def _extract_changed_files(diff: str) -> list[str]:
     """Extract changed file paths from a unified diff."""
     files: list[str] = []
@@ -381,6 +413,7 @@ async def cmd_help(ctx: CommandContext) -> OutboundMessage:
         "/dream — Manually trigger Dream consolidation",
         "/dream-log — Show what the last Dream changed",
         "/dream-restore — Revert memory to a previous state",
+        "/recall <query> — Search prior session history",
         "/model — Show current model",
         "/model <model-id> — Switch model for this session",
         "/model temp — Show temperature settings",
@@ -417,6 +450,7 @@ def build_help_text() -> str:
         "/dream — Manually trigger Dream consolidation",
         "/dream-log — Show what the last Dream changed",
         "/dream-restore — Revert memory to a previous state",
+        "/recall <query> — Search prior session history",
         "/model — Show current model",
         "/model <model-id> — Switch model for this session",
         "/model temp — Show temperature settings",
@@ -437,6 +471,8 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.prefix("/dream-log ", cmd_dream_log)
     router.exact("/dream-restore", cmd_dream_restore)
     router.prefix("/dream-restore ", cmd_dream_restore)
+    router.exact("/recall", cmd_recall)
+    router.prefix("/recall ", cmd_recall)
     router.exact("/model", cmd_model)
     router.exact("/status", cmd_status)
     router.exact("/help", cmd_help)

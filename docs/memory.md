@@ -123,6 +123,7 @@ Memory is not hidden behind the curtain. Users can inspect and guide it.
 | `/dream-log <sha>` | Show a specific Dream change |
 | `/dream-restore` | List recent Dream memory versions |
 | `/dream-restore <sha>` | Restore memory to the state before a specific change |
+| `/recall <query>` | Search prior sessions for relevant past work |
 
 These commands exist for a reason: automatic memory is powerful, but users should always retain the right to inspect, understand, and restore it.
 
@@ -137,6 +138,14 @@ This gives memory a history of its own:
 - you can restore a previous state
 
 That turns memory from a silent mutation into an auditable process.
+
+## Dream Skill Proposals
+
+Dream can also detect repeated, reusable workflows and write them as reviewable proposals instead of installing them directly.
+
+Those proposals live under `memory/skill-proposals/` inside the workspace. They use the same markdown/frontmatter shape as a normal skill so they can be reviewed and promoted later.
+
+This keeps the learning loop useful without letting Dream silently mutate the live `skills/` directory.
 
 ## Configuration
 
