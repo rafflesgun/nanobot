@@ -71,7 +71,7 @@ def run_provider_checks(config: Config, *, live: bool) -> list[DoctorCheckResult
             DoctorCheckResult(
                 section=_SECTION,
                 check_id="provider_live",
-                status=DoctorStatus.OK if ok else DoctorStatus.WARN,
+                status=DoctorStatus.OK if ok else DoctorStatus.FAIL,
                 message=message,
                 hint=None if ok else "Verify credentials, API base, and provider reachability.",
             )

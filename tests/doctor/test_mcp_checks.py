@@ -1,3 +1,5 @@
+import asyncio
+
 from nanobot.config.schema import Config
 from nanobot.doctor.checks.mcp import run_mcp_checks
 
@@ -78,5 +80,33 @@ def test_mcp_live_checks_translate_probe_errors_to_results(monkeypatch) -> None:
     results = run_mcp_checks(config, live=True)
 
     live_result = next(r for r in results if r.check_id == "mcp_demo_live")
-    assert live_result.status.value == "warn"
+    assert live_result.status.value == "fail"
     assert "boom" in live_result.message
+
+
+def test_mcp_live_checks_translate_timeouts_to_fail_results(monkeypatch) -> None:
+    config = Config.model_validate(
+        {
+            "tools": {
+                "mcpServers": {
+                    "demo": {
+                        "enabled": True,
+                        "transport": "stdio",
+                        "command": "python",
+                        "args": ["server.py"],
+                    }
+                }
+            }
+        }
+    )
+
+    async def _fake_probe(*_args, **_kwargs):
+        raise asyncio.TimeoutError("timed out")
+
+    monkeypatch.setattr("nanobot.doctor.checks.mcp._probe_mcp_server", _fake_probe)
+
+    results = run_mcp_checks(config, live=True)
+
+    live_result = next(r for r in results if r.check_id == "mcp_demo_live")
+    assert live_result.status.value == "fail"
+    assert "timed out" in live_result.message.lower()

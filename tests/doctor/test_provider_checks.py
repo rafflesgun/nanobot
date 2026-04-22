@@ -29,3 +29,20 @@ def test_provider_live_checks_call_probe_when_enabled(monkeypatch) -> None:
     run_provider_checks(config, live=True)
 
     assert called["value"] is True
+
+
+def test_provider_live_failures_are_fail_results(monkeypatch) -> None:
+    config = Config()
+    config.providers.openrouter.api_key = "sk-or-test"
+    config.agents.defaults.model = "openrouter/anthropic/claude-opus-4-5"
+
+    def _fake_probe(*_args, **_kwargs):
+        return False, "unreachable"
+
+    monkeypatch.setattr("nanobot.doctor.checks.providers._probe_provider", _fake_probe)
+
+    results = run_provider_checks(config, live=True)
+
+    live_result = next(r for r in results if r.check_id == "provider_live")
+    assert live_result.status.value == "fail"
+    assert "unreachable" in live_result.message

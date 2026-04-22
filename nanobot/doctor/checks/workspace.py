@@ -15,7 +15,7 @@ _REQUIRED_SUBDIRS: list[tuple[str, str]] = [
     ("sessions", "sessions_dir"),
     ("cron", "cron_dir"),
     ("skills", "skills_dir"),
-    ("skill_proposals", "skill_proposals_dir"),
+    ("memory/skill-proposals", "skill_proposals_dir"),
 ]
 
 

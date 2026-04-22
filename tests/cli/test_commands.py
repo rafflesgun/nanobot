@@ -273,6 +273,42 @@ def test_doctor_command_live_json_includes_live_mode_and_probe_results(tmp_path,
     assert "mcp_demo_live" in check_ids
 
 
+def test_doctor_live_json_returns_nonzero_on_live_failures(tmp_path, monkeypatch):
+    config_file = tmp_path / "config.json"
+    config_file.write_text("{}", encoding="utf-8")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    from nanobot.doctor.service import DoctorService
+    from nanobot.doctor.types import DoctorCheckResult, DoctorReport, DoctorStatus
+
+    def _fake_run(self, *, config_path, workspace, live):
+        return DoctorReport(
+            mode="live",
+            config_path=str(config_path),
+            workspace_path=str(workspace),
+            results=[
+                DoctorCheckResult(
+                    section="providers",
+                    check_id="provider_live",
+                    status=DoctorStatus.FAIL,
+                    message="unreachable",
+                )
+            ],
+        )
+
+    monkeypatch.setattr(DoctorService, "run", _fake_run)
+
+    result = runner.invoke(
+        app,
+        ["doctor", "--config", str(config_file), "--workspace", str(workspace), "--live", "--json"],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["summary"]["fail"] == 1
+
+
 def test_config_matches_github_copilot_codex_with_hyphen_prefix():
     config = Config()
     config.agents.defaults.model = "github-copilot/gpt-5.3-codex"

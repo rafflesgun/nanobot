@@ -24,11 +24,22 @@ def test_workspace_checks_report_required_runtime_dirs(tmp_path: Path) -> None:
 def test_workspace_checks_all_pass_when_dirs_exist(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    for subdir in ["memory", "sessions", "cron", "skills", "skill_proposals"]:
+    for subdir in ["memory", "sessions", "cron", "skills"]:
         (workspace / subdir).mkdir()
+    (workspace / "memory" / "skill-proposals").mkdir(parents=True)
 
     results = run_workspace_checks(workspace)
     assert all(r.status.value == "ok" for r in results)
+
+
+def test_workspace_checks_use_runtime_skill_proposals_path(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    results = run_workspace_checks(workspace)
+
+    proposal_result = next(r for r in results if r.check_id == "skill_proposals_dir")
+    assert "memory/skill-proposals" in proposal_result.message
 
 
 def test_workspace_checks_report_not_writable(tmp_path: Path) -> None:

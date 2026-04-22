@@ -12,6 +12,7 @@ from nanobot.doctor.types import DoctorCheckResult, DoctorStatus
 
 _SECTION = "mcp"
 _TRANSPORTS = {"stdio", "sse", "streamableHttp"}
+_LIVE_PROBE_TIMEOUT_S = 5.0
 
 
 def run_mcp_checks(config: Config, *, live: bool) -> list[DoctorCheckResult]:
@@ -23,10 +24,13 @@ def run_mcp_checks(config: Config, *, live: bool) -> list[DoctorCheckResult]:
 
         if live:
             try:
-                ok, message = asyncio.run(_probe_mcp_server(name, server_cfg))
+                ok, message = asyncio.run(_probe_mcp_server_with_timeout(name, server_cfg))
             except RuntimeError as exc:
                 ok = False
                 message = f"MCP live probe failed: {exc}"
+            except asyncio.TimeoutError as exc:
+                ok = False
+                message = f"MCP live probe timed out: {exc}"
             except Exception as exc:
                 ok = False
                 message = f"MCP live probe failed: {type(exc).__name__}: {exc}"
@@ -35,7 +39,7 @@ def run_mcp_checks(config: Config, *, live: bool) -> list[DoctorCheckResult]:
                 DoctorCheckResult(
                     section=_SECTION,
                     check_id=f"mcp_{name}_live",
-                    status=DoctorStatus.OK if ok else DoctorStatus.WARN,
+                    status=DoctorStatus.OK if ok else DoctorStatus.FAIL,
                     message=message,
                     hint=None if ok else "Verify the MCP server command or URL and confirm it accepts connections.",
                 )
@@ -123,3 +127,7 @@ async def _probe_mcp_server(name: str, server_cfg: MCPServerConfig) -> tuple[boo
         await stack.aclose()
 
     return True, f"MCP live probe connected to server '{name}'."
+
+
+async def _probe_mcp_server_with_timeout(name: str, server_cfg: MCPServerConfig) -> tuple[bool, str]:
+    return await asyncio.wait_for(_probe_mcp_server(name, server_cfg), timeout=_LIVE_PROBE_TIMEOUT_S)
