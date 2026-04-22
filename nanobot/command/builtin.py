@@ -17,15 +17,14 @@ async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
     """Cancel all active tasks and subagents for the session."""
     loop = ctx.loop
     msg = ctx.msg
-    tasks = loop._active_tasks.pop(msg.session_key, [])
-    cancelled = sum(1 for t in tasks if not t.done() and t.cancel())
-    for t in tasks:
-        try:
-            await t
-        except (asyncio.CancelledError, Exception):
-            pass
-    sub_cancelled = await loop.subagents.cancel_by_session(msg.session_key)
-    total = cancelled + sub_cancelled
+    if hasattr(loop, "_cancel_active_tasks"):
+        total = await loop._cancel_active_tasks(msg.session_key)
+    else:
+        tasks = [t for t in loop._active_tasks.get(msg.session_key, []) if not t.done()]
+        for task in tasks:
+            task.cancel()
+        subagents = await loop.subagents.cancel_by_session(msg.session_key)
+        total = len(tasks) + subagents
     content = f"Stopped {total} task(s)." if total else "No active task to stop."
     # Preserve topic thread context so the reply stays in the correct topic
     metadata = {
@@ -117,8 +116,15 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
 
 
 async def cmd_new(ctx: CommandContext) -> OutboundMessage:
-    """Start a fresh session."""
+    """Stop active task and start a fresh session."""
     loop = ctx.loop
+    if hasattr(loop, "_cancel_active_tasks"):
+        await loop._cancel_active_tasks(ctx.key)
+    else:
+        tasks = [t for t in loop._active_tasks.get(ctx.key, []) if not t.done()]
+        for task in tasks:
+            task.cancel()
+        await loop.subagents.cancel_by_session(ctx.key)
     session = ctx.session or loop.sessions.get_or_create(ctx.key)
     snapshot = session.messages[session.last_consolidated :]
     session.clear()
@@ -404,7 +410,7 @@ def build_help_text() -> str:
     """Build canonical help text shared across channels."""
     lines = [
         "🐈 nanobot commands:",
-        "/new — Start a new conversation",
+        "/new — Stop current task and start a new conversation",
         "/stop — Stop the current task",
         "/restart — Restart the bot",
         "/status — Show bot status",

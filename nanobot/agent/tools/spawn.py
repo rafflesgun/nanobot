@@ -1,5 +1,6 @@
 """Spawn tool for creating background subagents."""
 
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
 from nanobot.agent.tools.base import Tool
@@ -13,11 +14,15 @@ class SpawnTool(Tool):
 
     def __init__(self, manager: "SubagentManager"):
         self._manager = manager
-        self._origin_channel = "cli"
-        self._origin_chat_id = "direct"
-        self._session_key = "cli:direct"
-        self._origin_thread_id: int | None = None
-        self._model_override: str | None = None
+        self._origin_channel: ContextVar[str] = ContextVar("spawn_origin_channel", default="cli")
+        self._origin_chat_id: ContextVar[str] = ContextVar("spawn_origin_chat_id", default="direct")
+        self._session_key: ContextVar[str] = ContextVar("spawn_session_key", default="cli:direct")
+        self._origin_thread_id: ContextVar[int | None] = ContextVar(
+            "spawn_origin_thread_id", default=None
+        )
+        self._model_override: ContextVar[str | None] = ContextVar(
+            "spawn_model_override", default=None
+        )
 
     def set_context(
         self,
@@ -28,15 +33,18 @@ class SpawnTool(Tool):
         thread_id: int | None = None,
     ) -> None:
         """Set the origin context for subagent announcements."""
-        self._origin_channel = channel
-        self._origin_chat_id = chat_id
-        self._session_key = effective_key or (
-            f"{channel}:{chat_id}:topic:{thread_id}"
-            if thread_id is not None
-            else f"{channel}:{chat_id}"
+        self._origin_channel.set(channel)
+        self._origin_chat_id.set(chat_id)
+        self._session_key.set(
+            effective_key
+            or (
+                f"{channel}:{chat_id}:topic:{thread_id}"
+                if thread_id is not None
+                else f"{channel}:{chat_id}"
+            )
         )
-        self._origin_thread_id = thread_id
-        self._model_override = model_override
+        self._origin_thread_id.set(thread_id)
+        self._model_override.set(model_override)
 
     @property
     def name(self) -> str:
@@ -91,13 +99,25 @@ class SpawnTool(Tool):
         **kwargs: Any,
     ) -> str:
         """Spawn a subagent to execute the given task."""
-        return await self._manager.spawn(
-            task=task,
-            label=label,
-            origin_channel=self._origin_channel,
-            origin_chat_id=self._origin_chat_id,
-            origin_thread_id=self._origin_thread_id,
-            session_key=self._session_key,
-            subagent_id=subagent_id,
-            model_override=self._model_override,
-        )
+        spawn_kwargs: dict[str, Any] = {
+            "task": task,
+            "label": label,
+            "origin_channel": self._origin_channel.get(),
+            "origin_chat_id": self._origin_chat_id.get(),
+            "origin_thread_id": self._origin_thread_id.get(),
+            "session_key": self._session_key.get(),
+            "subagent_id": subagent_id,
+            "model_override": self._model_override.get(),
+        }
+        try:
+            return await self._manager.spawn(**spawn_kwargs)
+        except TypeError as exc:
+            if "unexpected keyword argument" not in str(exc):
+                raise
+            return await self._manager.spawn(
+                task=task,
+                label=label,
+                origin_channel=self._origin_channel.get(),
+                origin_chat_id=self._origin_chat_id.get(),
+                session_key=self._session_key.get(),
+            )
