@@ -14,6 +14,8 @@
 | `nanobot serve` | Start the OpenAI-compatible API |
 | `nanobot gateway` | Start the gateway |
 | `nanobot status` | Show status |
+| `nanobot doctor` | Diagnose deployment/runtime readiness |
+| `nanobot doctor --live` | Run bounded live integration probes |
 | `nanobot provider login openai-codex` | OAuth login for providers |
 | `nanobot channels login <channel>` | Authenticate a channel interactively |
 | `nanobot channels status` | Show channel status |

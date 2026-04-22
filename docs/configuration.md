@@ -7,6 +7,10 @@ Config file: `~/.nanobot/config.json`
 > run `nanobot onboard`, then answer `N` when asked whether to overwrite the config.
 > nanobot will merge in missing default fields and keep your current settings.
 
+## Operational Checks
+
+Run `nanobot doctor` after onboarding, after changing provider or channel configuration, and before deploying or debugging a runtime issue. In containerized deployments, run the same check inside the running container with `docker exec <container> nanobot doctor` so the command sees the container's mounted config, workspace, and network environment. Add `--live` when you want bounded live probes against configured services; without it, `nanobot doctor` stays on local readiness checks only.
+
 ## Environment Variables for Secrets
 
 Instead of storing secrets directly in `config.json`, you can use `${VAR_NAME}` references that are resolved from environment variables at startup:

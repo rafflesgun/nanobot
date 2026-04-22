@@ -1,6 +1,7 @@
 """CLI commands for nanobot."""
 
 import asyncio
+import json
 import os
 import select
 import signal
@@ -51,6 +52,7 @@ class SafeFileHistory(FileHistory):
 from nanobot.cli.stream import StreamRenderer, ThinkingSpinner
 from nanobot.config.paths import get_workspace_path, is_default_workspace
 from nanobot.config.schema import Config
+from nanobot.doctor.service import DoctorService
 from nanobot.utils.helpers import sync_workspace_templates
 from nanobot.utils.restart import (
     consume_restart_notice_from_env,
@@ -1465,6 +1467,87 @@ def status():
                 console.print(
                     f"{spec.label}: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}"
                 )
+
+
+@app.command()
+def doctor(
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+    live: bool = typer.Option(False, "--live", help="Run live checks when available"),
+    json_output: bool = typer.Option(False, "--json", help="Render the report as JSON"),
+):
+    """Run local doctor checks for nanobot."""
+    report = DoctorService().run(
+        config_path=_resolve_doctor_config_path(config),
+        workspace=_resolve_doctor_workspace_path(config, workspace),
+        live=live,
+    )
+
+    if json_output:
+        typer.echo(
+            json.dumps(
+                {
+                    **report.model_dump(mode="json"),
+                    "summary": report.summary,
+                }
+            )
+        )
+    else:
+        console.print("Nanobot Doctor\n")
+        current_section = None
+        for result in report.results:
+            if result.section != current_section:
+                if current_section is not None:
+                    console.print()
+                current_section = result.section
+                console.print(f"[bold]{result.section}[/bold]")
+
+            style, symbol = _doctor_status_style(result.status.value)
+            console.print(f"[{style}]{symbol}[/{style}] {result.check_id}: {result.message}")
+            if result.hint:
+                console.print(f"  [dim]Hint: {result.hint}[/dim]")
+
+        console.print()
+        summary = report.summary
+        console.print(
+            "Summary: "
+            f"[green]{summary['ok']} ok[/green], "
+            f"[yellow]{summary['warn']} warn[/yellow], "
+            f"[red]{summary['fail']} fail[/red]"
+        )
+
+    if report.has_failures:
+        raise typer.Exit(1)
+
+
+def _resolve_doctor_config_path(config: str | None) -> Path:
+    from nanobot.config.loader import get_config_path
+
+    if config:
+        return Path(config).expanduser().resolve(strict=False)
+    return get_config_path().resolve(strict=False)
+
+
+def _resolve_doctor_workspace_path(config: str | None, workspace: str | None) -> Path:
+    from nanobot.config.loader import load_config, set_config_path
+
+    resolved_config_path = _resolve_doctor_config_path(config)
+    if config:
+        set_config_path(resolved_config_path)
+
+    if workspace:
+        return Path(workspace).expanduser().resolve(strict=False)
+
+    loaded = load_config(resolved_config_path if config else None)
+    return Path(loaded.workspace_path).expanduser().resolve(strict=False)
+
+
+def _doctor_status_style(status: str) -> tuple[str, str]:
+    if status == "ok":
+        return "green", "✓"
+    if status == "warn":
+        return "yellow", "!"
+    return "red", "✗"
 
 
 # ============================================================================
