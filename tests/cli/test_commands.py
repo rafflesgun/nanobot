@@ -198,6 +198,35 @@ def test_onboard_wizard_preserves_explicit_config_in_next_steps(tmp_path, monkey
     assert f"nanobot gateway --config {resolved_config}" in compact_output
 
 
+def test_doctor_command_returns_nonzero_on_failures(tmp_path, monkeypatch):
+    config_file = tmp_path / "config.json"
+    config_file.write_text("{}", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        ["doctor", "--config", str(config_file), "--workspace", str(tmp_path / "missing")],
+    )
+
+    assert result.exit_code != 0
+    assert "Nanobot Doctor" in result.stdout
+
+
+def test_doctor_command_supports_json_output(tmp_path, monkeypatch):
+    config_file = tmp_path / "config.json"
+    config_file.write_text("{}", encoding="utf-8")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    result = runner.invoke(
+        app,
+        ["doctor", "--config", str(config_file), "--workspace", str(workspace), "--json"],
+    )
+
+    payload = json.loads(result.stdout)
+    assert "results" in payload
+    assert "summary" in payload
+
+
 def test_config_matches_github_copilot_codex_with_hyphen_prefix():
     config = Config()
     config.agents.defaults.model = "github-copilot/gpt-5.3-codex"
