@@ -27,7 +27,9 @@ from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTo
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.search import GlobTool, GrepTool
+from nanobot.agent.tools.session_search import SessionSearchTool
 from nanobot.agent.tools.shell import ExecTool
+from nanobot.agent.tools.skill_manage import SkillManageTool
 from nanobot.agent.tools.self import MyTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
@@ -333,6 +335,8 @@ class AgentLoop:
             self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
         for cls in (GlobTool, GrepTool):
             self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
+        self.tools.register(SessionSearchTool(workspace=self.workspace))
+        self.tools.register(SkillManageTool(workspace=self.workspace))
         if self.exec_config.enable:
             self.tools.register(
                 ExecTool(
@@ -391,7 +395,7 @@ class AgentLoop:
         effective_key = session_key or (
             UNIFIED_SESSION_KEY if self._unified_session else f"{channel}:{chat_id}"
         )
-        for name in ("message", "spawn", "cron", "my"):
+        for name in ("message", "spawn", "cron", "my", "session_search"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
                     if name == "message":
@@ -406,6 +410,8 @@ class AgentLoop:
                             model_override=model_override,
                             thread_id=thread_id,
                         )
+                    elif name == "session_search":
+                        tool.set_context(session_key=effective_key)
                     else:
                         tool.set_context(channel, chat_id)
 
@@ -704,7 +710,9 @@ class AgentLoop:
             raw = msg.content.strip()
             if self.commands.is_priority(raw):
                 await self._dispatch_command_inline(
-                    msg, msg.session_key, raw,
+                    msg,
+                    msg.session_key,
+                    raw,
                     self.commands.dispatch_priority,
                 )
                 continue
@@ -714,7 +722,9 @@ class AgentLoop:
                 # dispatch them directly (same pattern as priority commands).
                 if self.commands.is_dispatchable_command(raw):
                     await self._dispatch_command_inline(
-                        msg, effective_key, raw,
+                        msg,
+                        effective_key,
+                        raw,
                         self.commands.dispatch,
                     )
                     continue

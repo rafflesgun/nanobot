@@ -42,6 +42,7 @@ understand intended behavior quickly.
 | **Tool definitions caching (#2205)**        | ✅     | agent/tools/registry.py                                | tests/test_tool_registry_caching.py    | `_definitions_cache` invalidated on reg/unreg |
 | **Incremental session saving (#2219)**      | ✅     | agent/loop.py, agent/subagent.py                       | tests/test_loop_incremental_save.py    | save offset tracks persisted content          |
 | **Repeated tool call protection**           | ✅     | agent/runner.py, utils/runtime.py, config/schema.py    | tests/agent/test_runner.py             | `maxRepeatLookups: 2` blocks infinite loops   |
+| **Learning loop upgrades (recall + reviewable skills)** | ✅ | session/search.py, agent/tools/session_search.py, agent/skills_manager.py, agent/tools/skill_manage.py, agent/skill_proposals.py, agent/memory.py, command/builtin.py | tests/agent/test_session_search.py, tests/tools/test_session_search_tool.py, tests/command/test_builtin_recall.py, tests/agent/test_skills_manager.py, tests/tools/test_skill_manage_tool.py, tests/agent/test_skill_proposals.py, tests/agent/test_dream.py | `/recall` excludes current session by default; Dream writes proposals to `memory/skill-proposals/`; `skill_manage` mutates workspace skills only |
 | Web search enhancements merged into main   | ℹ️     | agent/tools/web.py, README.md                          | tests/tools/test_web_search_tool.py    | Multi-provider search now upstream (`brave`, `tavily`, `duckduckgo`, `searxng`, `jina`) |
 | Runtime hardening (PR #2733)               | ℹ️     | agent/runner.py, agent/hook.py, agent/loop.py          | tests/agent/test_runner.py             | Now upstream: AgentRunner, checkpoints, tool batching, provider retry |
 
@@ -773,3 +774,36 @@ print(len(_parse_kimi_tool_calls(test)), 'tool calls parsed')
 **Persistence**
 - Stored in `~/.nanobot/overrides.json` alongside model and TTS overrides
 - Keyed by session_key (e.g., `telegram:123456789:topic:42`)
+
+### 27. Learning loop upgrades: session recall + reviewable skills
+
+**Core behavior**
+- `/recall <query>` searches prior session transcripts for related work and excludes the current session by default
+- The agent also gets a read-only `session_search` tool that returns compact excerpts from matching prior sessions
+- `skill_manage` provides safe workspace-only mutations for skills: create, replace, patch, delete, apply proposal, reject proposal
+- Built-in skills remain read-only; only `workspace/skills/` is mutable
+- Dream no longer writes skills directly into `workspace/skills/`
+- Dream now writes reviewable proposals into `workspace/memory/skill-proposals/`
+- Proposal files use skill-compatible frontmatter/body so they can be promoted without translation
+
+**Files to protect during conflicts**
+- `nanobot/session/search.py`
+- `nanobot/agent/tools/session_search.py`
+- `nanobot/agent/skills_manager.py`
+- `nanobot/agent/tools/skill_manage.py`
+- `nanobot/agent/skill_proposals.py`
+- `nanobot/agent/memory.py`
+- `nanobot/templates/agent/dream_phase2.md`
+- `nanobot/command/builtin.py`
+
+**Resolution priority**
+1. Keep `/recall` as prior-session recall, not current-session search.
+2. Keep `session_search` read-only and dependency-light (scan-based JSONL recall in this branch).
+3. Keep `skill_manage` limited to workspace-local skills; do not allow mutation of bundled skills.
+4. Keep Dream proposal-based: `memory/skill-proposals/<name>.md`, not direct writes to `skills/<name>/SKILL.md`.
+5. Keep proposal promotion explicit via `apply_proposal` / `reject_proposal` instead of silent installation.
+
+**Quick validation**
+```bash
+pytest tests/agent/test_session_search.py tests/tools/test_session_search_tool.py tests/command/test_builtin_recall.py tests/agent/test_skills_manager.py tests/tools/test_skill_manage_tool.py tests/agent/test_skill_proposals.py tests/agent/test_dream.py -q
+```

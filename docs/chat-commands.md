@@ -13,6 +13,7 @@ These commands work inside chat channels and interactive agent sessions:
 | `/dream-log <sha>` | Show a specific Dream memory change |
 | `/dream-restore` | List recent Dream memory versions |
 | `/dream-restore <sha>` | Restore memory to the state before a specific change |
+| `/recall <query>` | Search prior sessions for related work |
 | `/help` | Show available in-chat commands |
 
 ## Periodic Tasks
