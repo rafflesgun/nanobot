@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+from contextlib import suppress
+
+from nanobot.agent.tools.mcp import connect_mcp_servers
+from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.schema import Config, MCPServerConfig
 from nanobot.doctor.types import DoctorCheckResult, DoctorStatus
 
@@ -16,16 +21,25 @@ def run_mcp_checks(config: Config, *, live: bool) -> list[DoctorCheckResult]:
     for name, server_cfg in sorted(config.tools.mcp_servers.items()):
         results.append(_check_server(name, server_cfg))
 
-    if live and config.tools.mcp_servers:
-        results.append(
-            DoctorCheckResult(
-                section=_SECTION,
-                check_id="mcp_live",
-                status=DoctorStatus.WARN,
-                message="Live MCP connection checks are not implemented yet.",
-                hint="This task only validates local MCP configuration shape.",
+        if live:
+            try:
+                ok, message = asyncio.run(_probe_mcp_server(name, server_cfg))
+            except RuntimeError as exc:
+                ok = False
+                message = f"MCP live probe failed: {exc}"
+            except Exception as exc:
+                ok = False
+                message = f"MCP live probe failed: {type(exc).__name__}: {exc}"
+
+            results.append(
+                DoctorCheckResult(
+                    section=_SECTION,
+                    check_id=f"mcp_{name}_live",
+                    status=DoctorStatus.OK if ok else DoctorStatus.WARN,
+                    message=message,
+                    hint=None if ok else "Verify the MCP server command or URL and confirm it accepts connections.",
+                )
             )
-        )
 
     return results
 
@@ -96,3 +110,16 @@ def _unmatched_enabled_tools(server_name: str, enabled_tools: list[str]) -> list
             continue
         unmatched.append(tool_name)
     return unmatched
+
+
+async def _probe_mcp_server(name: str, server_cfg: MCPServerConfig) -> tuple[bool, str]:
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers({name: server_cfg}, registry)
+    stack = stacks.get(name)
+    if stack is None:
+        return False, f"MCP live probe could not connect to server '{name}'."
+
+    with suppress(Exception):
+        await stack.aclose()
+
+    return True, f"MCP live probe connected to server '{name}'."

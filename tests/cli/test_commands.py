@@ -227,6 +227,52 @@ def test_doctor_command_supports_json_output(tmp_path, monkeypatch):
     assert "summary" in payload
 
 
+def test_doctor_command_live_json_includes_live_mode_and_probe_results(tmp_path, monkeypatch):
+    config_file = tmp_path / "config.json"
+    config_file.write_text(
+        json.dumps(
+            {
+                "agents": {"defaults": {"model": "openrouter/anthropic/claude-opus-4-5"}},
+                "providers": {"openrouter": {"apiKey": "sk-or-test"}},
+                "tools": {
+                    "mcpServers": {
+                        "demo": {
+                            "enabled": True,
+                            "transport": "stdio",
+                            "command": "python",
+                            "args": ["server.py"],
+                        }
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    monkeypatch.setattr(
+        "nanobot.doctor.checks.providers._probe_provider",
+        lambda *_args, **_kwargs: (True, "ok"),
+    )
+
+    async def _fake_mcp_probe(*_args, **_kwargs):
+        return True, "connected"
+
+    monkeypatch.setattr("nanobot.doctor.checks.mcp._probe_mcp_server", _fake_mcp_probe)
+
+    result = runner.invoke(
+        app,
+        ["doctor", "--config", str(config_file), "--workspace", str(workspace), "--live", "--json"],
+    )
+
+    payload = json.loads(result.stdout)
+    assert payload["mode"] == "live"
+    check_ids = {entry["check_id"] for entry in payload["results"]}
+    assert "provider_live" in check_ids
+    assert "mcp_demo_live" in check_ids
+
+
 def test_config_matches_github_copilot_codex_with_hyphen_prefix():
     config = Config()
     config.agents.defaults.model = "github-copilot/gpt-5.3-codex"
