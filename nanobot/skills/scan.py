@@ -34,7 +34,10 @@ _RULES = (
         severity="critical",
         category="exfiltration",
         message="Potential environment secret exfiltration via curl.",
-        pattern=re.compile(r"curl\s+https?://\S*\$[A-Z_][A-Z0-9_]*", re.IGNORECASE),
+        pattern=re.compile(
+            r"curl\b[^\n]*\$[A-Z_][A-Z0-9_]*",
+            re.IGNORECASE,
+        ),
     ),
     _Rule(
         pattern_id="prompt_injection_ignore_rules",
@@ -62,7 +65,7 @@ _RULES = (
         severity="medium",
         category="obfuscation",
         message="Base64-decoded shell execution can hide behavior.",
-        pattern=re.compile(r"base64\s+-d|python\s+-c|bash\s+-c", re.IGNORECASE),
+        pattern=re.compile(r"base64\s+-d|echo\s+[^\n]*\|\s*(bash|sh|python|perl|ruby|node)", re.IGNORECASE),
     ),
 )
 
