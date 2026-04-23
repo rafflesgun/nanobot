@@ -10,6 +10,8 @@ from typing import Any
 
 import yaml
 
+from nanobot.skills.scan import scan_skill_content
+
 
 class SkillsManager:
     VALID_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -25,6 +27,13 @@ class SkillsManager:
         meta, error = self._validate_content(name, content)
         if error:
             return {"success": False, "error": error}
+        scan = self._scan_content(name, content)
+        if scan["verdict"] == "block":
+            return {
+                "success": False,
+                "error": "Skill content blocked by safety scan",
+                "scan": scan,
+            }
         path = self._skill_path(name)
         if path.exists():
             return {"success": False, "error": f"Skill '{name}' already exists"}
@@ -34,6 +43,7 @@ class SkillsManager:
             "name": name,
             "path": str(path),
             "description": meta["description"],
+            "scan": scan,
         }
 
     def replace(self, name: str, content: str) -> dict[str, Any]:
@@ -43,6 +53,13 @@ class SkillsManager:
         meta, error = self._validate_content(name, content)
         if error:
             return {"success": False, "error": error}
+        scan = self._scan_content(name, content)
+        if scan["verdict"] == "block":
+            return {
+                "success": False,
+                "error": "Skill content blocked by safety scan",
+                "scan": scan,
+            }
         path = self._skill_path(name)
         if not path.exists():
             return {"success": False, "error": f"Skill '{name}' does not exist"}
@@ -52,6 +69,7 @@ class SkillsManager:
             "name": name,
             "path": str(path),
             "description": meta["description"],
+            "scan": scan,
         }
 
     def patch(self, name: str, old_text: str, new_text: str) -> dict[str, Any]:
@@ -68,8 +86,15 @@ class SkillsManager:
         _, validate_error = self._validate_content(name, updated)
         if validate_error:
             return {"success": False, "error": validate_error}
+        scan = self._scan_content(name, updated)
+        if scan["verdict"] == "block":
+            return {
+                "success": False,
+                "error": "Skill content blocked by safety scan",
+                "scan": scan,
+            }
         self._atomic_write(path, updated)
-        return {"success": True, "name": name, "path": str(path)}
+        return {"success": True, "name": name, "path": str(path), "scan": scan}
 
     def delete(self, name: str) -> dict[str, Any]:
         error = self._validate_target(name)
@@ -121,6 +146,10 @@ class SkillsManager:
 
     def _skill_path(self, name: str) -> Path:
         return self.skills_dir / name / "SKILL.md"
+
+    @staticmethod
+    def _scan_content(name: str, content: str) -> dict[str, Any]:
+        return scan_skill_content(name, content).model_dump()
 
     @staticmethod
     def _atomic_write(path: Path, content: str) -> None:

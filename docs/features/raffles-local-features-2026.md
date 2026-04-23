@@ -43,6 +43,7 @@ understand intended behavior quickly.
 | **Incremental session saving (#2219)**      | ✅     | agent/loop.py, agent/subagent.py                       | tests/test_loop_incremental_save.py    | save offset tracks persisted content          |
 | **Repeated tool call protection**           | ✅     | agent/runner.py, utils/runtime.py, config/schema.py    | tests/agent/test_runner.py             | `maxRepeatLookups: 2` blocks infinite loops   |
 | **Learning loop upgrades (recall + reviewable skills)** | ✅ | session/search.py, agent/tools/session_search.py, agent/skills_manager.py, agent/tools/skill_manage.py, agent/skill_proposals.py, agent/memory.py, command/builtin.py | tests/agent/test_session_search.py, tests/tools/test_session_search_tool.py, tests/command/test_builtin_recall.py, tests/agent/test_skills_manager.py, tests/tools/test_skill_manage_tool.py, tests/agent/test_skill_proposals.py, tests/agent/test_dream.py | `/recall` excludes current session by default; Dream writes proposals to `memory/skill-proposals/`; `skill_manage` mutates workspace skills only |
+| **Skill Scan v1 for workspace skill mutations** | ✅ | skills/scan.py, agent/skills_manager.py, agent/tools/skill_manage.py | tests/skills/test_scan.py, tests/agent/test_skills_manager.py, tests/tools/test_skill_manage_tool.py, tests/agent/test_skill_proposals.py, tests/agent/test_dream.py | `safe` allows writes; `warn` allows writes with findings; `block` rejects create/replace/patch/apply_proposal |
 | **`nanobot doctor` deployment diagnostics** | ✅ | doctor/types.py, doctor/service.py, doctor/checks/*.py, cli/commands.py | tests/doctor/*.py, tests/cli/test_commands.py | `nanobot doctor` local checks by default; `--live` adds bounded provider/MCP probes; `--json` for scripting; exit 1 on failures |
 | Web search enhancements merged into main   | ℹ️     | agent/tools/web.py, README.md                          | tests/tools/test_web_search_tool.py    | Multi-provider search now upstream (`brave`, `tavily`, `duckduckgo`, `searxng`, `jina`) |
 | Runtime hardening (PR #2733)               | ℹ️     | agent/runner.py, agent/hook.py, agent/loop.py          | tests/agent/test_runner.py             | Now upstream: AgentRunner, checkpoints, tool batching, provider retry |
@@ -809,7 +810,57 @@ print(len(_parse_kimi_tool_calls(test)), 'tool calls parsed')
 pytest tests/agent/test_session_search.py tests/tools/test_session_search_tool.py tests/command/test_builtin_recall.py tests/agent/test_skills_manager.py tests/tools/test_skill_manage_tool.py tests/agent/test_skill_proposals.py tests/agent/test_dream.py -q
 ```
 
-### 28. `nanobot doctor` deployment diagnostics
+### 28. Skill Scan v1 for workspace skill mutations
+
+**Core behavior**
+- `scan_skill_content()` classifies workspace skill text as `safe`, `warn`, or `block` before mutation writes happen
+- v1 coverage is intentionally regex-based and targets five classes of risky content:
+  - environment secret exfiltration via `curl ... $ENV_VAR`
+  - prompt-injection language such as `ignore previous instructions`
+  - destructive shell patterns such as `rm -rf`
+  - persistence via `crontab`
+  - obfuscated execution via `base64 -d`, `python -c`, or `bash -c`
+- `critical` and `high` findings become `block`; `medium` findings become `warn`; no findings returns `safe`
+
+**Enforcement points**
+- `SkillsManager.create()` scans full content before first write to `workspace/skills/<name>/SKILL.md`
+- `SkillsManager.replace()` scans full replacement content before overwriting an existing skill
+- `SkillsManager.patch()` scans the post-patch result before the atomic write, so partial edits cannot bypass the scanner
+- `SkillManageTool.execute(action="apply_proposal")` enforces the same path by loading proposal content and routing it through `SkillsManager.create()` before proposal promotion
+
+**Verdict semantics**
+- `safe`: mutation succeeds and the returned JSON includes `scan: {"verdict": "safe"}`
+- `warn`: mutation still succeeds, but findings are surfaced to the caller in the returned `scan` payload for review/logging
+- `block`: mutation fails with `success: false`, error `Skill content blocked by safety scan`, and the structured findings payload
+
+**Verification coverage**
+- `tests/skills/test_scan.py` locks the scanner verdicts and pattern coverage
+- `tests/agent/test_skills_manager.py` verifies `create`, `replace`, and `patch` reject blocked content and preserve scan payloads
+- `tests/tools/test_skill_manage_tool.py` verifies tool-level JSON responses include scan results and proposal application inherits enforcement
+- `tests/agent/test_skill_proposals.py` and `tests/agent/test_dream.py` cover the proposal workflow that now terminates in the same guarded mutation path
+
+**Files to protect during conflicts**
+- `nanobot/skills/scan.py`
+- `nanobot/agent/skills_manager.py`
+- `nanobot/agent/tools/skill_manage.py`
+- `tests/skills/test_scan.py`
+- `tests/agent/test_skills_manager.py`
+- `tests/tools/test_skill_manage_tool.py`
+- `tests/agent/test_skill_proposals.py`
+- `tests/agent/test_dream.py`
+
+**Resolution priority**
+1. Keep all four mutation entry points (`create`, `replace`, `patch`, `apply_proposal`) on the scan-before-write path.
+2. Keep `warn` as non-blocking; only `critical`/`high` findings should reject writes in v1.
+3. Keep the scan payload in successful and blocked results so callers can inspect findings without re-running a scan.
+4. Keep proposal promotion routed through `SkillsManager` instead of direct file writes, or proposal installs will bypass the contract.
+
+**Quick validation**
+```bash
+python3 -m pytest tests/skills/test_scan.py tests/agent/test_skills_manager.py tests/tools/test_skill_manage_tool.py tests/agent/test_skill_proposals.py tests/agent/test_dream.py -q
+```
+
+### 29. `nanobot doctor` deployment diagnostics
 
 **Core behavior**
 - `nanobot doctor` runs fast, deterministic, read-only checks for deployment readiness
