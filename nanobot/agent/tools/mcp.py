@@ -2,6 +2,7 @@
 
 import asyncio
 from contextlib import AsyncExitStack
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
@@ -94,14 +95,23 @@ def _normalize_schema_for_openai(schema: Any) -> dict[str, Any]:
 class MCPToolWrapper(Tool):
     """Wraps a single MCP server tool as a nanobot Tool."""
 
-    def __init__(self, session, server_name: str, tool_def, tool_timeout: int = 30):
+    def __init__(
+        self,
+        session,
+        server_name: str,
+        tool_def,
+        tool_timeout: int = 30,
+        reconnect_session: Callable[[str, str], Awaitable[Any | None]] | None = None,
+    ):
         self._session = session
+        self._server_name = server_name
         self._original_name = tool_def.name
         self._name = f"mcp_{server_name}_{tool_def.name}"
         self._description = tool_def.description or tool_def.name
         raw_schema = tool_def.inputSchema or {"type": "object", "properties": {}}
         self._parameters = _normalize_schema_for_openai(raw_schema)
         self._tool_timeout = tool_timeout
+        self._reconnect_session = reconnect_session
 
     @property
     def name(self) -> str:
@@ -117,6 +127,7 @@ class MCPToolWrapper(Tool):
 
     async def execute(self, **kwargs: Any) -> str:
         from mcp import types
+        from mcp.shared.exceptions import McpError
 
         for attempt in range(2):  # At most 1 retry
             try:
@@ -137,6 +148,30 @@ class MCPToolWrapper(Tool):
                     raise
                 logger.warning("MCP tool '{}' was cancelled by server/SDK", self._name)
                 return "(MCP tool call was cancelled)"
+            except McpError as exc:
+                if (
+                    attempt == 0
+                    and self._reconnect_session is not None
+                    and exc.error.message == "Session terminated"
+                ):
+                    logger.warning(
+                        "MCP tool '{}' session terminated, reconnecting server '{}' once...",
+                        self._name,
+                        self._server_name,
+                    )
+                    fresh_session = await self._reconnect_session(
+                        self._server_name, self._original_name
+                    )
+                    if fresh_session is not None:
+                        self._session = fresh_session
+                        continue
+                logger.error(
+                    "MCP tool '{}' failed: code={} message={}",
+                    self._name,
+                    exc.error.code,
+                    exc.error.message,
+                )
+                return f"(MCP tool call failed: {exc.error.message} [code {exc.error.code}])"
             except Exception as exc:
                 if _is_transient(exc):
                     if attempt == 0:
@@ -397,6 +432,33 @@ async def connect_mcp_servers(
     from mcp.client.stdio import stdio_client
     from mcp.client.streamable_http import streamable_http_client
 
+    async def reconnect_single_server(name: str, tool_name: str) -> Any | None:
+        stack = server_stacks.pop(name, None)
+        if stack is not None:
+            try:
+                await stack.aclose()
+            except Exception as exc:
+                logger.debug("MCP server '{}': cleanup before reconnect failed: {}", name, exc)
+
+        cfg = mcp_servers.get(name)
+        if cfg is None:
+            logger.warning("MCP server '{}': missing config for reconnect", name)
+            return None
+
+        tool_name_prefix = f"mcp_{name}_"
+        for registered_name in list(registry.tool_names):
+            if registered_name.startswith(tool_name_prefix):
+                registry.unregister(registered_name)
+
+        reconnect_result = await connect_single_server(name, cfg)
+        if reconnect_result is None or reconnect_result[1] is None:
+            server_stacks.pop(name, None)
+            return None
+
+        server_stacks[reconnect_result[0]] = reconnect_result[1]
+        tool = registry.get(f"mcp_{name}_{tool_name}")
+        return getattr(tool, "_session", None) if tool is not None else None
+
     async def connect_single_server(name: str, cfg) -> tuple[str, AsyncExitStack | None]:
         server_stack = AsyncExitStack()
         await server_stack.__aenter__()
@@ -481,7 +543,13 @@ async def connect_mcp_servers(
                         name,
                     )
                     continue
-                wrapper = MCPToolWrapper(session, name, tool_def, tool_timeout=cfg.tool_timeout)
+                wrapper = MCPToolWrapper(
+                    session,
+                    name,
+                    tool_def,
+                    tool_timeout=cfg.tool_timeout,
+                    reconnect_session=reconnect_single_server,
+                )
                 registry.register(wrapper)
                 logger.debug("MCP: registered tool '{}' from server '{}'", wrapper.name, name)
                 registered_count += 1
