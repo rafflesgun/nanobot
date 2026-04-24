@@ -135,6 +135,23 @@ class WorkflowRunTool(Tool):
                 ensure_ascii=False,
             )
 
+        active = self._progress.active(self._session_key)
+        if active is not None and active.workflow_name != name:
+            output = (
+                f"Workflow '{active.workflow_name}' is active. "
+                f"Complete or abort it before starting '{name}'."
+            )
+            return json.dumps(
+                {
+                    "success": False,
+                    "name": name,
+                    "mode": "step",
+                    "output": output,
+                    "error": output,
+                },
+                ensure_ascii=False,
+            )
+
         progress = self._progress.next(self._session_key)
         if not progress.success and "No active workflow" in progress.output:
             self._completed.pop(self._session_key, None)

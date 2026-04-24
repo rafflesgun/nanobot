@@ -32,6 +32,9 @@ class WorkflowProgressManager:
             total_steps=progress.total_steps,
         )
 
+    def active(self, session_key: str) -> WorkflowProgress | None:
+        return self._progress.get(session_key)
+
     def next(self, session_key: str) -> WorkflowProgressResult:
         progress = self._progress.get(session_key)
         if progress is None:

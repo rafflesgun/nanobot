@@ -26,6 +26,22 @@ description: Pre-release validation checklist
     )
 
 
+def write_other_workflow(workspace: Path) -> None:
+    workflows_dir = workspace / "workflows"
+    workflows_dir.mkdir(parents=True, exist_ok=True)
+    (workflows_dir / "deploy-check.md").write_text(
+        """---
+name: deploy-check
+description: Deployment validation checklist
+---
+
+1. Check deploy target.
+2. Confirm health checks.
+""",
+        encoding="utf-8",
+    )
+
+
 async def test_workflow_list_returns_summaries_and_invalid_entries(tmp_path) -> None:
     write_workflow(tmp_path)
     (tmp_path / "workflows" / "broken.md").write_text("not frontmatter", encoding="utf-8")
@@ -100,6 +116,39 @@ async def test_workflow_run_step_does_not_restart_after_completion(tmp_path) -> 
     assert after_completed["success"] is True
     assert "complete" in after_completed["output"].lower()
     assert "Step 1/2" not in after_completed["output"]
+
+
+async def test_workflow_run_step_rejects_different_active_workflow(tmp_path) -> None:
+    write_workflow(tmp_path)
+    write_other_workflow(tmp_path)
+    tool = WorkflowRunTool(workspace=tmp_path)
+    tool.set_context(session_key="cli:direct")
+
+    first = json.loads(await tool.execute(name="release-check", mode="step"))
+    mismatch = json.loads(await tool.execute(name="deploy-check", mode="step"))
+
+    assert "Step 1/2" in first["output"]
+    assert mismatch["success"] is False
+    assert "release-check" in mismatch["error"]
+    assert "abort" in mismatch["error"].lower() or "active" in mismatch["error"].lower()
+    assert "Confirm health checks" not in mismatch["output"]
+
+
+async def test_workflow_run_step_is_isolated_by_session_key(tmp_path) -> None:
+    write_workflow(tmp_path)
+    store = WorkflowStore(tmp_path)
+    progress = WorkflowProgressManager(store)
+    tool = WorkflowRunTool(workspace=tmp_path, store=store, progress=progress)
+
+    tool.set_context(session_key="cli:first")
+    first_session = json.loads(await tool.execute(name="release-check", mode="step"))
+    tool.set_context(session_key="cli:second")
+    second_session = json.loads(await tool.execute(name="release-check", mode="step"))
+
+    assert first_session["success"] is True
+    assert "Step 1/2" in first_session["output"]
+    assert second_session["success"] is True
+    assert "Step 1/2" in second_session["output"]
 
 
 async def test_workflow_run_unknown_mode_returns_error(tmp_path) -> None:
