@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from nanobot.agent.skill_proposal_metadata import ProposalMetadataStore
 from nanobot.doctor.types import DoctorCheckResult, DoctorStatus
 
 _SECTION = "skills"
@@ -49,6 +50,53 @@ def run_skill_checks(workspace: Path) -> list[DoctorCheckResult]:
                 )
             )
 
+        proposal_names = {path.stem for path in proposals_dir.glob("*.md")}
+        metadata_entries = ProposalMetadataStore(workspace).list()
+        drifted_names = sorted(set(metadata_entries) ^ proposal_names)
+
+        results.extend(
+            [
+                _proposal_health_result(
+                    check_id="skill_proposals_pending",
+                    names=sorted(
+                        name
+                        for name in proposal_names
+                        if (metadata_entries.get(name) or {}).get("status", "pending") == "pending"
+                    ),
+                    label="pending",
+                ),
+                _proposal_health_result(
+                    check_id="skill_proposals_blocked",
+                    names=sorted(
+                        name
+                        for name in proposal_names
+                        if (metadata_entries.get(name) or {}).get("scan_verdict") == "block"
+                    ),
+                    label="blocked",
+                    status=DoctorStatus.WARN,
+                ),
+                _proposal_health_result(
+                    check_id="skill_proposals_warning",
+                    names=sorted(
+                        name
+                        for name in proposal_names
+                        if (metadata_entries.get(name) or {}).get("scan_verdict") == "warn"
+                    ),
+                    label="warning",
+                    status=DoctorStatus.WARN,
+                ),
+                _proposal_health_result(
+                    check_id="skill_proposals_metadata_drift",
+                    names=drifted_names,
+                    label="metadata drift",
+                    status=DoctorStatus.WARN,
+                    ok_message="Skill proposal metadata matches proposal files.",
+                    warn_message="Skill proposal metadata drift detected: {names}",
+                    hint="Reconcile missing proposal files or stale metadata entries under memory/skill-proposals.",
+                ),
+            ]
+        )
+
     return results
 
 
@@ -66,4 +114,32 @@ def _dir_result(check_id: str, path: Path, label: str) -> DoctorCheckResult:
         status=DoctorStatus.WARN,
         message=f"{label} is missing: {path}",
         hint=f"Create it with: mkdir -p {path}",
+    )
+
+
+def _proposal_health_result(
+    *,
+    check_id: str,
+    names: list[str],
+    label: str,
+    status: DoctorStatus = DoctorStatus.OK,
+    ok_message: str | None = None,
+    warn_message: str | None = None,
+    hint: str | None = None,
+) -> DoctorCheckResult:
+    if names:
+        return DoctorCheckResult(
+            section=_SECTION,
+            check_id=check_id,
+            status=status,
+            message=(warn_message or f"Skill proposals with {label} state: {{names}}.").format(
+                names=", ".join(names)
+            ),
+            hint=hint,
+        )
+    return DoctorCheckResult(
+        section=_SECTION,
+        check_id=check_id,
+        status=DoctorStatus.OK,
+        message=ok_message or f"No skill proposals with {label} state.",
     )
