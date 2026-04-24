@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
+from nanobot.agent.skill_proposal_metadata import ProposalMetadataStore
 from nanobot.agent.skill_proposals import SkillProposalStore
 from nanobot.agent.skills_manager import SkillsManager
 from nanobot.agent.tools.base import Tool
@@ -14,6 +16,7 @@ class SkillManageTool(Tool):
     def __init__(self, workspace) -> None:
         self._manager = SkillsManager(workspace)
         self._proposals = SkillProposalStore(workspace)
+        self._metadata = ProposalMetadataStore(Path(workspace))
 
     @property
     def name(self) -> str:
@@ -90,8 +93,11 @@ class SkillManageTool(Tool):
                 result = {"success": False, "error": f"Proposal '{proposal_name}' does not exist"}
             else:
                 result = self._manager.create(proposal_name, proposal)
+                warning = self._record_apply_metadata(proposal_name, result)
                 if result.get("success"):
                     self._proposals.delete(proposal_name)
+                if warning:
+                    result["warning"] = warning
         elif action == "reject_proposal":
             proposal_name = name or ""
             if proposal_name_error:
@@ -99,11 +105,47 @@ class SkillManageTool(Tool):
                 return json.dumps(result, ensure_ascii=False)
             if self._proposals.delete(proposal_name):
                 result = {"success": True, "name": proposal_name}
+                warning = self._record_rejected_metadata(proposal_name)
+                if warning:
+                    result["warning"] = warning
             else:
                 result = {"success": False, "error": f"Proposal '{proposal_name}' does not exist"}
         else:
             result = {"success": False, "error": f"Unknown action: {action}"}
         return json.dumps(result, ensure_ascii=False)
+
+    def _record_apply_metadata(self, proposal_name: str, result: dict[str, Any]) -> str | None:
+        scan = result.get("scan")
+        try:
+            if isinstance(scan, dict):
+                self._record_scan_metadata(proposal_name, scan)
+            if result.get("success"):
+                self._metadata.record_applied(proposal_name)
+        except Exception as exc:
+            return f"Skill applied, but proposal metadata update failed: {exc}"
+        return None
+
+    def _record_rejected_metadata(self, proposal_name: str) -> str | None:
+        try:
+            self._metadata.record_rejected(proposal_name)
+        except Exception as exc:
+            return f"Proposal rejected, but metadata update failed: {exc}"
+        return None
+
+    def _record_scan_metadata(self, proposal_name: str, scan: dict[str, Any]) -> None:
+        verdict = str(scan.get("verdict") or "unknown")
+        summary = str(scan.get("summary") or "")
+        self._metadata.record_scan(proposal_name, verdict=verdict, summary=summary)
+
+        data = self._metadata.list()
+        entry = data.get(proposal_name, {})
+        entry["last_scan_verdict"] = verdict
+        entry["last_scan_summary"] = summary
+        data[proposal_name] = entry
+        self._metadata.path.write_text(
+            json.dumps(data, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
 
     @staticmethod
     def _validate_proposal_name(name: str) -> str | None:
