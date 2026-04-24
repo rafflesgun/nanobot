@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -189,6 +190,53 @@ async def test_workflow_run_step_is_isolated_by_session_key(tmp_path) -> None:
     assert "Step 1/2" in first_session["output"]
     assert second_session["success"] is True
     assert "Step 1/2" in second_session["output"]
+
+
+async def test_workflow_run_keeps_task_local_session_context(tmp_path) -> None:
+    write_workflow(tmp_path)
+    store = WorkflowStore(tmp_path)
+    progress = WorkflowProgressManager(store)
+    tool = WorkflowRunTool(workspace=tmp_path, store=store, progress=progress)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def task_one() -> tuple[dict, dict]:
+        tool.set_context(session_key="session-one")
+        first = json.loads(await tool.execute(name="release-check", mode="step"))
+        entered.set()
+        await release.wait()
+        second = json.loads(await tool.execute(name="release-check", mode="step"))
+        return first, second
+
+    async def task_two() -> dict:
+        await entered.wait()
+        tool.set_context(session_key="session-two")
+        first = json.loads(await tool.execute(name="release-check", mode="step"))
+        release.set()
+        return first
+
+    (task_one_first, task_one_second), task_two_first = await asyncio.gather(task_one(), task_two())
+
+    assert task_one_first["success"] is True
+    assert "Step 1/2" in task_one_first["output"]
+    assert task_one_second["success"] is True
+    assert "Step 2/2" in task_one_second["output"]
+    assert task_two_first["success"] is True
+    assert "Step 1/2" in task_two_first["output"]
+    assert progress.active("session-one").current_step_index == 2
+    assert progress.active("session-two").current_step_index == 1
+
+
+async def test_workflow_tool_concurrency_contract(tmp_path) -> None:
+    run_tool = WorkflowRunTool(workspace=tmp_path)
+    list_tool = WorkflowListTool(workspace=tmp_path)
+
+    assert run_tool.read_only is True
+    assert run_tool.exclusive is True
+    assert run_tool.concurrency_safe is False
+    assert list_tool.read_only is True
+    assert list_tool.exclusive is False
+    assert list_tool.concurrency_safe is True
 
 
 async def test_workflow_run_unknown_mode_returns_error(tmp_path) -> None:

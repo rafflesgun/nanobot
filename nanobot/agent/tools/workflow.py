@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
@@ -63,12 +64,12 @@ class WorkflowRunTool(Tool):
     ) -> None:
         self._store = store or WorkflowStore(Path(workspace))
         self._progress = progress or WorkflowProgressManager(self._store)
-        self._session_key = "cli:direct"
+        self._session_key: ContextVar[str] = ContextVar("workflow_session_key", default="cli:direct")
         self._completed: dict[str, str] = {}
 
     def set_context(self, session_key: str | None = None, **_: Any) -> None:
         if session_key:
-            self._session_key = session_key
+            self._session_key.set(session_key)
 
     @property
     def name(self) -> str:
@@ -102,6 +103,10 @@ class WorkflowRunTool(Tool):
     def read_only(self) -> bool:
         return True
 
+    @property
+    def exclusive(self) -> bool:
+        return True
+
     async def execute(self, name: str, mode: str = "full", **_: Any) -> str:
         if mode == "full":
             return self._execute_full(name)
@@ -124,7 +129,8 @@ class WorkflowRunTool(Tool):
         )
 
     def _execute_step(self, name: str) -> str:
-        if self._completed.get(self._session_key) == name:
+        session_key = self._session_key.get()
+        if self._completed.get(session_key) == name:
             return json.dumps(
                 {
                     "success": True,
@@ -135,11 +141,11 @@ class WorkflowRunTool(Tool):
                 ensure_ascii=False,
             )
 
-        stale = self._progress.validate(self._session_key)
+        stale = self._progress.validate(session_key)
         if stale is not None:
             return self._step_payload(stale, name=name)
 
-        active = self._progress.active(self._session_key)
+        active = self._progress.active(session_key)
         if active is not None and active.workflow_name != name:
             output = (
                 f"Workflow '{active.workflow_name}' is active. "
@@ -156,12 +162,12 @@ class WorkflowRunTool(Tool):
                 ensure_ascii=False,
             )
 
-        progress = self._progress.next(self._session_key)
+        progress = self._progress.next(session_key)
         if not progress.success and "No active workflow" in progress.output:
-            self._completed.pop(self._session_key, None)
-            progress = self._progress.start(self._session_key, name)
+            self._completed.pop(session_key, None)
+            progress = self._progress.start(session_key, name)
         elif progress.completed:
-            self._completed[self._session_key] = progress.workflow_name or name
+            self._completed[session_key] = progress.workflow_name or name
         return self._step_payload(progress, name=name)
 
     def _step_payload(self, progress, name: str) -> str:
