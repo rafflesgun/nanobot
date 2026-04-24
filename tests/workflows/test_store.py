@@ -69,6 +69,26 @@ description: "Pre-release: validation checklist"
     assert result.workflows[0].description == "Pre-release: validation checklist"
 
 
+def test_list_parses_yaml_description_containing_delimiter_text(tmp_path) -> None:
+    write_workflow(
+        tmp_path,
+        "release-check",
+        """---
+name: release-check
+description: "Pre-release --- validation checklist"
+---
+
+1. Run doctor.
+""",
+    )
+
+    workflow, error = WorkflowStore(tmp_path).read("release-check")
+
+    assert error is None
+    assert workflow is not None
+    assert workflow.description == "Pre-release --- validation checklist"
+
+
 def test_read_rejects_frontmatter_name_mismatch(tmp_path) -> None:
     write_workflow(
         tmp_path,
@@ -220,6 +240,35 @@ def test_read_rejects_unsafe_name(tmp_path) -> None:
     assert error == "Workflow name must be kebab-case using lowercase letters, digits, and hyphens"
 
 
+def test_rejects_workflow_symlink_escape(tmp_path) -> None:
+    outside = tmp_path / "outside.md"
+    outside.write_text(
+        """---
+name: release-check
+description: secret outside workflow
+---
+
+1. Do not leak this.
+""",
+        encoding="utf-8",
+    )
+    workflows_dir = tmp_path / "workflows"
+    workflows_dir.mkdir()
+    (workflows_dir / "release-check.md").symlink_to(outside)
+
+    store = WorkflowStore(tmp_path)
+    workflow, error = store.read("release-check")
+    result = store.list()
+
+    assert workflow is None
+    assert error is not None
+    assert "outside" in error or "symlink" in error
+    assert "secret" not in error
+    assert result.workflows == []
+    assert len(result.invalid) == 1
+    assert "secret" not in result.invalid[0].error
+
+
 def test_render_full_workflow_is_instructional(tmp_path) -> None:
     write_workflow(
         tmp_path,
@@ -268,3 +317,30 @@ description: Pre-release validation checklist
 
     assert "Step 2/2" in rendered
     assert "Summarize risks." in rendered
+
+
+def test_render_step_rejects_invalid_index(tmp_path) -> None:
+    write_workflow(
+        tmp_path,
+        "release-check",
+        """---
+name: release-check
+description: Pre-release validation checklist
+---
+
+1. Run doctor.
+2. Summarize risks.
+""",
+    )
+
+    store = WorkflowStore(tmp_path)
+    workflow, error = store.read("release-check")
+
+    assert error is None
+    assert workflow is not None
+    try:
+        store.render_step(workflow, 0)
+    except ValueError as exc:
+        assert str(exc) == "Step index 0 is outside workflow step range"
+    else:
+        raise AssertionError("Expected ValueError")

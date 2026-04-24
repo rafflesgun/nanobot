@@ -67,6 +67,8 @@ class WorkflowStore:
         return "\n".join(lines).rstrip()
 
     def render_step(self, workflow: Workflow, step_index: int) -> str:
+        if step_index < 1 or step_index > len(workflow.steps):
+            raise ValueError(f"Step index {step_index} is outside workflow step range")
         step = workflow.steps[step_index - 1]
         return f"Step {step.index}/{len(workflow.steps)}\n{step.text}"
 
@@ -75,6 +77,8 @@ class WorkflowStore:
             return None, INVALID_NAME_ERROR
         if not path.is_file():
             return None, f"Workflow '{name}' not found in {self.workflows_dir}"
+        if not self._is_safe_workflow_path(path):
+            return None, "Workflow path resolves outside workflows directory"
 
         try:
             content = path.read_text(encoding="utf-8")
@@ -107,21 +111,32 @@ class WorkflowStore:
         return workflow, None
 
     def _parse_frontmatter(self, content: str) -> tuple[dict[str, object], str, str | None]:
-        if not content.startswith("---"):
+        lines = content.splitlines()
+        if not lines or lines[0] != "---":
             return {}, "", "Workflow must start with YAML frontmatter"
 
-        parts = content.split("---", 2)
-        if len(parts) < 3:
+        closing_index = None
+        for index, line in enumerate(lines[1:], start=1):
+            if line == "---":
+                closing_index = index
+                break
+        if closing_index is None:
             return {}, "", "Workflow frontmatter must be closed with ---"
 
+        frontmatter = "\n".join(lines[1:closing_index])
         try:
-            metadata = yaml.safe_load(parts[1]) or {}
+            metadata = yaml.safe_load(frontmatter) or {}
         except yaml.YAMLError as exc:
             return {}, "", f"Invalid YAML frontmatter: {exc}"
         if not isinstance(metadata, dict):
             return {}, "", "Workflow frontmatter must parse to a mapping"
 
-        return metadata, parts[2], None
+        return metadata, "\n".join(lines[closing_index + 1 :]), None
+
+    def _is_safe_workflow_path(self, path: Path) -> bool:
+        workflows_root = self.workflows_dir.resolve(strict=False)
+        resolved_path = path.resolve(strict=False)
+        return resolved_path == workflows_root or workflows_root in resolved_path.parents
 
     def _parse_steps(self, body: str) -> list[WorkflowStep]:
         steps: list[WorkflowStep] = []
