@@ -51,8 +51,33 @@ def run_skill_checks(workspace: Path) -> list[DoctorCheckResult]:
             )
 
         proposal_names = {path.stem for path in proposals_dir.glob("*.md")}
-        metadata_entries = ProposalMetadataStore(workspace).list()
-        drifted_names = sorted(set(metadata_entries) ^ proposal_names)
+        metadata_store = ProposalMetadataStore(workspace)
+        metadata_entries = metadata_store.list()
+        metadata_path = metadata_store.path
+
+        metadata_warning: DoctorCheckResult | None = None
+        if metadata_path.exists() and not metadata_entries:
+            metadata_warning = DoctorCheckResult(
+                section=_SECTION,
+                check_id="skill_proposals_metadata_drift",
+                status=DoctorStatus.WARN,
+                message=f"Skill proposal metadata is unreadable or malformed: {metadata_path}",
+                hint="Repair or recreate memory/skill-proposals/.metadata.json.",
+            )
+
+        drifted_names: list[str] = []
+        for name in sorted(metadata_entries):
+            entry = metadata_entries.get(name) or {}
+            status = entry.get("status", "pending")
+            has_file = name in proposal_names
+            if status == "pending" and not has_file:
+                drifted_names.append(name)
+            elif status in {"applied", "rejected"} and has_file:
+                drifted_names.append(name)
+
+        for name in sorted(proposal_names):
+            if name not in metadata_entries:
+                drifted_names.append(name)
 
         results.extend(
             [
@@ -85,6 +110,13 @@ def run_skill_checks(workspace: Path) -> list[DoctorCheckResult]:
                     label="warning",
                     status=DoctorStatus.WARN,
                 ),
+            ]
+        )
+
+        if metadata_warning is not None:
+            results.append(metadata_warning)
+        else:
+            results.append(
                 _proposal_health_result(
                     check_id="skill_proposals_metadata_drift",
                     names=drifted_names,
@@ -92,10 +124,9 @@ def run_skill_checks(workspace: Path) -> list[DoctorCheckResult]:
                     status=DoctorStatus.WARN,
                     ok_message="Skill proposal metadata matches proposal files.",
                     warn_message="Skill proposal metadata drift detected: {names}",
-                    hint="Reconcile missing proposal files or stale metadata entries under memory/skill-proposals.",
-                ),
-            ]
-        )
+                    hint="Reconcile pending proposals missing files, or applied/rejected proposals still present on disk.",
+                )
+            )
 
     return results
 

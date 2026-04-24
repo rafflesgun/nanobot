@@ -74,7 +74,11 @@ class ProposalMetadataStore:
     def _read(self) -> dict[str, dict[str, Any]]:
         if not self.path.exists():
             return {}
-        return json.loads(self.path.read_text(encoding="utf-8"))
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return data if isinstance(data, dict) else {}
 
     def _write(self, data: dict[str, dict[str, Any]]) -> None:
         self.path.write_text(
