@@ -135,7 +135,10 @@ class WorkflowRunTool(Tool):
                 ensure_ascii=False,
             )
 
-        self._progress.validate(self._session_key)
+        stale = self._progress.validate(self._session_key)
+        if stale is not None:
+            return self._step_payload(stale, name=name)
+
         active = self._progress.active(self._session_key)
         if active is not None and active.workflow_name != name:
             output = (
@@ -159,6 +162,9 @@ class WorkflowRunTool(Tool):
             progress = self._progress.start(self._session_key, name)
         elif progress.completed:
             self._completed[self._session_key] = progress.workflow_name or name
+        return self._step_payload(progress, name=name)
+
+    def _step_payload(self, progress, name: str) -> str:
         payload = {
             "success": progress.success,
             "name": progress.workflow_name or name,

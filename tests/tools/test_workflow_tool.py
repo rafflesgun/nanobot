@@ -142,13 +142,36 @@ async def test_workflow_run_step_clears_stale_active_workflow_before_switch(tmp_
 
     first = json.loads(await tool.execute(name="release-check", mode="step"))
     (tmp_path / "workflows" / "release-check.md").unlink()
+    stale = json.loads(await tool.execute(name="deploy-check", mode="step"))
     switched = json.loads(await tool.execute(name="deploy-check", mode="step"))
 
     assert "Step 1/2" in first["output"]
+    assert stale["success"] is False
+    assert "release-check" in stale["error"]
+    assert "restart" in stale["error"].lower() or "readable" in stale["error"].lower()
     assert switched["success"] is True
     assert switched["name"] == "deploy-check"
     assert "Step 1/2" in switched["output"]
     assert "Check deploy target." in switched["output"]
+
+
+async def test_workflow_run_step_reports_changed_active_workflow_without_restart(tmp_path) -> None:
+    write_workflow(tmp_path)
+    tool = WorkflowRunTool(workspace=tmp_path)
+    tool.set_context(session_key="cli:direct")
+
+    first = json.loads(await tool.execute(name="release-check", mode="step"))
+    write_workflow(tmp_path)
+    stale = json.loads(await tool.execute(name="release-check", mode="step"))
+    restarted = json.loads(await tool.execute(name="release-check", mode="step"))
+
+    assert "Step 1/2" in first["output"]
+    assert stale["success"] is False
+    assert stale["name"] == "release-check"
+    assert "changed" in stale["error"].lower() or "restart" in stale["error"].lower()
+    assert "Step 1/2" not in stale["output"]
+    assert restarted["success"] is True
+    assert "Step 1/2" in restarted["output"]
 
 
 async def test_workflow_run_step_is_isolated_by_session_key(tmp_path) -> None:
