@@ -128,6 +128,26 @@ def test_read_rejects_non_mapping_frontmatter(tmp_path) -> None:
     assert error == "Workflow frontmatter must parse to a mapping"
 
 
+def test_read_rejects_non_string_description(tmp_path) -> None:
+    write_workflow(
+        tmp_path,
+        "release-check",
+        """---
+name: release-check
+description: 123
+---
+
+1. Run doctor.
+""",
+    )
+
+    workflow, error = WorkflowStore(tmp_path).read("release-check")
+
+    assert workflow is None
+    assert error is not None
+    assert "description" in error
+
+
 def test_read_rejects_missing_numbered_steps(tmp_path) -> None:
     write_workflow(
         tmp_path,

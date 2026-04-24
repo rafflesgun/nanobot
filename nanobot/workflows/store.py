@@ -89,8 +89,8 @@ class WorkflowStore:
         description = metadata.get("description", "")
         if frontmatter_name != name:
             return None, "Workflow frontmatter name must match filename"
-        if not description.strip():
-            return None, "Workflow description must be non-empty"
+        if not isinstance(description, str) or not description.strip():
+            return None, "Workflow description must be a non-empty string"
 
         steps = self._parse_steps(body)
         if not steps:
