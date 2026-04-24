@@ -15,6 +15,7 @@ These commands work inside chat channels and interactive agent sessions:
 | `/dream-restore <sha>` | Restore memory to the state before a specific change |
 | `/recall <query>` | Search prior sessions for related work |
 | `/workflow list` | List workspace-local instruction-only workflows |
+| `/workflow show <name>` | Show a local workflow checklist without starting step mode |
 | `/workflow run <name>` | Show a local workflow checklist |
 | `/workflow step <name>` | Start step-by-step workflow mode |
 | `/workflow next` | Continue the active step-by-step workflow |
