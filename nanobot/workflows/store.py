@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import yaml
+
 from nanobot.workflows.types import (
     InvalidWorkflow,
     Workflow,
@@ -104,29 +106,22 @@ class WorkflowStore:
         )
         return workflow, None
 
-    def _parse_frontmatter(self, content: str) -> tuple[dict[str, str], str, str | None]:
-        lines = content.splitlines()
-        if not lines or lines[0] != "---":
+    def _parse_frontmatter(self, content: str) -> tuple[dict[str, object], str, str | None]:
+        if not content.startswith("---"):
             return {}, "", "Workflow must start with YAML frontmatter"
 
-        end = None
-        for index, line in enumerate(lines[1:], start=1):
-            if line == "---":
-                end = index
-                break
-        if end is None:
+        parts = content.split("---", 2)
+        if len(parts) < 3:
             return {}, "", "Workflow frontmatter must be closed with ---"
 
-        metadata: dict[str, str] = {}
-        for line in lines[1:end]:
-            if not line.strip():
-                continue
-            key, separator, value = line.partition(":")
-            if not separator:
-                return {}, "", "Workflow frontmatter must use key: value entries"
-            metadata[key.strip()] = value.strip()
+        try:
+            metadata = yaml.safe_load(parts[1]) or {}
+        except yaml.YAMLError as exc:
+            return {}, "", f"Invalid YAML frontmatter: {exc}"
+        if not isinstance(metadata, dict):
+            return {}, "", "Workflow frontmatter must parse to a mapping"
 
-        return metadata, "\n".join(lines[end + 1 :]), None
+        return metadata, parts[2], None
 
     def _parse_steps(self, body: str) -> list[WorkflowStep]:
         steps: list[WorkflowStep] = []

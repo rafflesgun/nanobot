@@ -48,6 +48,27 @@ description: Pre-release validation checklist
     assert summary.step_count == 2
 
 
+def test_list_parses_yaml_frontmatter_syntax(tmp_path) -> None:
+    write_workflow(
+        tmp_path,
+        "release-check",
+        """---
+# Comments are valid YAML frontmatter.
+name: release-check
+description: "Pre-release: validation checklist"
+---
+
+1. Run doctor.
+""",
+    )
+
+    result = WorkflowStore(tmp_path).list()
+
+    assert result.invalid == []
+    assert len(result.workflows) == 1
+    assert result.workflows[0].description == "Pre-release: validation checklist"
+
+
 def test_read_rejects_frontmatter_name_mismatch(tmp_path) -> None:
     write_workflow(
         tmp_path,
@@ -67,6 +88,44 @@ description: Pre-release validation checklist
     assert len(result.invalid) == 1
     assert result.invalid[0].name == "release-check"
     assert "must match" in result.invalid[0].error
+
+
+def test_read_rejects_invalid_yaml_frontmatter(tmp_path) -> None:
+    write_workflow(
+        tmp_path,
+        "release-check",
+        """---
+name: [release-check
+description: Pre-release validation checklist
+---
+
+1. Run doctor.
+""",
+    )
+
+    workflow, error = WorkflowStore(tmp_path).read("release-check")
+
+    assert workflow is None
+    assert error is not None
+    assert "Invalid YAML frontmatter" in error
+
+
+def test_read_rejects_non_mapping_frontmatter(tmp_path) -> None:
+    write_workflow(
+        tmp_path,
+        "release-check",
+        """---
+- release-check
+---
+
+1. Run doctor.
+""",
+    )
+
+    workflow, error = WorkflowStore(tmp_path).read("release-check")
+
+    assert workflow is None
+    assert error == "Workflow frontmatter must parse to a mapping"
 
 
 def test_read_rejects_missing_numbered_steps(tmp_path) -> None:
