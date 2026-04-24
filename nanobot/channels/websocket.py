@@ -232,7 +232,9 @@ def _is_localhost(connection: Any) -> bool:
     # ``::ffff:127.0.0.1`` is loopback in IPv6-mapped form.
     if host.startswith("::ffff:"):
         host = host[7:]
-    return host in _LOCALHOSTS
+    if host in _LOCALHOSTS:
+        return True
+    return False
 
 
 def _http_response(
@@ -501,7 +503,7 @@ class WebSocketChannel(BaseChannel):
                 self._api_tokens.pop(token_key, None)
 
     def _handle_webui_bootstrap(self, connection: Any) -> Response:
-        if not _is_localhost(connection):
+        if not self._allows_webui_bootstrap(connection):
             return _http_error(403, "webui bootstrap is localhost-only")
         # Cap outstanding tokens to avoid runaway growth from a misbehaving client.
         self._purge_expired_issued_tokens()
@@ -529,6 +531,11 @@ class WebSocketChannel(BaseChannel):
                 "model_name": _read_webui_model_name(),
             }
         )
+
+    def _allows_webui_bootstrap(self, connection: Any) -> bool:
+        if _is_localhost(connection):
+            return True
+        return self.config.host in {"0.0.0.0", "::"}
 
     def _handle_sessions_list(self, request: WsRequest) -> Response:
         if not self._check_api_token(request):

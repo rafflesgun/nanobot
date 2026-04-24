@@ -10,7 +10,7 @@ from typer.testing import CliRunner
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.cli.commands import _make_provider, app
-from nanobot.config.schema import Config
+from nanobot.config.schema import ChannelsConfig, Config
 from nanobot.cron.types import CronJob, CronPayload
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
 from nanobot.providers.registry import find_by_name
@@ -1060,6 +1060,26 @@ def test_gateway_workspace_option_overrides_config(monkeypatch, tmp_path: Path) 
     assert isinstance(result.exception, _StopGatewayError)
     assert seen["workspace"] == override
     assert config.workspace_path == override
+
+
+def test_gateway_docker_defaults_bind_websocket_to_all_interfaces(monkeypatch, tmp_path: Path) -> None:
+    config_file = _write_instance_config(tmp_path)
+    config = Config()
+    config.channels = ChannelsConfig.model_validate(
+        {"websocket": {"enabled": True, "host": "127.0.0.1", "port": 8765}}
+    )
+    seen: dict[str, dict] = {}
+
+    def _capture_provider(loaded: Config) -> object:
+        seen["websocket"] = loaded.channels.model_extra["websocket"]
+        raise _StopGatewayError("stop")
+
+    _patch_cli_command_runtime(monkeypatch, config, make_provider=_capture_provider)
+
+    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+
+    assert isinstance(result.exception, _StopGatewayError)
+    assert seen["websocket"] == {"enabled": True, "host": "0.0.0.0", "port": 8765}
 
 
 def test_gateway_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: Path) -> None:

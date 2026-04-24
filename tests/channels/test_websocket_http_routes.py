@@ -7,8 +7,9 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
-import httpx
 import pytest
+
+import httpx
 
 from nanobot.channels.websocket import WebSocketChannel
 from nanobot.session.manager import Session, SessionManager
@@ -93,6 +94,24 @@ async def test_bootstrap_returns_token_for_localhost(
     finally:
         await channel.stop()
         await server_task
+
+
+def test_bootstrap_allows_remote_when_bound_to_all_interfaces(bus: MagicMock) -> None:
+    channel = _ch(bus, host="0.0.0.0")
+
+    class _Connection:
+        remote_address = ("8.8.8.8", 54321)
+
+    assert channel._allows_webui_bootstrap(_Connection()) is True
+
+
+def test_bootstrap_rejects_remote_when_bound_to_loopback(bus: MagicMock) -> None:
+    channel = _ch(bus, host="127.0.0.1")
+
+    class _Connection:
+        remote_address = ("8.8.8.8", 54321)
+
+    assert channel._allows_webui_bootstrap(_Connection()) is False
 
 
 @pytest.mark.asyncio

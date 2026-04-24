@@ -32,8 +32,9 @@ docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot onboard
 # Edit config on host to add API keys
 vim ~/.nanobot/config.json
 
-# Run gateway (connects to enabled channels, e.g. Telegram/Discord/Mochat)
-docker run -v ~/.nanobot:/home/nanobot/.nanobot -p 18790:18790 nanobot gateway
+# Run gateway (connects to enabled channels, e.g. Telegram/Discord/Mochat).
+# The embedded WebUI is served by the WebSocket channel on port 8765.
+docker run -v ~/.nanobot:/home/nanobot/.nanobot -p 18790:18790 -p 8765:8765 nanobot gateway
 
 # Or run a single command
 docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot agent -m "Hello!"

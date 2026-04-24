@@ -51,8 +51,8 @@ RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh && chmod +x /usr/local/bin/ent
 USER nanobot
 ENV HOME=/home/nanobot
 
-# Gateway default port
-EXPOSE 18790
+# Gateway default port and embedded WebUI/WebSocket port
+EXPOSE 18790 8765
 
 ENTRYPOINT ["entrypoint.sh"]
 CMD ["status"]

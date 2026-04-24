@@ -504,6 +504,13 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
     return loaded
 
 
+def _apply_docker_gateway_defaults(config: Config) -> None:
+    extra = config.channels.model_extra or {}
+    websocket = dict(extra.get("websocket") or {})
+    websocket.update({"enabled": True, "host": "0.0.0.0", "port": 8765})
+    config.channels = config.channels.model_copy(update={"websocket": websocket})
+
+
 def _warn_deprecated_config_keys(config_path: Path | None) -> None:
     """Hint users to remove obsolete keys from their config file."""
     import json
@@ -648,6 +655,7 @@ def gateway(
 
         logging.basicConfig(level=logging.DEBUG)
     cfg = _load_runtime_config(config, workspace)
+    _apply_docker_gateway_defaults(cfg)
     _run_gateway(cfg, port=port)
 
 
