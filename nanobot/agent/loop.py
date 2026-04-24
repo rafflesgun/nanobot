@@ -33,6 +33,7 @@ from nanobot.agent.tools.skill_manage import SkillManageTool
 from nanobot.agent.tools.self import MyTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
+from nanobot.agent.tools.workflow import WorkflowListTool, WorkflowRunTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.config.paths import (
@@ -129,7 +130,11 @@ class _LoopHook(AgentHook):
             args_str = json.dumps(tc.arguments, ensure_ascii=False)
             logger.info("Tool call: {}({})", tc.name, args_str[:200])
         self._loop._set_tool_context(
-            self._channel, self._chat_id, self._message_id, self._thread_id
+            self._channel,
+            self._chat_id,
+            self._message_id,
+            self._thread_id,
+            session_key=self._session_key,
         )
 
     async def after_iteration(self, context: AgentHookContext) -> None:
@@ -337,6 +342,8 @@ class AgentLoop:
             self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
         self.tools.register(SessionSearchTool(workspace=self.workspace))
         self.tools.register(SkillManageTool(workspace=self.workspace))
+        self.tools.register(WorkflowListTool(workspace=self.workspace))
+        self.tools.register(WorkflowRunTool(workspace=self.workspace))
         if self.exec_config.enable:
             self.tools.register(
                 ExecTool(
@@ -395,7 +402,7 @@ class AgentLoop:
         effective_key = session_key or (
             UNIFIED_SESSION_KEY if self._unified_session else f"{channel}:{chat_id}"
         )
-        for name in ("message", "spawn", "cron", "my", "session_search"):
+        for name in ("message", "spawn", "cron", "my", "session_search", "workflow_run"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
                     if name == "message":
@@ -410,7 +417,7 @@ class AgentLoop:
                             model_override=model_override,
                             thread_id=thread_id,
                         )
-                    elif name == "session_search":
+                    elif name in ("session_search", "workflow_run"):
                         tool.set_context(session_key=effective_key)
                     else:
                         tool.set_context(channel, chat_id)

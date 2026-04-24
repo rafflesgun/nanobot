@@ -932,3 +932,38 @@ pytest tests/doctor -q && pytest tests/cli/test_commands.py -q -k doctor
 ```bash
 python3 -m pytest tests/agent/test_skill_proposal_metadata.py tests/agent/test_skill_proposals.py tests/tools/test_skill_manage_tool.py tests/doctor/test_skill_checks.py -q
 ```
+
+### 31. Constrained scripted workflows
+
+**Core behavior**
+- Workspace-local workflows live under `workspace/workflows/<name>.md`.
+- Workflow files use YAML frontmatter with matching `name` and non-empty `description`.
+- Workflow steps are parsed from numbered markdown list items.
+- The runner is instruction-only: it never executes commands, mutates files, invokes tools, branches, loops, or expands templates.
+- Workflows are exposed through read-only agent tools `workflow_list` and `workflow_run`.
+- Workflows are also exposed through `/workflow list`, `/workflow show <name>`, `/workflow run <name>`, `/workflow step <name>`, `/workflow next`, and `/workflow abort`.
+- Step-by-step mode tracks session-local progress and fails closed if the workflow file changes during an active run.
+
+**Files to protect during future merges**
+- `nanobot/workflows/types.py`
+- `nanobot/workflows/store.py`
+- `nanobot/workflows/progress.py`
+- `nanobot/agent/tools/workflow.py`
+- `nanobot/agent/loop.py`
+- `nanobot/command/builtin.py`
+- `tests/workflows/test_store.py`
+- `tests/workflows/test_progress.py`
+- `tests/tools/test_workflow_tool.py`
+- `tests/command/test_builtin_workflow.py`
+
+**Resolution priority**
+1. Keep workflows workspace-local under `workflows/`; do not add bundled or remote workflows in v1.
+2. Keep the runner instruction-only; workflow content must never be executed by the workflow subsystem.
+3. Keep numbered markdown list items as the v1 step format.
+4. Keep both surfaces: agent tools for discovery/use by the model and slash commands for explicit user control.
+5. Keep file-change mismatch in step mode fail-closed with a restart message.
+
+**Quick validation**
+```bash
+python3 -m pytest tests/workflows tests/tools/test_workflow_tool.py tests/command/test_builtin_workflow.py tests/command/test_router_dispatchable.py -q
+```

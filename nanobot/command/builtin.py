@@ -11,6 +11,8 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.utils.helpers import build_status_content
 from nanobot.utils.restart import set_restart_notice_to_env
+from nanobot.workflows.progress import WorkflowProgressManager
+from nanobot.workflows.store import WorkflowStore
 
 
 async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
@@ -219,6 +221,89 @@ async def cmd_recall(ctx: CommandContext) -> OutboundMessage:
     )
 
 
+def _workflow_usage() -> str:
+    return "Usage: `/workflow list|show <name>|run <name>|step <name>|next|abort`"
+
+
+def _workflow_progress(ctx: CommandContext) -> WorkflowProgressManager:
+    progress = getattr(ctx.loop, "workflow_progress", None)
+    if progress is None:
+        progress = WorkflowProgressManager(WorkflowStore(ctx.loop.workspace))
+        setattr(ctx.loop, "workflow_progress", progress)
+    return progress
+
+
+def _workflow_response(ctx: CommandContext, content: str) -> OutboundMessage:
+    metadata = {
+        "render_as": "text",
+        "message_thread_id": ctx.msg.metadata.get("message_thread_id"),
+        "command_response": True,
+    }
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content=content,
+        metadata=metadata,
+    )
+
+
+def _format_workflow_list(ctx: CommandContext) -> str:
+    listing = WorkflowStore(ctx.loop.workspace).list()
+    lines = ["Workflows:"]
+    if listing.workflows:
+        for workflow in listing.workflows:
+            lines.append(f"- {workflow.name}: {workflow.description} ({workflow.step_count} steps)")
+    else:
+        lines.append("- No valid workflows found.")
+
+    if listing.invalid:
+        lines.extend(["", "Invalid workflows:"])
+        for invalid in listing.invalid:
+            lines.append(f"- {invalid.name}: {invalid.error}")
+
+    if listing.hint:
+        lines.extend(["", listing.hint])
+    return "\n".join(lines)
+
+
+async def cmd_workflow(ctx: CommandContext) -> OutboundMessage:
+    """Render instruction-only workflow commands without executing content."""
+    args = ctx.args.strip()
+    if not args:
+        return _workflow_response(ctx, _workflow_usage())
+
+    parts = args.split(maxsplit=1)
+    subcommand = parts[0].lower()
+    name = parts[1].strip() if len(parts) > 1 else ""
+    store = WorkflowStore(ctx.loop.workspace)
+
+    if subcommand == "list":
+        return _workflow_response(ctx, _format_workflow_list(ctx))
+
+    if subcommand in {"show", "run"}:
+        if not name:
+            return _workflow_response(ctx, _workflow_usage())
+        workflow, error = store.read(name)
+        content = error if error is not None or workflow is None else store.render_full(workflow)
+        return _workflow_response(ctx, content or "Unable to read workflow")
+
+    if subcommand == "step":
+        if not name:
+            return _workflow_response(ctx, _workflow_usage())
+        result = _workflow_progress(ctx).start(ctx.key, name)
+        return _workflow_response(ctx, result.output)
+
+    if subcommand == "next":
+        result = _workflow_progress(ctx).next(ctx.key)
+        return _workflow_response(ctx, result.output)
+
+    if subcommand == "abort":
+        result = _workflow_progress(ctx).abort(ctx.key)
+        return _workflow_response(ctx, result.output)
+
+    return _workflow_response(ctx, _workflow_usage())
+
+
 def _extract_changed_files(diff: str) -> list[str]:
     """Extract changed file paths from a unified diff."""
     files: list[str] = []
@@ -414,6 +499,12 @@ async def cmd_help(ctx: CommandContext) -> OutboundMessage:
         "/dream-log — Show what the last Dream changed",
         "/dream-restore — Revert memory to a previous state",
         "/recall <query> — Search prior session history",
+        "/workflow list — List instruction-only workflows",
+        "/workflow show <name> — Show a workflow",
+        "/workflow run <name> — Show a workflow checklist",
+        "/workflow step <name> — Start step-by-step workflow mode",
+        "/workflow next — Show the next workflow step",
+        "/workflow abort — Stop step-by-step workflow mode",
         "/model — Show current model",
         "/model <model-id> — Switch model for this session",
         "/model temp — Show temperature settings",
@@ -451,6 +542,12 @@ def build_help_text() -> str:
         "/dream-log — Show what the last Dream changed",
         "/dream-restore — Revert memory to a previous state",
         "/recall <query> — Search prior session history",
+        "/workflow list — List instruction-only workflows",
+        "/workflow show <name> — Show a workflow",
+        "/workflow run <name> — Show a workflow checklist",
+        "/workflow step <name> — Start step-by-step workflow mode",
+        "/workflow next — Show the next workflow step",
+        "/workflow abort — Stop step-by-step workflow mode",
         "/model — Show current model",
         "/model <model-id> — Switch model for this session",
         "/model temp — Show temperature settings",
@@ -473,6 +570,8 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.prefix("/dream-restore ", cmd_dream_restore)
     router.exact("/recall", cmd_recall)
     router.prefix("/recall ", cmd_recall)
+    router.exact("/workflow", cmd_workflow)
+    router.prefix("/workflow ", cmd_workflow)
     router.exact("/model", cmd_model)
     router.exact("/status", cmd_status)
     router.exact("/help", cmd_help)
