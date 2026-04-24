@@ -48,3 +48,13 @@ class WorkflowProgress:
     total_steps: int
     path: Path
     fingerprint: str
+
+
+@dataclass(frozen=True)
+class WorkflowProgressResult:
+    success: bool
+    output: str
+    workflow_name: str | None = None
+    current_step_index: int | None = None
+    total_steps: int | None = None
+    completed: bool = False
