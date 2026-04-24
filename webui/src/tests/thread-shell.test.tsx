@@ -62,6 +62,48 @@ describe("ThreadShell", () => {
     );
   });
 
+  it("sends messages when crypto.randomUUID is unavailable", async () => {
+    const client = makeClient();
+    const original = globalThis.crypto.randomUUID;
+    Object.defineProperty(globalThis.crypto, "randomUUID", {
+      value: undefined,
+      configurable: true,
+    });
+
+    try {
+      render(
+        wrap(
+          client,
+          <ThreadShell
+            session={session("chat-a")}
+            title="Chat chat-a"
+            onToggleSidebar={() => {}}
+            onGoHome={() => {}}
+            onNewChat={vi.fn()}
+          />,
+        ),
+      );
+
+      fireEvent.change(screen.getByLabelText("Message input"), {
+        target: { value: "works without randomUUID" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+      await waitFor(() =>
+        expect(client.sendMessage).toHaveBeenCalledWith(
+          "chat-a",
+          "works without randomUUID",
+        ),
+      );
+      expect(screen.getByText("works without randomUUID")).toBeInTheDocument();
+    } finally {
+      Object.defineProperty(globalThis.crypto, "randomUUID", {
+        value: original,
+        configurable: true,
+      });
+    }
+  });
+
   it("restores in-memory messages when switching away and back to a session", async () => {
     const client = makeClient();
     const onNewChat = vi.fn().mockResolvedValue("chat-a");

@@ -5,6 +5,7 @@ import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { ThreadViewport } from "@/components/thread/ThreadViewport";
 import { useNanobotStream } from "@/hooks/useNanobotStream";
+import { makeId } from "@/lib/id";
 import { useSessionHistory } from "@/hooks/useSessions";
 import type { ChatSummary, UIMessage } from "@/lib/types";
 import { useClient } from "@/providers/ClientProvider";
@@ -82,7 +83,7 @@ export function ThreadShell({
     setMessages((prev) => [
       ...prev,
       {
-        id: crypto.randomUUID(),
+        id: makeId(),
         role: "user",
         content: pending,
         createdAt: Date.now(),

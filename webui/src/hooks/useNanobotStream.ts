@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useClient } from "@/providers/ClientProvider";
+import { makeId } from "@/lib/id";
 import type { InboundEvent, UIMessage } from "@/lib/types";
 
 interface StreamBuffer {
@@ -43,7 +44,7 @@ export function useNanobotStream(
 
     const handle = (ev: InboundEvent) => {
       if (ev.event === "delta") {
-        const id = buffer.current?.messageId ?? crypto.randomUUID();
+        const id = buffer.current?.messageId ?? makeId();
         if (!buffer.current) {
           buffer.current = { messageId: id, parts: [] };
           setMessages((prev) => [
@@ -102,7 +103,7 @@ export function useNanobotStream(
             return [
               ...prev,
               {
-                id: crypto.randomUUID(),
+                id: makeId(),
                 role: "tool",
                 kind: "trace",
                 content: line,
@@ -124,7 +125,7 @@ export function useNanobotStream(
           return [
             ...filtered,
             {
-              id: crypto.randomUUID(),
+              id: makeId(),
               role: "assistant",
               content: ev.text,
               createdAt: Date.now(),
@@ -150,7 +151,7 @@ export function useNanobotStream(
       setMessages((prev) => [
         ...prev,
         {
-          id: crypto.randomUUID(),
+          id: makeId(),
           role: "user",
           content,
           createdAt: Date.now(),

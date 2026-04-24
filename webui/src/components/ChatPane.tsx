@@ -4,6 +4,7 @@ import { Composer } from "@/components/Composer";
 import { MessageList } from "@/components/MessageList";
 import { useClient } from "@/providers/ClientProvider";
 import { useNanobotStream } from "@/hooks/useNanobotStream";
+import { makeId } from "@/lib/id";
 import { useSessionHistory } from "@/hooks/useSessions";
 import type { ChatSummary } from "@/lib/types";
 
@@ -49,7 +50,7 @@ export function ChatPane({ session, onNewChat }: ChatPaneProps) {
     setMessages((prev) => [
       ...prev,
       {
-        id: crypto.randomUUID(),
+        id: makeId(),
         role: "user",
         content: pending,
         createdAt: Date.now(),
