@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
+from nanobot.agent.loop import _LoopHook
 from nanobot.agent.tools.workflow import WorkflowListTool, WorkflowRunTool
 from nanobot.workflows.progress import WorkflowProgressManager
 from nanobot.workflows.store import WorkflowStore
@@ -107,3 +109,42 @@ async def test_workflow_run_unknown_mode_returns_error(tmp_path) -> None:
 
     assert payload["success"] is False
     assert "mode" in payload["error"]
+
+
+async def test_loop_hook_preserves_effective_session_key_before_tool_execution() -> None:
+    class FakeLoop:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def _set_tool_context(self, channel, chat_id, message_id=None, thread_id=None, session_key=None):
+            self.calls.append(
+                {
+                    "channel": channel,
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "thread_id": thread_id,
+                    "session_key": session_key,
+                }
+            )
+
+    loop = FakeLoop()
+    hook = _LoopHook(
+        loop,
+        channel="telegram",
+        chat_id="room",
+        message_id="msg-1",
+        thread_id=42,
+        session_key="telegram:room:topic:42",
+    )
+
+    await hook.before_execute_tools(SimpleNamespace(tool_calls=[]))
+
+    assert loop.calls == [
+        {
+            "channel": "telegram",
+            "chat_id": "room",
+            "message_id": "msg-1",
+            "thread_id": 42,
+            "session_key": "telegram:room:topic:42",
+        }
+    ]
