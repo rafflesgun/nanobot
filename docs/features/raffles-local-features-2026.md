@@ -45,6 +45,7 @@ understand intended behavior quickly.
 | **Learning loop upgrades (recall + reviewable skills)** | ✅ | session/search.py, agent/tools/session_search.py, agent/skills_manager.py, agent/tools/skill_manage.py, agent/skill_proposals.py, agent/memory.py, command/builtin.py | tests/agent/test_session_search.py, tests/tools/test_session_search_tool.py, tests/command/test_builtin_recall.py, tests/agent/test_skills_manager.py, tests/tools/test_skill_manage_tool.py, tests/agent/test_skill_proposals.py, tests/agent/test_dream.py | `/recall` excludes current session by default; Dream writes proposals to `memory/skill-proposals/`; `skill_manage` mutates workspace skills only |
 | **Skill Scan v1 for workspace skill mutations** | ✅ | skills/scan.py, agent/skills_manager.py, agent/tools/skill_manage.py | tests/skills/test_scan.py, tests/agent/test_skills_manager.py, tests/tools/test_skill_manage_tool.py, tests/agent/test_skill_proposals.py, tests/agent/test_dream.py | `safe` allows writes; `warn` allows writes with findings; `block` rejects create/replace/patch/apply_proposal |
 | **`nanobot doctor` deployment diagnostics** | ✅ | doctor/types.py, doctor/service.py, doctor/checks/*.py, cli/commands.py | tests/doctor/*.py, tests/cli/test_commands.py | `nanobot doctor` local checks by default; `--live` adds bounded provider/MCP probes; `--json` for scripting; exit 1 on failures |
+| **Proposal metadata index + doctor drift visibility** | ✅ | agent/skill_proposal_metadata.py, agent/skill_proposals.py, agent/tools/skill_manage.py, doctor/checks/skills.py | tests/agent/test_skill_proposal_metadata.py, tests/agent/test_skill_proposals.py, tests/tools/test_skill_manage_tool.py, tests/doctor/test_skill_checks.py | Metadata index tracks `pending`/`applied`/`rejected`; doctor reports proposal health and drift |
 | Web search enhancements merged into main   | ℹ️     | agent/tools/web.py, README.md                          | tests/tools/test_web_search_tool.py    | Multi-provider search now upstream (`brave`, `tavily`, `duckduckgo`, `searxng`, `jina`) |
 | Runtime hardening (PR #2733)               | ℹ️     | agent/runner.py, agent/hook.py, agent/loop.py          | tests/agent/test_runner.py             | Now upstream: AgentRunner, checkpoints, tool batching, provider retry |
 
@@ -893,4 +894,41 @@ python3 -m pytest tests/skills/test_scan.py tests/agent/test_skills_manager.py t
 **Quick validation**
 ```bash
 pytest tests/doctor -q && pytest tests/cli/test_commands.py -q -k doctor
+```
+
+### 30. Proposal metadata index + doctor drift visibility
+
+**Core behavior**
+- Proposal lifecycle metadata is tracked in a dedicated index alongside proposal markdown files so review state survives beyond filename inspection.
+- The metadata index records proposal status as one of `pending`, `applied`, or `rejected`.
+- `skill_manage` updates lifecycle metadata when proposals are applied or rejected instead of leaving proposal state implicit.
+- `nanobot doctor` surfaces proposal health and drift so operators can see mismatches between proposal files and the metadata index.
+
+**Contract details**
+- Proposal markdown remains the review artifact under `workspace/memory/skill-proposals/`.
+- Proposal metadata lives in the branch-local index implemented by `nanobot/agent/skill_proposal_metadata.py` and consumed by `nanobot/agent/skill_proposals.py`.
+- `pending` means the proposal file exists and is still actionable.
+- `applied` means the proposal was promoted into a workspace skill and should no longer appear as pending work.
+- `rejected` means the proposal was explicitly declined and should remain visible as historical review state rather than silently disappearing from the index.
+- Doctor drift includes cases where proposal files exist without matching metadata, metadata references missing proposal files, or lifecycle state no longer matches on-disk reality.
+
+**Files to protect during future merges**
+- `nanobot/agent/skill_proposal_metadata.py`
+- `nanobot/agent/skill_proposals.py`
+- `nanobot/agent/tools/skill_manage.py`
+- `nanobot/doctor/checks/skills.py`
+- `tests/agent/test_skill_proposal_metadata.py`
+- `tests/agent/test_skill_proposals.py`
+- `tests/tools/test_skill_manage_tool.py`
+- `tests/doctor/test_skill_checks.py`
+
+**Resolution priority**
+1. Keep proposal state explicit in the metadata index; do not regress to inferring lifecycle solely from which markdown files happen to exist.
+2. Keep the lifecycle vocabulary limited to `pending`, `applied`, and `rejected` unless a real migration updates both runtime code and this contract.
+3. Keep `skill_manage` as the state transition point for apply/reject flows so metadata and proposal files cannot drift under normal usage.
+4. Keep doctor reporting proposal health/drift against both the proposal directory and the metadata index so merge regressions are operator-visible.
+
+**Quick validation**
+```bash
+python3 -m pytest tests/agent/test_skill_proposal_metadata.py tests/agent/test_skill_proposals.py tests/tools/test_skill_manage_tool.py tests/doctor/test_skill_checks.py -q
 ```
