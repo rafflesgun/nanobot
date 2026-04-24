@@ -1,3 +1,10 @@
+FROM oven/bun:1.1.38 AS webui-builder
+
+WORKDIR /app
+COPY webui/ ./webui/
+WORKDIR /app/webui
+RUN bun install --frozen-lockfile && bun run build
+
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 # Install Node.js 20 for the WhatsApp bridge
@@ -23,6 +30,7 @@ RUN mkdir -p nanobot bridge && touch nanobot/__init__.py && \
 # Copy the full source and install
 COPY nanobot/ nanobot/
 COPY bridge/ bridge/
+COPY --from=webui-builder /app/nanobot/web/dist nanobot/web/dist
 RUN uv pip install --system --no-cache .
 
 # Build the WhatsApp bridge

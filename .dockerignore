@@ -17,5 +17,6 @@ docs/
 .pytest_cache/
 .vscode/
 *.png
+!webui/public/**/*.png
 $null
 nul
