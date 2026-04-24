@@ -1,4 +1,4 @@
-FROM oven/bun:1.1.38 AS webui-builder
+FROM oven/bun:1.2.22 AS webui-builder
 
 WORKDIR /app
 COPY webui/ ./webui/
