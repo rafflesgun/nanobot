@@ -135,6 +135,7 @@ class WorkflowRunTool(Tool):
                 ensure_ascii=False,
             )
 
+        self._progress.validate(self._session_key)
         active = self._progress.active(self._session_key)
         if active is not None and active.workflow_name != name:
             output = (

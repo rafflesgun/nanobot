@@ -35,6 +35,30 @@ class WorkflowProgressManager:
     def active(self, session_key: str) -> WorkflowProgress | None:
         return self._progress.get(session_key)
 
+    def validate(self, session_key: str) -> WorkflowProgressResult | None:
+        progress = self._progress.get(session_key)
+        if progress is None:
+            return None
+
+        workflow, error = self.store.read(progress.workflow_name)
+        if error is not None or workflow is None:
+            self._progress.pop(session_key, None)
+            return WorkflowProgressResult(
+                success=False,
+                output=f"Workflow '{progress.workflow_name}' is no longer readable. Please restart the workflow.",
+                workflow_name=progress.workflow_name,
+            )
+
+        if workflow.fingerprint != progress.fingerprint:
+            self._progress.pop(session_key, None)
+            return WorkflowProgressResult(
+                success=False,
+                output=f"Workflow '{progress.workflow_name}' changed. Please restart the workflow.",
+                workflow_name=progress.workflow_name,
+            )
+
+        return None
+
     def next(self, session_key: str) -> WorkflowProgressResult:
         progress = self._progress.get(session_key)
         if progress is None:

@@ -134,6 +134,23 @@ async def test_workflow_run_step_rejects_different_active_workflow(tmp_path) -> 
     assert "Confirm health checks" not in mismatch["output"]
 
 
+async def test_workflow_run_step_clears_stale_active_workflow_before_switch(tmp_path) -> None:
+    write_workflow(tmp_path)
+    write_other_workflow(tmp_path)
+    tool = WorkflowRunTool(workspace=tmp_path)
+    tool.set_context(session_key="cli:direct")
+
+    first = json.loads(await tool.execute(name="release-check", mode="step"))
+    (tmp_path / "workflows" / "release-check.md").unlink()
+    switched = json.loads(await tool.execute(name="deploy-check", mode="step"))
+
+    assert "Step 1/2" in first["output"]
+    assert switched["success"] is True
+    assert switched["name"] == "deploy-check"
+    assert "Step 1/2" in switched["output"]
+    assert "Check deploy target." in switched["output"]
+
+
 async def test_workflow_run_step_is_isolated_by_session_key(tmp_path) -> None:
     write_workflow(tmp_path)
     store = WorkflowStore(tmp_path)
