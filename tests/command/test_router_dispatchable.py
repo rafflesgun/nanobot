@@ -26,11 +26,14 @@ class TestIsDispatchableCommand:
         assert router.is_dispatchable_command("/dream-log")
         assert router.is_dispatchable_command("/dream-restore")
         assert router.is_dispatchable_command("/recall")
+        assert router.is_dispatchable_command("/workflow")
 
     def test_prefix_commands_match(self, router: CommandRouter) -> None:
         assert router.is_dispatchable_command("/dream-log abc123")
         assert router.is_dispatchable_command("/dream-restore def456")
         assert router.is_dispatchable_command("/recall retry loop")
+        assert router.is_dispatchable_command("/workflow list")
+        assert router.is_dispatchable_command("/workflow run release-check")
 
     def test_priority_commands_not_matched(self, router: CommandRouter) -> None:
         # Priority commands are NOT in the dispatchable tiers — they are
