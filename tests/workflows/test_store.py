@@ -90,6 +90,26 @@ description: Pre-release validation checklist
     assert "must match" in result.invalid[0].error
 
 
+def test_read_rejects_non_string_name_without_crashing(tmp_path) -> None:
+    write_workflow(
+        tmp_path,
+        "release-check",
+        """---
+name: 123
+description: Pre-release validation checklist
+---
+
+1. Run doctor.
+""",
+    )
+
+    workflow, error = WorkflowStore(tmp_path).read("release-check")
+
+    assert workflow is None
+    assert error is not None
+    assert "name" in error or "match" in error
+
+
 def test_read_rejects_invalid_yaml_frontmatter(tmp_path) -> None:
     write_workflow(
         tmp_path,
@@ -223,3 +243,28 @@ description: Pre-release validation checklist
     assert "Instruction-only workflow" in rendered
     assert "1/2" in rendered
     assert "Run doctor." in rendered
+
+
+def test_render_step_returns_requested_step(tmp_path) -> None:
+    write_workflow(
+        tmp_path,
+        "release-check",
+        """---
+name: release-check
+description: Pre-release validation checklist
+---
+
+1. Run doctor.
+2. Summarize risks.
+""",
+    )
+
+    store = WorkflowStore(tmp_path)
+    workflow, error = store.read("release-check")
+
+    assert error is None
+    assert workflow is not None
+    rendered = store.render_step(workflow, 2)
+
+    assert "Step 2/2" in rendered
+    assert "Summarize risks." in rendered
