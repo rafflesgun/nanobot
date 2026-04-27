@@ -137,16 +137,6 @@ class SkillManageTool(Tool):
         summary = str(scan.get("summary") or "")
         self._metadata.record_scan(proposal_name, verdict=verdict, summary=summary)
 
-        data = self._metadata.list()
-        entry = data.get(proposal_name, {})
-        entry["last_scan_verdict"] = verdict
-        entry["last_scan_summary"] = summary
-        data[proposal_name] = entry
-        self._metadata.path.write_text(
-            json.dumps(data, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-
     @staticmethod
     def _validate_proposal_name(name: str) -> str | None:
         if (
