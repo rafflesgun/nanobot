@@ -7,12 +7,13 @@ import random
 import re
 import time
 import unicodedata
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal
 
 from loguru import logger
 from pydantic import Field
-from telegram import BotCommand, ReplyParameters, Update
+from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters, Update
 
 try:
     from telegram import ReactionTypeEmoji
@@ -21,7 +22,7 @@ try:
 except ImportError:
     HAS_REACTION_TYPE = False
 from telegram.error import BadRequest, NetworkError, TimedOut
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
 from io import BytesIO
@@ -253,6 +254,8 @@ class TelegramConfig(Base):
     pool_timeout: float = 5.0
     streaming: bool = True
     tts: SchemaTTSConfig = Field(default_factory=SchemaTTSConfig)
+    # Enable inline keyboard buttons in Telegram messages.
+    inline_keyboards: bool = False
     stream_edit_interval: float = Field(default=_STREAM_EDIT_INTERVAL_DEFAULT, ge=0.1)
 
 
@@ -428,13 +431,25 @@ class TelegramChannel(BaseChannel):
                 (
                     filters.TEXT
                     | filters.PHOTO
+                    | filters.VIDEO
+                    | filters.VIDEO_NOTE
+                    | filters.ANIMATION
                     | filters.VOICE
                     | filters.AUDIO
                     | filters.Document.ALL
+                    | filters.LOCATION
                 ),
                 self._on_message,
             )
         )
+
+        # Conditionally register inline keyboard callback handler
+        if self.config.inline_keyboards:
+            self._app.add_handler(CallbackQueryHandler(self._on_callback_query))
+            allowed_updates = ["message", "callback_query"]
+            logger.debug("Telegram inline keyboards enabled")
+        else:
+            allowed_updates = ["message"]
 
         logger.info("Starting Telegram bot (polling mode)...")
 
@@ -456,7 +471,7 @@ class TelegramChannel(BaseChannel):
 
         # Start polling (this runs until stopped)
         await self._app.updater.start_polling(
-            allowed_updates=["message"],
+            allowed_updates=allowed_updates,
             drop_pending_updates=True,  # Ignore old messages on startup
             error_callback=self._on_polling_error,
         )
@@ -497,6 +512,8 @@ class TelegramChannel(BaseChannel):
         ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
         if ext in ("jpg", "jpeg", "png", "gif", "webp"):
             return "photo"
+        if ext in ("mp4", "mov", "avi", "mkv", "webm", "3gp"):
+            return "video"
         if ext == "ogg":
             return "voice"
         if ext in ("mp3", "m4a", "wav", "aac"):
@@ -632,16 +649,19 @@ class TelegramChannel(BaseChannel):
                 media_type = self._get_media_type(media_path)
                 sender = {
                     "photo": self._app.bot.send_photo,
+                    "video": self._app.bot.send_video,
                     "voice": self._app.bot.send_voice,
                     "audio": self._app.bot.send_audio,
                 }.get(media_type, self._app.bot.send_document)
-                param = (
-                    "photo"
-                    if media_type == "photo"
-                    else media_type
-                    if media_type in ("voice", "audio")
-                    else "document"
-                )
+                param = {
+                    "photo": "photo",
+                    "video": "video",
+                    "voice": "voice",
+                    "audio": "audio",
+                }.get(media_type, "document")
+                extra: dict[str, Any] = {}
+                if media_type == "video":
+                    extra["supports_streaming"] = True
 
                 # Telegram Bot API accepts HTTP(S) URLs directly for media params.
                 if self._is_remote_media_url(media_path):
@@ -654,16 +674,19 @@ class TelegramChannel(BaseChannel):
                         **{param: media_path},
                         reply_parameters=reply_params,
                         **thread_kwargs,
+                        **extra,
                     )
                     continue
 
-                with open(media_path, "rb") as f:
-                    await sender(
-                        chat_id=chat_id,
-                        **{param: f},
-                        reply_parameters=reply_params,
-                        **thread_kwargs,
-                    )
+                media_bytes = Path(media_path).read_bytes()
+                await self._call_with_retry(
+                    sender,
+                    chat_id=chat_id,
+                    **{param: media_bytes},
+                    reply_parameters=reply_params,
+                    **thread_kwargs,
+                    **extra,
+                )
             except Exception as e:
                 filename = media_path.rsplit("/", 1)[-1]
                 logger.error("Failed to send media {}: {}", media_path, e)
@@ -674,6 +697,24 @@ class TelegramChannel(BaseChannel):
                     **thread_kwargs,
                 )
 
+        # Send text content
+        if msg.content and msg.content != "[empty message]":
+            render_as_blockquote = bool(msg.metadata.get("_tool_hint"))
+            buttons = getattr(msg, "buttons", None) or []
+            reply_markup = self._build_keyboard(buttons) if buttons else None
+            text = msg.content
+            # Fallback: no native keyboard → splice labels into the message so the choices survive.
+            if buttons and reply_markup is None:
+                text = f"{text}\n\n{self._buttons_as_text(buttons)}"
+            chunks = split_message(text, TELEGRAM_MAX_MESSAGE_LEN)
+            for i, chunk in enumerate(chunks):
+                is_last = (i == len(chunks) - 1)
+                await self._send_text(
+                    chat_id, chunk, reply_params, thread_kwargs,
+                    render_as_blockquote=render_as_blockquote,
+                    reply_markup=reply_markup if is_last else None,
+                )
+
         await self._maybe_send_tts(
             chat_id=chat_id,
             text=msg.content,
@@ -682,13 +723,10 @@ class TelegramChannel(BaseChannel):
             metadata=msg.metadata,
         )
 
-        # Send text content
-        if msg.content and msg.content != "[empty message]":
-            for chunk in split_message(msg.content, TELEGRAM_MAX_MESSAGE_LEN):
-                await self._send_text(chat_id, chunk, reply_params, thread_kwargs)
-
     async def _call_with_retry(self, fn, *args, **kwargs):
-        """Call an async Telegram API function with retry on pool/network timeout."""
+        """Call an async Telegram API function with retry on pool/network timeout and RetryAfter."""
+        from telegram.error import RetryAfter
+
         for attempt in range(1, _SEND_MAX_RETRIES + 1):
             try:
                 return await fn(*args, **kwargs)
@@ -698,6 +736,17 @@ class TelegramChannel(BaseChannel):
                 delay = _SEND_RETRY_BASE_DELAY * (2 ** (attempt - 1))
                 logger.warning(
                     "Telegram timeout (attempt {}/{}), retrying in {:.1f}s",
+                    attempt,
+                    _SEND_MAX_RETRIES,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+            except RetryAfter as e:
+                if attempt == _SEND_MAX_RETRIES:
+                    raise
+                delay = float(getattr(e, "retry_after", _SEND_RETRY_BASE_DELAY))
+                logger.warning(
+                    "Telegram rate limited (attempt {}/{}), retrying in {:.1f}s",
                     attempt,
                     _SEND_MAX_RETRIES,
                     delay,
@@ -714,6 +763,8 @@ class TelegramChannel(BaseChannel):
         text: str,
         reply_params=None,
         thread_kwargs: dict | None = None,
+        render_as_blockquote: bool = False,
+        reply_markup=None,
     ) -> None:
         """Send a plain text message with HTML fallback."""
         try:
@@ -724,6 +775,7 @@ class TelegramChannel(BaseChannel):
                 text=html,
                 parse_mode="HTML",
                 reply_parameters=reply_params,
+                reply_markup=reply_markup,
                 **(thread_kwargs or {}),
             )
         except BadRequest as e:
@@ -734,6 +786,7 @@ class TelegramChannel(BaseChannel):
                     chat_id=chat_id,
                     text=text,
                     reply_parameters=reply_params,
+                    reply_markup=reply_markup,
                     **(thread_kwargs or {}),
                 )
             except Exception as e2:
@@ -1395,34 +1448,29 @@ class TelegramChannel(BaseChannel):
             "reply_to_message_id": getattr(reply_to, "message_id", None) if reply_to else None,
         }
 
-    @staticmethod
-    async def _extract_reply_context(message) -> str | None:
+    async def _extract_reply_context(self, message) -> str | None:
         """Extract text from the message being replied to, if any."""
         reply = getattr(message, "reply_to_message", None)
         if not reply:
             return None
-        snippet = None
-        reply_text = getattr(reply, "text", None)
-        reply_caption = getattr(reply, "caption", None)
-        if isinstance(reply_text, str) and reply_text:
-            snippet = reply_text.strip()
-        elif isinstance(reply_caption, str) and reply_caption:
-            snippet = reply_caption.strip()
-        if not snippet:
+        text = getattr(reply, "text", None) or getattr(reply, "caption", None) or ""
+        if len(text) > TELEGRAM_REPLY_CONTEXT_MAX_LEN:
+            text = text[:TELEGRAM_REPLY_CONTEXT_MAX_LEN] + "..."
+
+        if not text:
             return None
-        if len(snippet) > TELEGRAM_REPLY_CONTEXT_MAX_LEN:
-            snippet = snippet[:TELEGRAM_REPLY_CONTEXT_MAX_LEN] + "..."
-        from_user = getattr(reply, "from_user", None)
-        label = None
-        if from_user is not None:
-            username = getattr(from_user, "username", None)
-            first_name = getattr(from_user, "first_name", None)
-            if username:
-                label = f"@{username}"
-            elif first_name:
-                label = first_name
-        prefix = f"[Reply to {label}: " if label else "[Reply to: "
-        return prefix + snippet + "]"
+
+        bot_id, _ = await self._ensure_bot_identity()
+        reply_user = getattr(reply, "from_user", None)
+
+        if bot_id and reply_user and getattr(reply_user, "id", None) == bot_id:
+            return f"[Reply to bot: {text}]"
+        elif reply_user and getattr(reply_user, "username", None):
+            return f"[Reply to @{reply_user.username}: {text}]"
+        elif reply_user and getattr(reply_user, "first_name", None):
+            return f"[Reply to {reply_user.first_name}: {text}]"
+        else:
+            return f"[Reply to: {text}]"
 
     async def _download_message_media(
         self, msg, *, add_failure_content: bool = False
@@ -2202,16 +2250,19 @@ class TelegramChannel(BaseChannel):
                 "image/jpeg": ".jpg",
                 "image/png": ".png",
                 "image/gif": ".gif",
+                "image/webp": ".webp",
                 "audio/ogg": ".ogg",
                 "audio/mpeg": ".mp3",
                 "audio/mp4": ".m4a",
+                "video/mp4": ".mp4",
+                "video/quicktime": ".mov",
+                "video/webm": ".webm",
+                "video/x-matroska": ".mkv", "video/3gpp": ".3gp",
             }
             if mime_type in ext_map:
                 return ext_map[mime_type]
 
         if filename:
-            from pathlib import Path
-
             p = Path(filename)
             if p.suffixes:
                 # Return full compound extension if present (e.g. .tar.gz)
@@ -2219,5 +2270,62 @@ class TelegramChannel(BaseChannel):
             if p.suffix:
                 return p.suffix.lower()
 
-        type_map = {"image": ".jpg", "voice": ".ogg", "audio": ".mp3", "file": ""}
+        type_map = {"image": ".jpg", "voice": ".ogg", "audio": ".mp3", "video": ".mp4", "file": ""}
         return type_map.get(media_type, "")
+
+    def _build_keyboard(self, buttons: list) -> InlineKeyboardMarkup | None:
+        """Build inline keyboard markup if inline_keyboards is enabled."""
+        if not buttons or not self.config.inline_keyboards:
+            return None
+        keyboard = [
+            [InlineKeyboardButton(label, callback_data=self._safe_callback_data(label)) for label in row]
+            for row in buttons
+        ]
+        return InlineKeyboardMarkup(keyboard)
+
+    @staticmethod
+    def _safe_callback_data(label: str) -> str:
+        # Telegram caps callback_data at 64 bytes UTF-8; truncate at a char boundary so the keyboard still sends.
+        encoded = label.encode("utf-8")
+        if len(encoded) <= 64:
+            return label
+        return encoded[:64].decode("utf-8", errors="ignore")
+
+    @staticmethod
+    def _buttons_as_text(buttons: list[list[str]]) -> str:
+        # Buttons are semantic options; when we can't render a keyboard, the user still needs to see them.
+        return "\n".join(" ".join(f"[{label}]" for label in row) for row in buttons if row)
+
+    async def _on_callback_query(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle inline keyboard button clicks (callback queries)."""
+        if not update.callback_query or not update.effective_user:
+            return
+        query = update.callback_query
+        user = update.effective_user
+        chat_id = query.message.chat_id if query.message else None
+        sender_id = self._sender_id(user)
+        if not chat_id:
+            logger.warning("Callback query without chat_id")
+            return
+        button_label = query.data or ""
+        await query.answer()
+        if query.message:
+            try:
+                await query.message.edit_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+        logger.debug("Inline button tap from {}: {}", sender_id, button_label)
+        self._start_typing(str(chat_id))
+        await self._handle_message(
+            sender_id=sender_id,
+            chat_id=str(chat_id),
+            content=button_label,
+            metadata={
+                "callback_query_id": query.id,
+                "button_label": button_label,
+                "user_id": user.id,
+                "username": user.username,
+                "first_name": user.first_name,
+                "is_callback": True,
+            },
+        )

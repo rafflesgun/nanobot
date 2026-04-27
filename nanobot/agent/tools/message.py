@@ -15,7 +15,11 @@ from nanobot.bus.events import OutboundMessage
         chat_id=StringSchema("Optional: target chat/user ID"),
         media=ArraySchema(
             StringSchema(""),
-            description="Optional: list of file paths to attach (images, audio, documents)",
+            description="Optional: list of file paths to attach (images, video, audio, documents)",
+        ),
+        buttons=ArraySchema(
+            ArraySchema(StringSchema("Button label")),
+            description="Optional: inline keyboard buttons as list of rows, each row is list of button labels.",
         ),
         required=["content"],
     )
@@ -45,7 +49,15 @@ class MessageTool(Tool):
             "message_default_thread_id",
             default=None,
         )
+        self._default_metadata: ContextVar[dict[str, Any]] = ContextVar(
+            "message_default_metadata",
+            default={},
+        )
         self._sent_in_turn_var: ContextVar[bool] = ContextVar("message_sent_in_turn", default=False)
+        self._record_channel_delivery_var: ContextVar[bool] = ContextVar(
+            "message_record_channel_delivery",
+            default=False,
+        )
 
     def set_context(
         self,
@@ -53,12 +65,14 @@ class MessageTool(Tool):
         chat_id: str,
         message_id: str | None = None,
         thread_id: int | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """Set the current message context."""
         self._default_channel.set(channel)
         self._default_chat_id.set(chat_id)
         self._default_message_id.set(message_id)
         self._default_thread_id.set(thread_id)
+        self._default_metadata.set(metadata or {})
 
     def set_send_callback(self, callback: Callable[[OutboundMessage], Awaitable[None]]) -> None:
         """Set the callback for sending messages."""
@@ -67,6 +81,14 @@ class MessageTool(Tool):
     def start_turn(self) -> None:
         """Reset per-turn send tracking."""
         self._sent_in_turn = False
+
+    def set_record_channel_delivery(self, active: bool):
+        """Mark tool-sent messages as proactive channel deliveries."""
+        return self._record_channel_delivery_var.set(active)
+
+    def reset_record_channel_delivery(self, token) -> None:
+        """Restore previous proactive delivery recording state."""
+        self._record_channel_delivery_var.reset(token)
 
     @property
     def _sent_in_turn(self) -> bool:
@@ -96,15 +118,21 @@ class MessageTool(Tool):
         chat_id: str | None = None,
         message_id: str | None = None,
         media: list[str] | None = None,
+        buttons: list[list[str]] | None = None,
         **kwargs: Any,
     ) -> str:
         from nanobot.utils.helpers import strip_think
 
         content = strip_think(content)
 
+        if buttons is not None:
+            if not isinstance(buttons, list) or any(
+                not isinstance(row, list) or any(not isinstance(label, str) for label in row)
+                for row in buttons
+            ):
+                return "Error: buttons must be a list of list of strings"
         default_channel = self._default_channel.get()
         default_chat_id = self._default_chat_id.get()
-
         channel = channel or default_channel
         chat_id = chat_id or default_chat_id
         thread_id = kwargs.get("thread_id")
@@ -113,7 +141,8 @@ class MessageTool(Tool):
         # some channels (e.g. Feishu) use it to determine the target
         # conversation via their Reply API, which would route the message
         # to the wrong chat entirely.
-        if channel == default_channel and chat_id == default_chat_id:
+        same_target = channel == default_channel and chat_id == default_chat_id
+        if same_target:
             message_id = message_id or self._default_message_id.get()
             if thread_id is None:
                 thread_id = self._default_thread_id.get()
@@ -127,17 +156,20 @@ class MessageTool(Tool):
         if not self._send_callback:
             return "Error: Message sending not configured"
 
-        metadata: dict[str, Any] = {}
+        metadata = dict(self._default_metadata.get()) if same_target else {}
         if message_id is not None:
             metadata["message_id"] = message_id
         if thread_id is not None:
             metadata["message_thread_id"] = thread_id
+        if self._record_channel_delivery_var.get():
+            metadata["_record_channel_delivery"] = True
 
         msg = OutboundMessage(
             channel=channel,
             chat_id=chat_id,
             content=content,
             media=media or [],
+            buttons=buttons or [],
             metadata=metadata,
         )
 
@@ -146,6 +178,7 @@ class MessageTool(Tool):
             if channel == default_channel and chat_id == default_chat_id:
                 self._sent_in_turn = True
             media_info = f" with {len(media)} attachments" if media else ""
-            return f"Message sent to {channel}:{chat_id}{media_info}"
+            button_info = f" with {sum(len(row) for row in buttons)} button(s)" if buttons else ""
+            return f"Message sent to {channel}:{chat_id}{media_info}{button_info}"
         except Exception as e:
             return f"Error sending message: {str(e)}"

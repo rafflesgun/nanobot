@@ -39,6 +39,7 @@ class OutboundMessage:
     reply_to: str | None = None
     media: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    buttons: list[list[str]] = field(default_factory=list)
 
     def __contains__(self, item: object) -> bool:
         """Support simple string containment checks against content in tests/callers."""

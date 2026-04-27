@@ -2,7 +2,8 @@
 
 This document records features developed on `raffles/local`  
 that survived the merge with `origin/main` on 13 March 2026  
-and the merge with upstream/main on 2 April 2026.
+the merge with upstream/main on 2 April 2026,
+and the merge with `origin/main` on 27 April 2026.
 
 Goal: help future merge conflict resolution (human or agent)  
 understand intended behavior quickly.

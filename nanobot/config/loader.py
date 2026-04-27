@@ -4,9 +4,11 @@ import json
 import os
 import re
 from pathlib import Path
+from typing import Any
 
 import pydantic
 from loguru import logger
+from pydantic import BaseModel
 
 from nanobot.config.schema import Config
 
@@ -33,7 +35,7 @@ def load_config(config_path: Path | None = None) -> Config:
     Returns:
         Loaded configuration object.
     """
-    path = config_path or _config_path_override or get_config_path()
+    path = config_path or _config_path_override or _current_config_path or get_config_path()
 
     config = Config()
     if path.exists():
@@ -65,7 +67,7 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
         config: Configuration to save.
         config_path: Optional path to save to. Uses default if not provided.
     """
-    path = config_path or get_config_path()
+    path = config_path or _config_path_override or _current_config_path or get_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
 
     data = config.model_dump(mode="json", by_alias=True)
@@ -74,21 +76,56 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
-def resolve_config_env_vars(config: Config) -> Config:
-    """Return a copy of *config* with ``${VAR}`` env-var references resolved.
+_ENV_REF_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
-    Only string values are affected; other types pass through unchanged.
-    Raises :class:`ValueError` if a referenced variable is not set.
+
+def resolve_config_env_vars(config: Config) -> Config:
+    """Return *config* with ``${VAR}`` env-var references resolved.
+
+    Walks in place so fields declared with ``exclude=True`` (e.g.
+    ``DreamConfig.cron``) survive; returns the same instance when no
+    references are present. Raises ``ValueError`` if a referenced
+    variable is not set.
     """
-    data = config.model_dump(mode="json", by_alias=True)
-    data = _resolve_env_vars(data)
-    return Config.model_validate(data)
+    return _resolve_in_place(config)
+
+
+def _resolve_in_place(obj: Any) -> Any:
+    if isinstance(obj, str):
+        new = _ENV_REF_PATTERN.sub(_env_replace, obj)
+        return new if new != obj else obj
+    if isinstance(obj, BaseModel):
+        updates: dict[str, Any] = {}
+        for name in type(obj).model_fields:
+            old = getattr(obj, name)
+            new = _resolve_in_place(old)
+            if new is not old:
+                updates[name] = new
+        extras = obj.__pydantic_extra__
+        new_extras: dict[str, Any] | None = None
+        if extras:
+            resolved = {k: _resolve_in_place(v) for k, v in extras.items()}
+            if any(resolved[k] is not extras[k] for k in extras):
+                new_extras = resolved
+        if not updates and new_extras is None:
+            return obj
+        copy = obj.model_copy(update=updates) if updates else obj.model_copy()
+        if new_extras is not None:
+            copy.__pydantic_extra__ = new_extras
+        return copy
+    if isinstance(obj, dict):
+        resolved = {k: _resolve_in_place(v) for k, v in obj.items()}
+        return resolved if any(resolved[k] is not obj[k] for k in obj) else obj
+    if isinstance(obj, list):
+        resolved = [_resolve_in_place(v) for v in obj]
+        return resolved if any(nv is not ov for nv, ov in zip(resolved, obj)) else obj
+    return obj
 
 
 def _resolve_env_vars(obj: object) -> object:
-    """Recursively resolve ``${VAR}`` patterns in string values."""
+    """Recursively resolve ``${VAR}`` patterns in plain strings/dicts/lists."""
     if isinstance(obj, str):
-        return re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", _env_replace, obj)
+        return _ENV_REF_PATTERN.sub(_env_replace, obj)
     if isinstance(obj, dict):
         return {k: _resolve_env_vars(v) for k, v in obj.items()}
     if isinstance(obj, list):
@@ -143,12 +180,15 @@ def _migrate_config(data: dict) -> dict:
 
 
 _config_path_override: Path | None = None
+_current_config_path: Path | None = None
 
 
 def set_config_path(path: Path | str | None) -> None:
     """Allow tests to override config location"""
-    global _config_path_override
+    global _config_path_override, _current_config_path
     if path is None:
         _config_path_override = None
+        _current_config_path = None
     else:
         _config_path_override = Path(path)
+        _current_config_path = _config_path_override

@@ -63,13 +63,23 @@ class CronTool(Tool):
         self._channel_var: ContextVar[str] = ContextVar("cron_channel", default="")
         self._chat_id_var: ContextVar[str] = ContextVar("cron_chat_id", default="")
         self._thread_id_var: ContextVar[int | None] = ContextVar("cron_thread_id", default=None)
+        self._metadata: ContextVar[dict] = ContextVar("cron_metadata", default={})
+        self._session_key: ContextVar[str] = ContextVar("cron_session_key", default="")
         self._in_cron_context: ContextVar[bool] = ContextVar("cron_in_context", default=False)
 
-    def set_context(self, channel: str, chat_id: str, thread_id: int | None = None) -> None:
+    def set_context(
+        self,
+        channel: str,
+        chat_id: str,
+        thread_id: int | None = None,
+        metadata: dict | None = None, session_key: str | None = None,
+    ) -> None:
         """Set the current session context for delivery."""
         self._channel_var.set(channel)
         self._chat_id_var.set(chat_id)
         self._thread_id_var.set(thread_id)
+        self._metadata.set(metadata or {})
+        self._session_key.set(session_key or f"{channel}:{chat_id}")
 
     @property
     def _channel(self) -> str:
@@ -216,6 +226,8 @@ class CronTool(Tool):
             to=chat_id,
             thread_id=self._thread_id_var.get(),
             delete_after_run=delete_after,
+            channel_meta=self._metadata.get(),
+            session_key=self._session_key.get() or None,
         )
         return f"Created job '{job.name}' (id: {job.id})"
 

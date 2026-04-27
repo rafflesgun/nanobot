@@ -131,6 +131,11 @@ class SubagentManager:
         self.stats_manager = StatsManager(workspace)
         self.runner = AgentRunner(provider)
 
+    def set_provider(self, provider: LLMProvider, model: str) -> None:
+        self.provider = provider
+        self.model = model
+        self.runner.provider = provider
+
     async def spawn(
         self,
         task: str,
