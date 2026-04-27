@@ -57,7 +57,7 @@ class SessionSearchService:
     @staticmethod
     def _session_key_from_path(path: Path) -> str:
         stem = path.stem
-        return stem.replace("_", ":", 1)
+        return stem.replace("_", ":")
 
     def _search_file(
         self,
