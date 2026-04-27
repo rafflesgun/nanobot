@@ -6,6 +6,7 @@ import pytest
 
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.message import MessageTool
+from nanobot.agent.tools.session_search import SessionSearchTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.cron.service import CronService
 
@@ -101,6 +102,45 @@ async def test_cron_tool_keeps_task_local_context(tmp_path) -> None:
     jobs = tool._cron.list_jobs()
     assert {job.payload.channel for job in jobs} == {"feishu", "email"}
     assert {job.payload.to for job in jobs} == {"chat-a", "chat-b"}
+
+
+@pytest.mark.asyncio
+async def test_session_search_tool_keeps_task_local_context(tmp_path) -> None:
+    sessions_dir = tmp_path / "sessions"
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+    (sessions_dir / "session_a.jsonl").write_text(
+        '{"_type":"metadata","metadata":{},"key":"session-a"}\n'
+        '{"role":"user","content":"Alpha task notes","timestamp":"2026-04-22T09:01:00"}\n',
+        encoding="utf-8",
+    )
+    (sessions_dir / "session_b.jsonl").write_text(
+        '{"_type":"metadata","metadata":{},"key":"session-b"}\n'
+        '{"role":"user","content":"Beta task notes","timestamp":"2026-04-22T09:02:00"}\n',
+        encoding="utf-8",
+    )
+
+    tool = SessionSearchTool(workspace=tmp_path)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def task_one() -> str:
+        tool.set_context(session_key="session-a")
+        entered.set()
+        await release.wait()
+        return await tool.execute(query="task notes", limit=10)
+
+    async def task_two() -> str:
+        await entered.wait()
+        tool.set_context(session_key="session-b")
+        release.set()
+        return await tool.execute(query="task notes", limit=10, include_current_session=True)
+
+    result_one, result_two = await asyncio.gather(task_one(), task_two())
+
+    assert "session-a" not in result_one
+    assert "session-b" in result_one
+    assert "session-a" in result_two
+    assert "session-b" in result_two
 
 
 # --- Basic single-task regression tests ---

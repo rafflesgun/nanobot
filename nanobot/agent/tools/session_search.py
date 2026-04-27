@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
@@ -11,10 +12,10 @@ from nanobot.session.search import SessionSearchService
 class SessionSearchTool(Tool):
     def __init__(self, workspace) -> None:
         self._service = SessionSearchService(workspace)
-        self._session_key: str | None = None
+        self._session_key: ContextVar[str | None] = ContextVar("session_search_key", default=None)
 
     def set_context(self, session_key: str | None = None, **_: Any) -> None:
-        self._session_key = session_key
+        self._session_key.set(session_key)
 
     @property
     def name(self) -> str:
@@ -62,7 +63,7 @@ class SessionSearchTool(Tool):
     ) -> str:
         if not query or not query.strip():
             return "Error: query cannot be empty"
-        exclude = None if include_current_session else self._session_key
+        exclude = None if include_current_session else self._session_key.get()
         hits = self._service.search(query, limit=limit, exclude_session_key=exclude)
         if not hits:
             return f'No prior session matches found for "{query}".'
