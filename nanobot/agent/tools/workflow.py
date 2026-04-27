@@ -166,6 +166,7 @@ class WorkflowRunTool(Tool):
         if not progress.success and "No active workflow" in progress.output:
             self._completed.pop(session_key, None)
             progress = self._progress.start(session_key, name)
+            self._completed.pop(session_key, None)
         elif progress.completed:
             self._completed[session_key] = progress.workflow_name or name
         return self._step_payload(progress, name=name)

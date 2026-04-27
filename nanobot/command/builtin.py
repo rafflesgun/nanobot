@@ -226,10 +226,10 @@ def _workflow_usage() -> str:
 
 
 def _workflow_progress(ctx: CommandContext) -> WorkflowProgressManager:
-    progress = getattr(ctx.loop, "workflow_progress", None)
+    progress = getattr(ctx.loop, "_workflow_progress", None)
     if progress is None:
         progress = WorkflowProgressManager(WorkflowStore(ctx.loop.workspace))
-        setattr(ctx.loop, "workflow_progress", progress)
+        setattr(ctx.loop, "_workflow_progress", progress)
     return progress
 
 

@@ -34,6 +34,8 @@ from nanobot.agent.tools.self import MyTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.agent.tools.workflow import WorkflowListTool, WorkflowRunTool
+from nanobot.workflows.progress import WorkflowProgressManager
+from nanobot.workflows.store import WorkflowStore
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.config.paths import (
@@ -322,6 +324,7 @@ class AgentLoop:
             self.tools.register(MyTool(loop=self, modify_allowed=_tc.my.allow_set))
         self._runtime_vars: dict[str, Any] = {}
         self._current_iteration: int = 0
+        self._workflow_progress = WorkflowProgressManager(WorkflowStore(self.workspace))
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
 
@@ -343,7 +346,7 @@ class AgentLoop:
         self.tools.register(SessionSearchTool(workspace=self.workspace))
         self.tools.register(SkillManageTool(workspace=self.workspace))
         self.tools.register(WorkflowListTool(workspace=self.workspace))
-        self.tools.register(WorkflowRunTool(workspace=self.workspace))
+        self.tools.register(WorkflowRunTool(workspace=self.workspace, progress=self._workflow_progress))
         if self.exec_config.enable:
             self.tools.register(
                 ExecTool(
