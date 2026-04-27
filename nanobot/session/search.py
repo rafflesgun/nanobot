@@ -106,7 +106,7 @@ class SessionSearchService:
                     if phrase_hits or term_hits:
                         match_count += phrase_hits + term_hits
                         score += phrase_hits * 10 + term_hits
-        except OSError:
+        except (OSError, UnicodeDecodeError):
             return None
 
         if score <= 0 or not texts:

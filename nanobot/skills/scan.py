@@ -35,7 +35,7 @@ _RULES = (
         category="exfiltration",
         message="Potential environment secret exfiltration via curl.",
         pattern=re.compile(
-            r"curl\b[^\n]*\$[A-Z_][A-Z0-9_]*",
+            r"curl\b[^\n]*\$\{?[A-Z_][A-Z0-9_]*\}?",
             re.IGNORECASE,
         ),
     ),
@@ -52,6 +52,13 @@ _RULES = (
         category="destructive shell patterns",
         message="Potentially destructive recursive delete command.",
         pattern=re.compile(r"rm\s+-rf\b", re.IGNORECASE),
+    ),
+    _Rule(
+        pattern_id="obfuscation_shell_exec",
+        severity="high",
+        category="obfuscation",
+        message="Shell execution via -c flag can hide malicious behavior.",
+        pattern=re.compile(r"\b(bash|sh|python|perl|ruby|node)\s+-c\b", re.IGNORECASE),
     ),
     _Rule(
         pattern_id="persistence_cron",

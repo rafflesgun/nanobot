@@ -783,6 +783,8 @@ print(len(_parse_kimi_tool_calls(test)), 'tool calls parsed')
 **Core behavior**
 - `/recall <query>` searches prior session transcripts for related work and excludes the current session by default
 - The agent also gets a read-only `session_search` tool that returns compact excerpts from matching prior sessions
+- Binary and non-UTF-8 session files are gracefully skipped (no crash on `UnicodeDecodeError`)
+- Multi-part content (list of text blocks) in agent messages is correctly extracted and searchable
 - `skill_manage` provides safe workspace-only mutations for skills: create, replace, patch, delete, apply proposal, reject proposal
 - Built-in skills remain read-only; only `workspace/skills/` is mutable
 - Dream no longer writes skills directly into `workspace/skills/`
@@ -815,12 +817,13 @@ pytest tests/agent/test_session_search.py tests/tools/test_session_search_tool.p
 
 **Core behavior**
 - `scan_skill_content()` classifies workspace skill text as `safe`, `warn`, or `block` before mutation writes happen
-- v1 coverage is intentionally regex-based and targets five classes of risky content:
-  - environment secret exfiltration via `curl ... $ENV_VAR`
+- v1 coverage is intentionally regex-based and targets six classes of risky content:
+  - environment secret exfiltration via `curl ... $ENV_VAR` or `curl ... ${ENV_VAR}` (braced form)
   - prompt-injection language such as `ignore previous instructions`
   - destructive shell patterns such as `rm -rf`
+  - obfuscated execution via `-c` flag (`bash -c`, `python -c`, `sh -c`, `perl -c`, `ruby -c`, `node -c`)
   - persistence via `crontab`
-  - obfuscated execution via `base64 -d`, `python -c`, or `bash -c`
+  - piped obfuscation via `base64 -d` or `echo ... | (bash|sh|python|perl|ruby|node)`
 - `critical` and `high` findings become `block`; `medium` findings become `warn`; no findings returns `safe`
 
 **Enforcement points**
@@ -876,7 +879,7 @@ python3 -m pytest tests/skills/test_scan.py tests/agent/test_skills_manager.py t
 - Providers: default provider config presence, optional live auth/reachability probe
 - Channels: required config fields for enabled channels only
 - Dream: memory dir, skill proposal dir, `.dream_cursor` parent
-- Skills: workspace skills and proposal directory readiness
+- Skills: workspace skills and proposal directory readiness, blocked/warning proposal detection via `last_scan_verdict`
 - MCP: config block shape, enabled-tools sanity, optional live connectivity probe
 
 **Files to protect during conflicts**

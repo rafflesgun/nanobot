@@ -95,7 +95,7 @@ def run_skill_checks(workspace: Path) -> list[DoctorCheckResult]:
                     names=sorted(
                         name
                         for name in proposal_names
-                        if (metadata_entries.get(name) or {}).get("scan_verdict") == "block"
+                        if (metadata_entries.get(name) or {}).get("last_scan_verdict") == "block"
                     ),
                     label="blocked",
                     status=DoctorStatus.WARN,
@@ -105,7 +105,7 @@ def run_skill_checks(workspace: Path) -> list[DoctorCheckResult]:
                     names=sorted(
                         name
                         for name in proposal_names
-                        if (metadata_entries.get(name) or {}).get("scan_verdict") == "warn"
+                        if (metadata_entries.get(name) or {}).get("last_scan_verdict") == "warn"
                     ),
                     label="warning",
                     status=DoctorStatus.WARN,

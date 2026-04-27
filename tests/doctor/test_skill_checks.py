@@ -17,6 +17,8 @@ def test_skill_checks_report_blocked_pending_proposals(tmp_path) -> None:
 
     assert any(r.check_id == "skill_proposals_pending" for r in results)
     assert any(r.check_id == "skill_proposals_blocked" for r in results)
+    blocked_result = next(r for r in results if r.check_id == "skill_proposals_blocked")
+    assert "bad-skill" in blocked_result.message
 
 
 def test_skill_checks_warn_on_metadata_file_drift(tmp_path) -> None:
@@ -44,6 +46,8 @@ def test_skill_checks_report_warning_proposals(tmp_path) -> None:
     results = run_skill_checks(tmp_path)
 
     assert any(r.check_id == "skill_proposals_warning" for r in results)
+    warning_result = next(r for r in results if r.check_id == "skill_proposals_warning")
+    assert "warn-skill" in warning_result.message
 
 
 def test_skill_checks_do_not_flag_applied_metadata_without_file_as_drift(tmp_path) -> None:

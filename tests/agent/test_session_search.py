@@ -172,3 +172,41 @@ def test_search_fallback_key_for_topic_filename_is_excludable(tmp_path: Path) ->
     hits = service.search("retry incident", exclude_session_key="telegram:123:topic:42")
 
     assert hits == []
+
+
+def test_search_skips_binary_session_files(tmp_path: Path) -> None:
+    sessions_dir = tmp_path / "sessions"
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+    (sessions_dir / "binary_file.jsonl").write_bytes(b"\xff\xfe\x00\x00invalid binary")
+
+    service = SessionSearchService(tmp_path)
+    hits = service.search("anything")
+
+    assert hits == []
+
+
+def test_search_handles_multipart_content(tmp_path: Path) -> None:
+    _write_session(
+        tmp_path / "sessions" / "cli_direct.jsonl",
+        [
+            {
+                "_type": "metadata",
+                "key": "cli:direct",
+            },
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": "The retry logic is duplicated"},
+                    {"type": "text", "text": "in provider retry mode"},
+                ],
+                "timestamp": "2026-04-22T09:02:00",
+            },
+        ],
+    )
+
+    service = SessionSearchService(tmp_path)
+    hits = service.search("retry logic")
+
+    assert len(hits) == 1
+    assert hits[0].session_key == "cli:direct"
+    assert "retry logic" in hits[0].excerpt.lower()
