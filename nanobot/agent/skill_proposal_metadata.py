@@ -76,15 +76,27 @@ class ProposalMetadataStore:
             return {}
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        except json.JSONDecodeError:
+            import logging
+            logging.getLogger(__name__).warning("Corrupted metadata file %s, resetting", self.path)
+            return {}
+        except OSError:
             return {}
         return data if isinstance(data, dict) else {}
 
     def _write(self, data: dict[str, dict[str, Any]]) -> None:
-        self.path.write_text(
-            json.dumps(data, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+        import tempfile, os
+        tmp = tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False, dir=self.path.parent)
+        try:
+            tmp.write(json.dumps(data, indent=2, sort_keys=True) + "\n")
+            tmp.close()
+            os.replace(tmp.name, self.path)
+        except BaseException:
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
+            raise
 
     @staticmethod
     def _timestamp() -> str:
