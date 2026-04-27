@@ -129,3 +129,17 @@ async def test_workflow_unknown_subcommand_returns_usage(tmp_path) -> None:
     out = await cmd_workflow(workflow_context(tmp_path, "/workflow nope", "nope"))
 
     assert "Usage:" in out.content
+
+
+@pytest.mark.asyncio
+async def test_workflow_show_invalid_name_returns_validation_error(tmp_path) -> None:
+    out = await cmd_workflow(workflow_context(tmp_path, "/workflow show ../secret", "show ../secret"))
+
+    assert "Workflow name must be kebab-case" in out.content
+
+
+@pytest.mark.asyncio
+async def test_workflow_abort_without_active_workflow_returns_message(tmp_path) -> None:
+    out = await cmd_workflow(workflow_context(tmp_path, "/workflow abort", "abort"))
+
+    assert "No active workflow" in out.content

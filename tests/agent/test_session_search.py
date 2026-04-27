@@ -154,3 +154,21 @@ def test_search_excludes_current_topic_session_using_metadata_key(tmp_path: Path
     hits = service.search("retry incident", exclude_session_key="telegram:123:topic:42")
 
     assert hits == []
+
+
+def test_search_fallback_key_for_topic_filename_is_excludable(tmp_path: Path) -> None:
+    _write_session(
+        tmp_path / "sessions" / "telegram_123_topic_42.jsonl",
+        [
+            {
+                "role": "user",
+                "content": "Topic-specific retry incident without metadata",
+                "timestamp": "2026-04-22T09:01:00",
+            },
+        ],
+    )
+
+    service = SessionSearchService(tmp_path)
+    hits = service.search("retry incident", exclude_session_key="telegram:123:topic:42")
+
+    assert hits == []

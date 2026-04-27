@@ -31,6 +31,15 @@ def test_config_checks_report_invalid_json(tmp_path: Path) -> None:
     assert any(r.check_id == "config_parse" and r.status.value == "fail" for r in results)
 
 
+def test_config_checks_report_directory_path_as_parse_failure(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.mkdir()
+
+    results = run_config_checks(config_path)
+
+    assert any(r.check_id == "config_parse" and r.status.value == "fail" for r in results)
+
+
 def test_config_checks_report_schema_validation_error(tmp_path: Path) -> None:
     config_path = tmp_path / "config.json"
     # agents.defaults.maxTokens must be an int, not a string

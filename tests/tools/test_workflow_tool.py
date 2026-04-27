@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 from nanobot.agent.loop import _LoopHook
 from nanobot.agent.tools.workflow import WorkflowListTool, WorkflowRunTool
+from nanobot.bus.queue import MessageBus
 from nanobot.workflows.progress import WorkflowProgressManager
 from nanobot.workflows.store import WorkflowStore
 
@@ -237,6 +238,21 @@ async def test_workflow_tool_concurrency_contract(tmp_path) -> None:
     assert list_tool.read_only is True
     assert list_tool.exclusive is False
     assert list_tool.concurrency_safe is True
+
+
+def test_agent_loop_registers_workflow_run_with_shared_progress(tmp_path) -> None:
+    from nanobot.agent.loop import AgentLoop
+
+    provider = SimpleNamespace(
+        get_default_model=lambda: "test-model",
+        generation=SimpleNamespace(max_tokens=4096),
+    )
+
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    tool = loop.tools.get("workflow_run")
+
+    assert isinstance(tool, WorkflowRunTool)
+    assert tool._progress is loop._workflow_progress
 
 
 async def test_workflow_run_unknown_mode_returns_error(tmp_path) -> None:
