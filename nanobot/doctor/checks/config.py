@@ -54,7 +54,7 @@ def run_config_checks(config_path: Path) -> list[DoctorCheckResult]:
     try:
         with open(config_path, encoding="utf-8") as f:
             data = json.load(f)
-    except (json.JSONDecodeError, ValueError) as exc:
+    except (json.JSONDecodeError, ValueError, OSError) as exc:
         results.append(
             DoctorCheckResult(
                 section=_SECTION,

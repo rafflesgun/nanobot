@@ -134,5 +134,8 @@ async def _probe_anthropic_provider(
     extra_headers: dict[str, str] | None,
 ) -> tuple[bool, str]:
     provider = AnthropicProvider(api_key=api_key, api_base=api_base, extra_headers=extra_headers)
-    await asyncio.wait_for(provider._client.models.list(), timeout=_PROBE_TIMEOUT_S)
+    try:
+        await asyncio.wait_for(provider._client.models.list(), timeout=_PROBE_TIMEOUT_S)
+    finally:
+        await provider._client.close()
     return True, "Provider live probe succeeded."

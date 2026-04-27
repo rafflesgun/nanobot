@@ -1546,8 +1546,11 @@ def _resolve_doctor_workspace_path(config: str | None, workspace: str | None) ->
     if workspace:
         return Path(workspace).expanduser().resolve(strict=False)
 
-    loaded = load_config(resolved_config_path if config else None)
-    return Path(loaded.workspace_path).expanduser().resolve(strict=False)
+    try:
+        loaded = load_config(resolved_config_path if config else None)
+        return Path(loaded.workspace_path).expanduser().resolve(strict=False)
+    except Exception:
+        return Path(workspace).expanduser().resolve(strict=False) if workspace else Path(".").resolve()
 
 
 def _doctor_status_style(status: str) -> tuple[str, str]:

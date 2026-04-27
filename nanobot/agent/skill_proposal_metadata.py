@@ -12,7 +12,6 @@ class ProposalMetadataStore:
     def __init__(self, workspace: Path) -> None:
         self.workspace = workspace
         self.dir = workspace / "memory" / "skill-proposals"
-        self.dir.mkdir(parents=True, exist_ok=True)
         self.path = self.dir / ".metadata.json"
 
     def get(self, name: str) -> dict[str, Any] | None:
@@ -39,8 +38,8 @@ class ProposalMetadataStore:
         entry = data.get(name, {})
         entry.update(
             {
-                "scan_verdict": verdict,
-                "scan_summary": summary,
+                "last_scan_verdict": verdict,
+                "last_scan_summary": summary,
                 "scanned_at": self._timestamp(),
             }
         )
@@ -71,6 +70,9 @@ class ProposalMetadataStore:
         data[name] = entry
         self._write(data)
 
+    def _ensure_dir(self) -> None:
+        self.dir.mkdir(parents=True, exist_ok=True)
+
     def _read(self) -> dict[str, dict[str, Any]]:
         if not self.path.exists():
             return {}
@@ -85,6 +87,7 @@ class ProposalMetadataStore:
         return data if isinstance(data, dict) else {}
 
     def _write(self, data: dict[str, dict[str, Any]]) -> None:
+        self._ensure_dir()
         import tempfile, os
         tmp = tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False, dir=self.path.parent)
         try:
