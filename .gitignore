@@ -2,6 +2,7 @@
 .worktrees/
 .assets
 .docs
+docs/superpowers/
 .env
 .web
 .orion
