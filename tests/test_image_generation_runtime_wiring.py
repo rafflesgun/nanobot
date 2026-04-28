@@ -102,6 +102,33 @@ def test_agent_loop_registers_image_generation_with_runtime_opt_in(tmp_path: Pat
     assert isinstance(loop.tools.get("generate_image"), GenerateImageTool)
 
 
+def test_agent_loop_registers_image_generation_with_custom_provider(tmp_path: Path) -> None:
+    config = Config.model_validate(
+        {
+            "providers": {
+                "custom": {
+                    "apiKey": "image-key",
+                    "apiBase": "https://images.example.test/v1",
+                }
+            },
+            "tools": {"imageGeneration": {"enabled": True, "provider": "custom"}},
+        }
+    )
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        tools_config=config.tools,
+        image_generation_provider=config.get_image_generation_provider(),
+        enable_image_generation_tool=True,
+    )
+
+    assert isinstance(loop.tools.get("generate_image"), GenerateImageTool)
+
+
 def test_agent_loop_imports_image_generation_only_inside_enabled_registration_block() -> None:
     source = Path(loop_module.__file__).read_text(encoding="utf-8")
     tree = ast.parse(source)
@@ -125,7 +152,10 @@ def test_gateway_agent_loop_passes_openai_provider() -> None:
     assert len(calls) == 1
     value = _keyword_value(calls[0], "image_generation_provider")
     assert value is not None
-    assert _is_attribute_chain(value, ("config", "providers", "openai"))
+    assert isinstance(value, ast.Call)
+    assert isinstance(value.func, ast.Attribute)
+    assert value.func.attr == "get_image_generation_provider"
+    assert _is_attribute_chain(value.func.value, ("config",))
 
 
 def test_gateway_agent_loop_enables_image_generation() -> None:

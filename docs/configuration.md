@@ -621,7 +621,7 @@ If you need to allow trusted private ranges such as Tailscale / CGNAT addresses,
 
 ## Image Generation Tool
 
-Enable `tools.imageGeneration` to register the built-in `generate_image` tool for chat-channel users. The first supported image generation provider is OpenAI.
+Enable `tools.imageGeneration` to register the built-in `generate_image` tool for chat-channel users. Supported providers are `openai` and `custom` (for OpenAI-compatible image generation APIs).
 
 ```json
 {
@@ -641,6 +641,8 @@ Enable `tools.imageGeneration` to register the built-in `generate_image` tool fo
   }
 }
 ```
+
+For an OpenAI-compatible custom image endpoint, set `provider` to `custom` and configure `providers.custom.apiKey` / `providers.custom.apiBase`.
 
 Generated images are sent directly to the current chat as media. The tool returns only a compact status string to the model, so image bytes and provider metadata do not enter model context.
 

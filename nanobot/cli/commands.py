@@ -552,7 +552,7 @@ def serve(
         session_ttl_minutes=runtime_config.agents.defaults.session_ttl_minutes,
         consolidation_ratio=runtime_config.agents.defaults.consolidation_ratio,
         tools_config=runtime_config.tools,
-        image_generation_provider=runtime_config.providers.openai,
+        image_generation_provider=runtime_config.get_image_generation_provider(),
     )
 
     model_name = runtime_config.agents.defaults.model
@@ -671,7 +671,7 @@ def _run_gateway(
         session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
         consolidation_ratio=config.agents.defaults.consolidation_ratio,
         tools_config=config.tools,
-        image_generation_provider=config.providers.openai,
+        image_generation_provider=config.get_image_generation_provider(),
         enable_image_generation_tool=True,
         provider_snapshot_loader=load_provider_snapshot,
         provider_signature=provider_snapshot.signature,
@@ -1081,7 +1081,7 @@ def agent(
         session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
         consolidation_ratio=config.agents.defaults.consolidation_ratio,
         tools_config=config.tools,
-        image_generation_provider=config.providers.openai,
+        image_generation_provider=config.get_image_generation_provider(),
     )
     restart_notice = consume_restart_notice_from_env()
     if restart_notice and should_show_cli_restart_notice(restart_notice, session_id):

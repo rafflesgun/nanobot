@@ -530,7 +530,7 @@ class ImageGenerationToolConfig(Base):
     """Image generation tool configuration."""
 
     enabled: bool = False
-    provider: Literal["openai"] = "openai"
+    provider: Literal["openai", "custom"] = "openai"
     model: str = "gpt-image-1"
     size: Literal[
         "auto",
@@ -677,5 +677,10 @@ class Config(BaseSettings):
             if spec and spec.default_api_base:
                 return spec.default_api_base
         return None
+
+    def get_image_generation_provider(self) -> ProviderConfig | None:
+        """Get provider config for the image generation tool."""
+        provider_name = self.tools.image_generation.provider
+        return getattr(self.providers, provider_name, None)
 
     model_config = ConfigDict(env_prefix="NANOBOT_", env_nested_delimiter="__")

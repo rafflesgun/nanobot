@@ -474,6 +474,24 @@ def test_config_falls_back_to_vllm_when_ollama_not_configured():
     assert config.get_api_base() == "http://localhost:8000"
 
 
+def test_config_can_use_custom_for_chat_and_image_generation():
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"provider": "auto", "model": "unknown-chat-model"}},
+            "providers": {
+                "custom": {
+                    "apiKey": "image-key",
+                    "apiBase": "https://images.example.test/v1",
+                }
+            },
+            "tools": {"imageGeneration": {"enabled": True, "provider": "custom"}},
+        }
+    )
+
+    assert config.get_provider_name() == "custom"
+    assert config.get_image_generation_provider() is config.providers.custom
+
+
 def test_openai_compat_provider_passes_model_through():
     from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 

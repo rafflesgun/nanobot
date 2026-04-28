@@ -31,3 +31,19 @@ def test_tools_image_generation_accepts_camel_case() -> None:
     assert cfg.tools.image_generation.model == "gpt-image-1"
     assert cfg.tools.image_generation.size == "1024x1536"
     assert cfg.tools.image_generation.quality == "high"
+
+
+def test_image_generation_config_accepts_custom_openai_compatible_provider() -> None:
+    cfg = Config.model_validate(
+        {
+            "tools": {
+                "imageGeneration": {
+                    "enabled": True,
+                    "provider": "custom",
+                    "model": "image-model",
+                }
+            }
+        }
+    )
+
+    assert cfg.tools.image_generation.provider == "custom"
