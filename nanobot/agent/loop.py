@@ -19,8 +19,12 @@ from nanobot.agent.autocompact import AutoCompact
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.hook import AgentHook, AgentHookContext, CompositeHook
 from nanobot.agent.memory import Consolidator, Dream
-from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunSpec, AgentRunner
-from nanobot.agent.runner import _PERSISTED_MODEL_ERROR_PLACEHOLDER
+from nanobot.agent.runner import (
+    _MAX_INJECTIONS_PER_TURN,
+    _PERSISTED_MODEL_ERROR_PLACEHOLDER,
+    AgentRunner,
+    AgentRunSpec,
+)
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.ask import (
@@ -35,45 +39,52 @@ from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTo
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.search import GlobTool, GrepTool
-from nanobot.agent.tools.session_search import SessionSearchTool
-from nanobot.agent.tools.skill_manage import SkillManageTool
 from nanobot.agent.tools.self import MyTool
+from nanobot.agent.tools.session_search import SessionSearchTool
 from nanobot.agent.tools.shell import ExecTool
+from nanobot.agent.tools.skill_manage import SkillManageTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.agent.tools.workflow import WorkflowListTool, WorkflowRunTool
-from nanobot.workflows.progress import WorkflowProgressManager
-from nanobot.workflows.store import WorkflowStore
 from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.queue import MessageBus
+from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.config.paths import (
     load_model_overrides,
     load_temperature_overrides,
     save_model_overrides,
     save_temperature_overrides,
 )
-from nanobot.bus.queue import MessageBus
-from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
-from nanobot.config.schema import AgentDefaults
+from nanobot.config.schema import AgentDefaults, ProviderConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.document import extract_documents
-from nanobot.utils.helpers import image_placeholder_text, truncate_text as truncate_text_fn
-from nanobot.utils.runtime import (
-    EMPTY_FINAL_RESPONSE_MESSAGE,
-    format_provider_error,
-    is_provider_error_message,
-)
-from nanobot.utils.stats import StatsManager
+from nanobot.utils.helpers import image_placeholder_text
+from nanobot.utils.helpers import truncate_text as truncate_text_fn
 from nanobot.utils.progress_events import (
     build_tool_event_finish_payloads,
     build_tool_event_start_payload,
     invoke_on_progress,
     on_progress_accepts_tool_events,
 )
+from nanobot.utils.runtime import (
+    EMPTY_FINAL_RESPONSE_MESSAGE,
+    format_provider_error,
+    is_provider_error_message,
+)
+from nanobot.utils.stats import StatsManager
+from nanobot.workflows.progress import WorkflowProgressManager
+from nanobot.workflows.store import WorkflowStore
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import AgentsConfig, ChannelsConfig, ExecToolConfig, ToolsConfig, WebToolsConfig
+    from nanobot.config.schema import (
+        AgentsConfig,
+        ChannelsConfig,
+        ExecToolConfig,
+        ToolsConfig,
+        WebToolsConfig,
+    )
     from nanobot.cron.service import CronService
 
 
@@ -268,6 +279,8 @@ class AgentLoop:
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
         tools_config: ToolsConfig | None = None,
+        image_generation_provider: ProviderConfig | None = None,
+        enable_image_generation_tool: bool = False,
         provider_snapshot_loader: Callable[[], ProviderSnapshot] | None = None,
         provider_signature: tuple[object, ...] | None = None,
     ):
@@ -299,6 +312,9 @@ class AgentLoop:
         self.provider_retry_mode = provider_retry_mode
         self.web_config = web_config or WebToolsConfig()
         self.exec_config = exec_config or ExecToolConfig()
+        self.tools_config = _tc
+        self.image_generation_provider = image_generation_provider
+        self.enable_image_generation_tool = enable_image_generation_tool
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
         self._start_time = time.time()
@@ -440,6 +456,28 @@ class AgentLoop:
             )
             self.tools.register(WebFetchTool(proxy=self.web_config.proxy))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
+        image_cfg = self.tools_config.image_generation
+        image_provider = self.image_generation_provider
+        if (
+            self.enable_image_generation_tool
+            and image_cfg.enabled
+            and image_provider
+            and image_provider.api_key
+        ):
+            from nanobot.agent.tools.image_generation import GenerateImageTool
+            from nanobot.image_generation import ImageGenerationService
+
+            service = ImageGenerationService(
+                api_key=image_provider.api_key,
+                api_base=image_provider.api_base,
+                model=image_cfg.model,
+                size=image_cfg.size,
+                quality=image_cfg.quality,
+                workspace=self.workspace,
+            )
+            self.tools.register(
+                GenerateImageTool(service=service, send_callback=self.bus.publish_outbound)
+            )
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(
@@ -485,10 +523,18 @@ class AgentLoop:
             UNIFIED_SESSION_KEY if self._unified_session else f"{channel}:{chat_id}"
         )
         model_override = self._model_overrides.get(effective_key)
-        for name in ("message", "spawn", "cron", "my", "session_search", "workflow_run"):
+        for name in (
+            "message",
+            "generate_image",
+            "spawn",
+            "cron",
+            "my",
+            "session_search",
+            "workflow_run",
+        ):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
-                    if name == "message":
+                    if name in ("message", "generate_image"):
                         tool.set_context(channel, chat_id, message_id, thread_id, metadata=metadata)
                     elif name == "cron":
                         params = inspect.signature(tool.set_context).parameters

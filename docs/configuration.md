@@ -619,6 +619,31 @@ If you need to allow trusted private ranges such as Tailscale / CGNAT addresses,
 | `baseUrl` | string | `""` | Base URL for SearXNG |
 | `maxResults` | integer | `5` | Results per search (1–10) |
 
+## Image Generation Tool
+
+Enable `tools.imageGeneration` to register the built-in `generate_image` tool for chat-channel users. The first supported image generation provider is OpenAI.
+
+```json
+{
+  "providers": {
+    "openai": {
+      "apiKey": "${OPENAI_API_KEY}"
+    }
+  },
+  "tools": {
+    "imageGeneration": {
+      "enabled": true,
+      "provider": "openai",
+      "model": "gpt-image-1",
+      "size": "1024x1024",
+      "quality": "auto"
+    }
+  }
+}
+```
+
+Generated images are sent directly to the current chat as media. The tool returns only a compact status string to the model, so image bytes and provider metadata do not enter model context.
+
 ## MCP (Model Context Protocol)
 
 > [!TIP]

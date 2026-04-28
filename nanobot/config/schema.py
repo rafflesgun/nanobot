@@ -526,6 +526,25 @@ class MyToolConfig(Base):
     allow_set: bool = False  # let `my` modify loop state (read-only if False)
 
 
+class ImageGenerationToolConfig(Base):
+    """Image generation tool configuration."""
+
+    enabled: bool = False
+    provider: Literal["openai"] = "openai"
+    model: str = "gpt-image-1"
+    size: Literal[
+        "auto",
+        "1024x1024",
+        "1024x1536",
+        "1536x1024",
+        "256x256",
+        "512x512",
+        "1792x1024",
+        "1024x1792",
+    ] = "1024x1024"
+    quality: Literal["auto", "low", "medium", "high", "standard", "hd"] = "auto"
+
+
 class ToolsConfig(Base):
     """Tools configuration."""
 
@@ -535,6 +554,9 @@ class ToolsConfig(Base):
         default_factory=WorkspaceRestrictionConfig
     )
     my: MyToolConfig = Field(default_factory=MyToolConfig)
+    image_generation: ImageGenerationToolConfig = Field(
+        default_factory=ImageGenerationToolConfig
+    )
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     ssrf_whitelist: list[str] = Field(default_factory=list)
 

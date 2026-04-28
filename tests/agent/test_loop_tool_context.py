@@ -4,7 +4,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.image_generation import GenerateImageTool
 from nanobot.bus.queue import MessageBus
+from nanobot.config.schema import ProviderConfig, ToolsConfig
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
 
@@ -45,6 +47,66 @@ class _Tools:
 
     def prepare_call(self, name: str, arguments: dict):
         return (self.tool, arguments, None) if name == "cron" else (None, arguments, None)
+
+
+def _provider() -> MagicMock:
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    return provider
+
+
+def test_generate_image_tool_registers_when_enabled_and_openai_key(tmp_path: Path) -> None:
+    tools_config = ToolsConfig.model_validate({"imageGeneration": {"enabled": True}})
+    provider_cfg = ProviderConfig(api_key="key")
+
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=_provider(),
+        workspace=tmp_path,
+        model="test-model",
+        tools_config=tools_config,
+        image_generation_provider=provider_cfg,
+        enable_image_generation_tool=True,
+    )
+
+    assert isinstance(loop.tools.get("generate_image"), GenerateImageTool)
+
+
+def test_generate_image_tool_not_registered_without_key(tmp_path: Path) -> None:
+    tools_config = ToolsConfig.model_validate({"imageGeneration": {"enabled": True}})
+
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=_provider(),
+        workspace=tmp_path,
+        model="test-model",
+        tools_config=tools_config,
+        image_generation_provider=ProviderConfig(),
+        enable_image_generation_tool=True,
+    )
+
+    assert loop.tools.get("generate_image") is None
+
+
+def test_set_tool_context_updates_generate_image_tool(tmp_path: Path) -> None:
+    tools_config = ToolsConfig.model_validate({"imageGeneration": {"enabled": True}})
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=_provider(),
+        workspace=tmp_path,
+        model="test-model",
+        tools_config=tools_config,
+        image_generation_provider=ProviderConfig(api_key="key"),
+        enable_image_generation_tool=True,
+    )
+    tool = loop.tools.get("generate_image")
+    assert isinstance(tool, GenerateImageTool)
+
+    loop._set_tool_context("telegram", "chat-1", message_id="msg-1")
+
+    assert tool._channel.get() == "telegram"
+    assert tool._chat_id.get() == "chat-1"
+    assert tool._message_id.get() == "msg-1"
 
 
 @pytest.mark.asyncio

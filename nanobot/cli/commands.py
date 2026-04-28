@@ -552,6 +552,7 @@ def serve(
         session_ttl_minutes=runtime_config.agents.defaults.session_ttl_minutes,
         consolidation_ratio=runtime_config.agents.defaults.consolidation_ratio,
         tools_config=runtime_config.tools,
+        image_generation_provider=runtime_config.providers.openai,
     )
 
     model_name = runtime_config.agents.defaults.model
@@ -612,6 +613,7 @@ def _run_gateway(
     """Shared gateway runtime; ``open_browser_url`` opens a tab once channels are up."""
     from nanobot.agent.loop import AgentLoop
     from nanobot.agent.tools.cron import CronTool
+    from nanobot.agent.tools.image_generation import GenerateImageTool
     from nanobot.agent.tools.message import MessageTool
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.manager import ChannelManager
@@ -669,6 +671,8 @@ def _run_gateway(
         session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
         consolidation_ratio=config.agents.defaults.consolidation_ratio,
         tools_config=config.tools,
+        image_generation_provider=config.providers.openai,
+        enable_image_generation_tool=True,
         provider_snapshot_loader=load_provider_snapshot,
         provider_signature=provider_snapshot.signature,
     )
@@ -715,6 +719,10 @@ def _run_gateway(
     message_tool = getattr(agent, "tools", {}).get("message")
     if isinstance(message_tool, MessageTool):
         message_tool.set_send_callback(_deliver_to_channel)
+
+    image_tool = getattr(agent, "tools", {}).get("generate_image")
+    if isinstance(image_tool, GenerateImageTool):
+        image_tool.set_send_callback(_deliver_to_channel)
 
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
@@ -1073,6 +1081,7 @@ def agent(
         session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
         consolidation_ratio=config.agents.defaults.consolidation_ratio,
         tools_config=config.tools,
+        image_generation_provider=config.providers.openai,
     )
     restart_notice = consume_restart_notice_from_env()
     if restart_notice and should_show_cli_restart_notice(restart_notice, session_id):

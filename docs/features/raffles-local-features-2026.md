@@ -47,6 +47,7 @@ understand intended behavior quickly.
 | **Skill Scan v1 for workspace skill mutations** | ✅ | skills/scan.py, agent/skills_manager.py, agent/tools/skill_manage.py | tests/skills/test_scan.py, tests/agent/test_skills_manager.py, tests/tools/test_skill_manage_tool.py, tests/agent/test_skill_proposals.py, tests/agent/test_dream.py | `safe` allows writes; `warn` allows writes with findings; `block` rejects create/replace/patch/apply_proposal |
 | **`nanobot doctor` deployment diagnostics** | ✅ | doctor/types.py, doctor/service.py, doctor/checks/*.py, cli/commands.py | tests/doctor/*.py, tests/cli/test_commands.py | `nanobot doctor` local checks by default; `--live` adds bounded provider/MCP probes; `--json` for scripting; exit 1 on failures |
 | **Proposal metadata index + doctor drift visibility** | ✅ | agent/skill_proposal_metadata.py, agent/skill_proposals.py, agent/tools/skill_manage.py, doctor/checks/skills.py | tests/agent/test_skill_proposal_metadata.py, tests/agent/test_skill_proposals.py, tests/tools/test_skill_manage_tool.py, tests/doctor/test_skill_checks.py | Metadata index tracks `pending`/`applied`/`rejected`; doctor reports proposal health and drift |
+| **OpenAI image generation tool**       | ✅     | image_generation.py, agent/tools/image_generation.py, agent/loop.py, cli/commands.py, config/schema.py | tests/test_image_generation_*.py, tests/tools/test_image_generation_tool.py, tests/agent/test_loop_tool_context.py | `tools.imageGeneration.enabled = false`; gateway-only tool registration; uses `providers.openai` |
 | Web search enhancements merged into main   | ℹ️     | agent/tools/web.py, README.md                          | tests/tools/test_web_search_tool.py    | Multi-provider search now upstream (`brave`, `tavily`, `duckduckgo`, `searxng`, `jina`) |
 | Runtime hardening (PR #2733)               | ℹ️     | agent/runner.py, agent/hook.py, agent/loop.py          | tests/agent/test_runner.py             | Now upstream: AgentRunner, checkpoints, tool batching, provider retry |
 
@@ -937,7 +938,57 @@ pytest tests/doctor -q && pytest tests/cli/test_commands.py -q -k doctor
 python3 -m pytest tests/agent/test_skill_proposal_metadata.py tests/agent/test_skill_proposals.py tests/tools/test_skill_manage_tool.py tests/doctor/test_skill_checks.py -q
 ```
 
-### 31. Constrained scripted workflows
+### 31. OpenAI image generation tool
+
+**Core behavior**
+- `tools.imageGeneration.enabled` gates a built-in `generate_image` tool for chat-channel users.
+- Initial provider is OpenAI and reuses `providers.openai.apiKey` / `providers.openai.apiBase`.
+- `ImageGenerationService` calls OpenAI image generation, saves the image under workspace-aware `media/generated/`, and returns compact metadata only.
+- `generate_image` auto-sends the generated file to the current chat via `OutboundMessage(media=[path])`.
+- Tool results are intentionally compact: no base64, local file path, provider JSON, or raw exception detail is returned to the model.
+- Registration is gateway-only by default: the gateway opts in with `enable_image_generation_tool=True` because it rewires delivery through `_deliver_to_channel`; CLI/API/programmatic paths do not expose the tool unless a real media delivery path is explicitly provided.
+
+**Files to protect during conflicts**
+- `nanobot/config/schema.py` → `ImageGenerationToolConfig`, `ToolsConfig.image_generation`
+- `nanobot/image_generation.py` → OpenAI image generation service and file persistence
+- `nanobot/agent/tools/image_generation.py` → `GenerateImageTool`, compact/sanitized model-visible results
+- `nanobot/agent/loop.py` → opt-in registration and context propagation for `generate_image`
+- `nanobot/cli/commands.py` → gateway opt-in and `_deliver_to_channel` callback wiring
+- `docs/configuration.md` → user-facing config example
+
+**Resolution priority**
+1. Keep `tools.imageGeneration.enabled = false` by default.
+2. Keep registration conditional on explicit runtime opt-in, enabled config, and OpenAI API key; do not expose the tool in runtimes that cannot deliver media.
+3. Keep success and failure tool results compact and sanitized.
+4. Keep generated image bytes out of model-visible tool results and session text.
+5. Keep `gpt-image-1` requests from sending unsupported `response_format`; only DALL-E models request `b64_json` explicitly.
+
+**Config example**
+```json
+{
+  "providers": {
+    "openai": {
+      "apiKey": "${OPENAI_API_KEY}"
+    }
+  },
+  "tools": {
+    "imageGeneration": {
+      "enabled": true,
+      "provider": "openai",
+      "model": "gpt-image-1",
+      "size": "1024x1024",
+      "quality": "auto"
+    }
+  }
+}
+```
+
+**Quick validation**
+```bash
+python3 -m pytest tests/test_image_generation_config.py tests/test_image_generation_service.py tests/tools/test_image_generation_tool.py tests/test_image_generation_runtime_wiring.py tests/agent/test_loop_tool_context.py -q
+```
+
+### 32. Constrained scripted workflows
 
 **Core behavior**
 - Workspace-local workflows live under `workspace/workflows/<name>.md`.
