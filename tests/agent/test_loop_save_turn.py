@@ -9,7 +9,6 @@ from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import GenerationSettings, LLMResponse
-from nanobot.providers.base import GenerationSettings, LLMResponse
 from nanobot.session.manager import Session
 
 
@@ -718,6 +717,97 @@ async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_
         },
         {"role": "assistant", "content": "done"},
     ]
+
+
+@pytest.mark.asyncio
+async def test_process_message_strips_leading_message_time_from_response(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    loop.provider.chat_with_retry = AsyncMock(
+        return_value=LLMResponse(
+            content="[Message Time: 2026-04-28T18:47:02.637891]\n\nVisible reply",
+            tool_calls=[],
+        )
+    )
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="user-1",
+            chat_id="chat-1",
+            content="hello",
+        )
+    )
+
+    assert response is not None
+    assert response.content == "Visible reply"
+    persisted = loop.sessions.get_or_create("telegram:chat-1")
+    assert persisted.messages[-1]["role"] == "assistant"
+    assert persisted.messages[-1]["content"] == "Visible reply"
+
+
+@pytest.mark.asyncio
+async def test_process_message_strips_leading_message_time_from_stream(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    streamed: list[str] = []
+
+    async def chat_stream_with_retry(*, on_content_delta, **_kwargs):
+        for delta in (
+            "[Message Time: 2026-04-28T18:47:02.637891]",
+            "\n[Message Time: 2026-04-28T18:43:28.058605]\n",
+            "Visible",
+            " reply",
+        ):
+            await on_content_delta(delta)
+        return LLMResponse(
+            content=(
+                "[Message Time: 2026-04-28T18:47:02.637891]\n"
+                "[Message Time: 2026-04-28T18:43:28.058605]\nVisible reply"
+            ),
+            tool_calls=[],
+        )
+
+    async def on_stream(delta: str) -> None:
+        streamed.append(delta)
+
+    loop.provider.chat_stream_with_retry = chat_stream_with_retry
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="user-1",
+            chat_id="chat-1",
+            content="hello",
+        ),
+        on_stream=on_stream,
+    )
+
+    assert response is not None
+    assert response.content == "Visible reply"
+    assert streamed == ["Visible", " reply"]
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "[Message Time: 2026-04-28T18:47:02.637891]\nVisible reply",
+        "[Message Time: 2026-04-28T18:47:02.637891]\n\nVisible reply",
+        "[Message Time: 2026-04-28 18:47]\nVisible reply",
+        (
+            "[Message Time: 2026-04-28T18:47:02.637891]\n"
+            "[Message Time: 2026-04-28T18:43:28.058605]\nVisible reply"
+        ),
+    ],
+)
+def test_strip_message_time_prefix_accepts_common_timestamp_shapes(content: str) -> None:
+    assert AgentLoop._strip_message_time_prefix(content) == "Visible reply"
+
+
+def test_strip_message_time_prefix_keeps_mid_message_reference() -> None:
+    content = "The note was [Message Time: 2026-04-28T18:47:02] in history."
+
+    assert AgentLoop._strip_message_time_prefix(content) == content
 
 
 @pytest.mark.asyncio

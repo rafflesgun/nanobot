@@ -127,9 +127,9 @@ class _LoopHook(AgentHook):
     async def on_stream(self, context: AgentHookContext, delta: str) -> None:
         from nanobot.utils.helpers import strip_think
 
-        prev_clean = strip_think(self._stream_buf)
+        prev_clean = self._loop._strip_message_time_prefix(strip_think(self._stream_buf))
         self._stream_buf += delta
-        new_clean = strip_think(self._stream_buf)
+        new_clean = self._loop._strip_message_time_prefix(strip_think(self._stream_buf))
         incremental = new_clean[len(prev_clean) :]
         if incremental and self._on_stream:
             await self._on_stream(incremental)
@@ -388,6 +388,13 @@ class AgentLoop:
         self._current_iteration: int = 0
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
+
+    @staticmethod
+    def _strip_message_time_prefix(content: str) -> str:
+        """Remove model-copied history timestamp metadata from assistant output."""
+        if not isinstance(content, str):
+            return content
+        return re.sub(r"^(?:\[Message Time: [^\]\n]+\](?:\n+|$))+", "", content).lstrip("\n")
 
     def _apply_provider_snapshot(self, snapshot: ProviderSnapshot) -> None:
         """Swap model/provider for future turns without disturbing an active one."""
@@ -1384,6 +1391,10 @@ class AgentLoop:
                 stop_reason = "stop"
             else:
                 raise ValueError("_run_agent_loop returned unexpected result shape")
+            if final_content:
+                final_content = self._strip_message_time_prefix(final_content)
+                if all_msgs and all_msgs[-1].get("role") == "assistant":
+                    all_msgs[-1] = {**all_msgs[-1], "content": final_content}
             self._save_turn(session, all_msgs, 1 + len(history))
             self._clear_pending_user_turn(session)
             self._clear_runtime_checkpoint(session)
@@ -1552,6 +1563,10 @@ class AgentLoop:
 
         if final_content is None or not final_content.strip():
             final_content = EMPTY_FINAL_RESPONSE_MESSAGE
+        else:
+            final_content = self._strip_message_time_prefix(final_content)
+            if all_msgs and all_msgs[-1].get("role") == "assistant":
+                all_msgs[-1] = {**all_msgs[-1], "content": final_content}
 
         if session is not None:
             save_skip = 1 + len(history) + (1 if user_persisted_early else 0)
