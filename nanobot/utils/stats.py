@@ -37,7 +37,8 @@ class StatsManager:
             return 0
 
     def record_usage(self, channel: str, chat_id: str, model: str, input_tokens: int, output_tokens: int,
-                     total_tokens: int, session_key: str, timestamp: str = None) -> None:
+                     total_tokens: int, session_key: str, timestamp: str = None,
+                     cached_tokens: int = 0) -> None:
         """Record token usage statistics."""
         if timestamp is None:
             timestamp = datetime.now().isoformat()
@@ -52,6 +53,8 @@ class StatsManager:
             "total_tokens": self._coerce_int(total_tokens),
             "session_key": str(session_key),
         }
+        if cached_tokens:
+            stats_data["cached_tokens"] = self._coerce_int(cached_tokens)
 
         # Append to the usage file in JSONL format
         with open(self.usage_file, "a") as f:
@@ -66,6 +69,7 @@ class StatsManager:
             "total_input_tokens": 0,
             "total_output_tokens": 0,
             "total_tokens": 0,
+            "total_cached_tokens": 0,
             "count": 0
         }
 
@@ -85,6 +89,7 @@ class StatsManager:
                     stats["total_input_tokens"] += data.get("input_tokens", 0)
                     stats["total_output_tokens"] += data.get("output_tokens", 0)
                     stats["total_tokens"] += data.get("total_tokens", 0)
+                    stats["total_cached_tokens"] += data.get("cached_tokens", 0)
                     stats["count"] += 1
 
         except Exception as e:
@@ -114,11 +119,13 @@ class StatsManager:
                         "total_input_tokens": 0,
                         "total_output_tokens": 0,
                         "total_tokens": 0,
+                        "total_cached_tokens": 0,
                         "count": 0,
                     })
                     stat["total_input_tokens"] += self._coerce_int(data.get("input_tokens", 0))
                     stat["total_output_tokens"] += self._coerce_int(data.get("output_tokens", 0))
                     stat["total_tokens"] += self._coerce_int(data.get("total_tokens", 0))
+                    stat["total_cached_tokens"] += self._coerce_int(data.get("cached_tokens", 0))
                     stat["count"] += 1
         except Exception as e:
             logger.error(f"Error reading stats file: {e}")

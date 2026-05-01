@@ -1031,8 +1031,10 @@ python3 -m pytest tests/workflows tests/tools/test_workflow_tool.py tests/comman
 - Main agent (deepseek-v4) delegates recall and curation workloads to configurable sub-agents running on cheap models
 - Sub-agents are defined via markdown files in `agents/<name>.md` with YAML frontmatter (same pattern as skills)
 - A single `delegate` tool on the main agent replaces multiple specialized tool schemas
-- Each sub-agent has an isolated tool set, model, temperature, and max iterations
+- Each sub-agent has an isolated tool set, model, temperature, max iterations, and **per-agent fallback model chain**
 - Workspace agents override built-in agents with the same name; config overrides frontmatter
+- **Runtime agent creation**: agents written to `agents/<name>.md` at runtime are discovered instantly — no restart needed
+- **Channel override independence**: sub-agents use their own configured model, not the channel override model
 
 **Token saving**
 - `session_search` tool schema (~500 tokens) removed from main agent's system prompt
@@ -1042,17 +1044,31 @@ python3 -m pytest tests/workflows tests/tools/test_workflow_tool.py tests/comman
 - Trivial-prompt skip (≤3 tokens) avoids injecting memory on meaningless turns ("ok", "yes", "/status")
 - Context-length auto-compact triggers at 75% of model context window (matching opencode CLI behavior)
 
+**Token usage tracking**
+- Sub-agent token usage (prompt_tokens, completion_tokens, cached_tokens) is accumulated and merged into main agent's `_last_usage`
+- DeepSeek's `prompt_cache_hit_tokens` is normalized to `cached_tokens` and included in `/status` cache percentage display
+- `DelegateTool.cumulative_usage` aggregates across all sub-agent calls, reset each turn via the main loop
+
 **Built-in agents**
-- `nanobot/agents/recall.md` — session search + summarization (trigger: on_demand)
-- `nanobot/agents/curator.md` — skill lifecycle + umbrella-building consolidation (trigger: idle)
+- `nanobot/agents/recall.md` — session search + summarization, model: `deepseek-v4-flash` (trigger: on_demand)
+- `nanobot/agents/curator.md` — skill lifecycle + umbrella-building, model: `kimi-k2.5` (trigger: idle)
+
+**Per-sub-agent fallback models**
+- `fallback_models` supported in both agent `.md` frontmatter and config overrides (config wins if both set)
+- Config override schema (`SubAgentConfig`): `model`, `temperature`, `tools`, `fallbackModels`, `provider`
+- If not configured, sub-agent inherits main agent's `fallbackModels` list
+- Recommended: set sub-agent fallbacks to cheap/medium models to avoid escalating to premium unnecessarily
 
 **Agent file format**
 ```yaml
 ---
-name: my-agent
-description: What this agent does
-model: openai/gpt-4o-mini
+name: stock-analyst
+description: Analyzes stock market data and trends
+model: deepseek-v4-flash
 temperature: 0.1
+fallback_models:
+  - minimax-m2.7
+  - glm-5.1
 tools:
   - read_file
   - shell
@@ -1060,15 +1076,31 @@ max_iterations: 5
 max_tokens: 4000
 trigger: on_demand
 ---
-You are a specialized agent. Do your job.
+You are a stock market analysis agent.
+```
+
+**Config example**
+```jsonc
+{
+  "subagents": {
+    "recall": {
+      "model": "deepseek-v4-flash",
+      "fallbackModels": ["deepseek-v3.2", "minimax-m2.7"]
+    },
+    "curator": {
+      "model": "kimi-k2.5",
+      "fallbackModels": ["glm-5.1"]
+    }
+  }
+}
 ```
 
 **Files to protect**
-- `nanobot/agent/subagents.py` — AgentConfig dataclass, AgentLoader for YAML-frontmatter .md agent files
-- `nanobot/agent/tools/delegate.py` — DelegateTool dispatches LLM tasks to sub-agents
+- `nanobot/agent/subagents.py` — AgentConfig dataclass (with `fallback_models`), AgentLoader for YAML-frontmatter .md agent files
+- `nanobot/agent/tools/delegate.py` — DelegateTool dispatches LLM tasks to sub-agents with fallback chain + cumulative usage tracking
 - `nanobot/agents/` — built-in agent definitions
-- `nanobot/agent/loop.py` — delegate registration, tool factory map, curator wiring
-- `nanobot/config/schema.py` — SubAgentConfig, SubAgentsConfig, CuratorConfig
+- `nanobot/agent/loop.py` — delegate registration, tool factory map, curator wiring, sub-agent usage merge into `_last_usage`
+- `nanobot/config/schema.py` — SubAgentConfig (with `fallbackModels`, `provider`), SubAgentsConfig, CuratorConfig
 
 **Quick validation**
 ```bash

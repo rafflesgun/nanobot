@@ -1153,6 +1153,23 @@ class AgentLoop:
                             self._last_usage[k] = self._last_usage.get(k, 0) + v
                         self._delegate_tool.cumulative_usage = {}
 
+                # Persist turn usage to stats (best-effort)
+                try:
+                    model_used = model
+                    self.stats_manager.record_usage(
+                        channel=channel,
+                        chat_id=chat_id,
+                        model=model_used or "unknown",
+                        input_tokens=self._last_usage.get("prompt_tokens", 0),
+                        output_tokens=self._last_usage.get("completion_tokens", 0),
+                        total_tokens=self._last_usage.get("total_tokens",
+                            self._last_usage.get("prompt_tokens", 0) + self._last_usage.get("completion_tokens", 0)),
+                        session_key=session_key or "unknown",
+                        cached_tokens=self._last_usage.get("cached_tokens", 0),
+                    )
+                except Exception:
+                    pass
+
                 # Check for errors that should trigger fallback
                 if result.stop_reason == "error":
                     error_content = (result.final_content or "").lower()
