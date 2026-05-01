@@ -25,6 +25,7 @@ class DelegateTool(Tool):
         self._provider = provider
         self._runner = runner
         self._tool_factories: dict[str, Any] = {}
+        self._overrides: dict[str, dict[str, Any]] = {}
 
     def set_provider(self, provider: "LLMProvider") -> None:
         self._provider = provider
@@ -34,6 +35,9 @@ class DelegateTool(Tool):
 
     def set_tool_factories(self, factories: dict[str, Any]) -> None:
         self._tool_factories = factories
+
+    def set_subagent_overrides(self, overrides: dict[str, dict[str, Any]]) -> None:
+        self._overrides = overrides
 
     @property
     def name(self) -> str:
@@ -72,7 +76,8 @@ class DelegateTool(Tool):
         }
 
     async def execute(self, agent: str, task: str, **_: Any) -> str:
-        config = self._loader.load(agent)
+        overrides = getattr(self, "_overrides", {}).get(agent)
+        config = self._loader.load(agent, overrides=overrides)
         if config is None:
             return json.dumps({"success": False, "error": f"Agent '{agent}' not found."})
 
@@ -99,22 +104,35 @@ class DelegateTool(Tool):
             if factory:
                 tools.register(factory())
 
-        spec = AgentRunSpec(
-            initial_messages=[
-                {"role": "system", "content": config.system_prompt},
-                {"role": "user", "content": task},
-            ],
-            tools=tools,
-            model=config.model,
-            max_iterations=config.max_iterations,
-            max_tool_result_chars=16_000,
-            temperature=config.temperature,
-            max_tokens=config.max_tokens,
-        )
+        models_to_try = [config.model] + config.fallback_models
+        last_error: Exception | None = None
 
-        runner = AgentRunner(self._provider)
-        result = await runner.run(spec)
-        return result.final_content or "(no output)"
+        for model in models_to_try:
+            spec = AgentRunSpec(
+                initial_messages=[
+                    {"role": "system", "content": config.system_prompt},
+                    {"role": "user", "content": task},
+                ],
+                tools=tools,
+                model=model,
+                max_iterations=config.max_iterations,
+                max_tool_result_chars=16_000,
+                temperature=config.temperature,
+                max_tokens=config.max_tokens,
+            )
+
+            try:
+                runner = AgentRunner(self._provider)
+                result = await runner.run(spec)
+                if result.stop_reason != "error" or model == models_to_try[-1]:
+                    return result.final_content or "(no output)"
+                last_error = Exception(result.error or "sub-agent returned error")
+            except Exception as e:
+                last_error = e
+                if model == models_to_try[-1]:
+                    raise
+
+        raise last_error or RuntimeError("sub-agent failed")
 
     def execute_sync(self, agent: str, task: str) -> str:
         """Synchronous fallback for tests."""

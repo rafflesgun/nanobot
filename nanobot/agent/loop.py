@@ -348,6 +348,24 @@ class AgentLoop:
         self._delegate_tool = DelegateTool(self._agent_loader)
         self._delegate_tool.set_tool_factories(_tool_factories)
 
+        # Wire config overrides for sub-agents (e.g. fallbackModels, model, temperature)
+        try:
+            from nanobot.config.loader import load_runtime_config
+            rtc = load_runtime_config()
+            overrides: dict[str, dict[str, Any]] = {}
+            sa = getattr(rtc.config, "subagents", None) if rtc else None
+            if sa:
+                for name in ("recall", "curator"):
+                    sub = getattr(sa, name, None)
+                    if sub:
+                        overrides[name] = {
+                            k: v for k, v in sub.model_dump(by_alias=False).items()
+                            if v is not None
+                        }
+            self._delegate_tool.set_subagent_overrides(overrides)
+        except Exception:
+            pass
+
         self.runner = AgentRunner(provider)
         self._delegate_tool.set_provider(provider)
         self._delegate_tool.set_runner(self.runner)

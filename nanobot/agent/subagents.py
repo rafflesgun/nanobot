@@ -23,6 +23,7 @@ class AgentConfig:
     max_tokens: int = 4096
     trigger: str = "on_demand"
     channel: str | None = None
+    fallback_models: list[str] = field(default_factory=list)
 
 
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
@@ -39,8 +40,8 @@ class AgentLoader:
             return None
         config = self._parse(content)
         if overrides:
-            for key in ("model", "temperature", "tools", "max_iterations", "max_tokens"):
-                if key in overrides:
+            for key in ("model", "temperature", "tools", "max_iterations", "max_tokens", "fallback_models"):
+                if key in overrides and overrides[key] is not None:
                     setattr(config, key, overrides[key])
         return config
 
@@ -93,4 +94,5 @@ class AgentLoader:
             max_tokens=int(frontmatter.get("max_tokens", 4096)),
             trigger=frontmatter.get("trigger", "on_demand"),
             channel=frontmatter.get("channel"),
+            fallback_models=frontmatter.get("fallback_models") or [],
         )
