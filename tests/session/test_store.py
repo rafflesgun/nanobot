@@ -82,8 +82,22 @@ class TestSessionCRUD:
 
         sessions = store.list_sessions_rich(limit=5)
         assert len(sessions) == 2
-        assert sessions[0]["message_count"] == 2  # s2 is newer
+        assert sessions[0]["id"] == "s2"  # s2 has newest message
+        assert sessions[0]["message_count"] == 2
+        assert sessions[1]["id"] == "s1"
         assert sessions[1]["message_count"] == 1
+
+    def test_list_sessions_rich_orders_by_last_message(self, store: SessionStore) -> None:
+        # s1 created first, but gets a newer message later — should appear first
+        store.create_session("older", "cli", "m", "2026-05-01T10:00:00Z")
+        store.add_message("older", "user", "old msg", "2026-05-01T10:00:01Z")
+        store.create_session("newer", "cli", "m", "2026-05-01T11:00:00Z")
+        store.add_message("newer", "user", "new msg", "2026-05-01T11:00:01Z")
+        # Add a message to older that is more recent than newer's latest
+        store.add_message("older", "user", "even newer msg", "2026-05-01T12:00:00Z")
+
+        sessions = store.list_sessions_rich(limit=5)
+        assert sessions[0]["id"] == "older"  # older has the most recent message
 
     def test_update_session_title(self, store: SessionStore) -> None:
         store.create_session("s1", "cli", "m", "2026-05-01T10:00:00Z")

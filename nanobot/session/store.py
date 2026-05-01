@@ -91,10 +91,16 @@ class SessionStore:
         limit: int = 10,
         order_by_last_active: bool = True,
     ) -> list[dict[str, Any]]:
-        order = "started_at DESC" if order_by_last_active else "id DESC"
-        rows = self.conn.execute(
-            f"SELECT * FROM sessions ORDER BY {order} LIMIT ?", (limit,)
-        ).fetchall()
+        if order_by_last_active:
+            sql = """
+                SELECT s.*, (SELECT MAX(timestamp) FROM messages WHERE session_id = s.id) AS last_active
+                FROM sessions s
+                ORDER BY last_active DESC
+                LIMIT ?
+            """
+        else:
+            sql = "SELECT *, NULL AS last_active FROM sessions ORDER BY id DESC LIMIT ?"
+        rows = self.conn.execute(sql, (limit,)).fetchall()
         return [dict(r) for r in rows]
 
     # -- Messages -------------------------------------------------------------
