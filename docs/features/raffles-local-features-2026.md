@@ -1024,3 +1024,124 @@ python3 -m pytest tests/test_image_generation_config.py tests/test_image_generat
 ```bash
 python3 -m pytest tests/workflows tests/tools/test_workflow_tool.py tests/command/test_builtin_workflow.py tests/command/test_router_dispatchable.py -q
 ```
+
+### 32. Sub-Agent Architecture
+
+**Core behavior**
+- Main agent (deepseek-v4) delegates recall and curation workloads to configurable sub-agents running on cheap models
+- Sub-agents are defined via markdown files in `agents/<name>.md` with YAML frontmatter (same pattern as skills)
+- A single `delegate` tool on the main agent replaces multiple specialized tool schemas
+- Each sub-agent has an isolated tool set, model, temperature, and max iterations
+- Workspace agents override built-in agents with the same name; config overrides frontmatter
+
+**Token saving**
+- `session_search` tool schema (~500 tokens) removed from main agent's system prompt
+- Recall results are distilled summaries (~200 chars) vs raw excerpts (~600 chars)
+- Curator runs on cheap model, offline — zero main agent token impact
+- Memory context fencing prevents the model from confusing recalled memory with new instructions
+- Trivial-prompt skip (≤3 tokens) avoids injecting memory on meaningless turns ("ok", "yes", "/status")
+- Context-length auto-compact triggers at 75% of model context window (matching opencode CLI behavior)
+
+**Built-in agents**
+- `nanobot/agents/recall.md` — session search + summarization (trigger: on_demand)
+- `nanobot/agents/curator.md` — skill lifecycle + umbrella-building consolidation (trigger: idle)
+
+**Agent file format**
+```yaml
+---
+name: my-agent
+description: What this agent does
+model: openai/gpt-4o-mini
+temperature: 0.1
+tools:
+  - read_file
+  - shell
+max_iterations: 5
+max_tokens: 4000
+trigger: on_demand
+---
+You are a specialized agent. Do your job.
+```
+
+**Files to protect**
+- `nanobot/agent/subagents.py` — AgentConfig dataclass, AgentLoader for YAML-frontmatter .md agent files
+- `nanobot/agent/tools/delegate.py` — DelegateTool dispatches LLM tasks to sub-agents
+- `nanobot/agents/` — built-in agent definitions
+- `nanobot/agent/loop.py` — delegate registration, tool factory map, curator wiring
+- `nanobot/config/schema.py` — SubAgentConfig, SubAgentsConfig, CuratorConfig
+
+**Quick validation**
+```bash
+python3 -m pytest tests/agent/test_subagents.py tests/tools/test_delegate.py -q
+```
+
+### 33. SQLite + FTS5 Session Store
+
+**Core behavior**
+- Replaces JSONL file scan with SQLite-backed FTS5 for full-text session search
+- WAL mode for concurrent reads; `check_same_thread=False` for async channel safety
+- BM25 relevance ranking via FTS5 `ORDER BY rank`
+- Sessions table with metadata (id, source, model, title, started_at, token_count, parent_session_id)
+- Messages table with FTS5 virtual table for content search
+- One-time migration: existing JSONL sessions imported on first boot; JSONL kept as backup
+- SessionManager writes to both JSONL (canonical) and SQLite (write-through, best-effort)
+
+**Files to protect**
+- `nanobot/session/store.py` — SessionStore class
+- `nanobot/session/manager.py` — SessionManager integration
+- `nanobot/session/search.py` — kept for compatibility, replaced by store.py
+- `nanobot/agent/tools/session_search.py` — rewritten for FTS5 store, three modes (recent browse, keyword search)
+
+**Quick validation**
+```bash
+python3 -m pytest tests/session/test_store.py tests/session/test_store_integration.py tests/tools/test_session_search_tool.py -q
+```
+
+### 34. Autonomous Curator
+
+**Core behavior**
+- Idle-triggered (default 7-day interval) skill library maintenance
+- Phase 1 (pure logic, zero LLM tokens): auto-transitions active→stale(30d)→archived(90d); reactivates stale if recently used
+- Phase 2 (cheap-model LLM pass): umbrella-building consolidation — merges narrow sibling skills into class-level umbrellas, demotes session-specific content to references/templates/scripts
+- Safety guardrails: only touches agent-created skills, never deletes (archive only), never touches pinned skills
+- Per-run reports with structured YAML output (consolidations + prunings lists)
+- Configurable via `curator.*` config keys
+
+**Skill lifecycle states**
+- `active` — in use (default)
+- `stale` — unused > 30 days (auto; reverts to active if used)
+- `archived` — unused > 90 days (moved to `skills/.archive/`, recoverable)
+- `pinned` — opt-out from all auto-transitions
+
+**Skill usage telemetry**
+- `.skill_usage.json` sidecar tracking: use_count, patch_count, view_count, last_used_at, last_patched_at, last_viewed_at, state, pinned
+- Atomic writes via tempfile + os.replace
+- Bumped on: skill invocation, skill_manage patch, skill_view
+
+**Files to protect**
+- `nanobot/agent/curator.py` — CuratorScheduler with idle detection, lifecycle logic, umbrella-building
+- `nanobot/agent/skill_usage.py` — SkillUsageStore with atomic writes
+- `nanobot/agents/curator.md` — built-in curator agent definition
+- `nanobot/agent/loop.py` — curator initialization and idle check in main loop
+
+**Quick validation**
+```bash
+python3 -m pytest tests/agent/test_skill_usage.py -q
+```
+
+### 35. Token & Performance Optimizations
+
+**Memory context fencing** — MEMORY.md/USER.md injection wrapped in `<memory-context>` tags with explicit system note ("NOT new user input"). Prevents model confusion. +50 tokens.
+
+**Context-length auto-compact** — Compaction triggers when prompt tokens exceed 75% of model context window (matching opencode CLI behavior). Keeps existing time-based trigger as fallback.
+
+**Trivial-prompt skip** — Skips memory injection for user messages ≤3 tokens (e.g., "ok", "yes", "/status"). Saves ~200-500 tokens on meaningless turns.
+
+**Files to protect**
+- `nanobot/agent/context.py` — memory fencing, trivial-prompt skip
+- `nanobot/agent/memory.py` — Consolidator 75% threshold check
+
+**Quick validation**
+```bash
+python3 -m pytest tests/agent/test_consolidator.py tests/agent/test_context.py -q
+```
