@@ -554,17 +554,6 @@ class AgentRunner:
             break
         else:
             stop_reason = "max_iterations"
-            if spec.max_iterations_message:
-                final_content = spec.max_iterations_message.format(
-                    max_iterations=spec.max_iterations,
-                )
-            else:
-                final_content = render_template(
-                    "agent/max_iterations_message.md",
-                    strip=True,
-                    max_iterations=spec.max_iterations,
-                )
-            self._append_final_message(messages, final_content)
             # Drain any remaining injections so they are appended to the
             # conversation history instead of being re-published as
             # independent inbound messages by _dispatch's finally block.
@@ -579,6 +568,43 @@ class AgentRunner:
             )
             if drained_after_max_iterations:
                 had_injections = True
+
+            try:
+                response = await self._request_finalization_retry(spec, messages)
+            except Exception:
+                logger.warning("Max-iteration finalization retry failed", exc_info=True)
+                response = None
+            retry_usage = self._usage_dict(response.usage) if response is not None else {}
+            if retry_usage:
+                self._accumulate_usage(usage, retry_usage)
+            context = AgentHookContext(iteration=spec.max_iterations, messages=messages)
+            context.response = response
+            context.usage = dict(retry_usage)
+            clean = hook.finalize_content(context, response.content if response else None)
+            if (
+                response is not None
+                and response.finish_reason != "error"
+                and not response.has_tool_calls
+                and not is_blank_text(clean)
+            ):
+                final_content = clean
+                stop_reason = "finalized_after_max_iterations"
+                self._append_final_message(messages, final_content)
+                context.final_content = final_content
+                context.stop_reason = stop_reason
+                await hook.after_iteration(context)
+            else:
+                if spec.max_iterations_message:
+                    final_content = spec.max_iterations_message.format(
+                        max_iterations=spec.max_iterations,
+                    )
+                else:
+                    final_content = render_template(
+                        "agent/max_iterations_message.md",
+                        strip=True,
+                        max_iterations=spec.max_iterations,
+                    )
+                self._append_final_message(messages, final_content)
 
         return AgentRunResult(
             final_content=final_content,
@@ -686,7 +712,26 @@ class AgentRunner:
         retry_messages = list(messages)
         retry_messages.append(build_finalization_retry_message())
         kwargs = self._build_request_kwargs(spec, retry_messages, tools=None)
-        return await self.provider.chat_with_retry(**kwargs)
+        coro = self.provider.chat_with_retry(**kwargs)
+        timeout_s: float | None = spec.llm_timeout_s
+        if timeout_s is None:
+            raw = os.environ.get("NANOBOT_LLM_TIMEOUT_S", "300").strip()
+            try:
+                timeout_s = float(raw)
+            except (TypeError, ValueError):
+                timeout_s = 300.0
+        if timeout_s is not None and timeout_s <= 0:
+            timeout_s = None
+        if timeout_s is None:
+            return await coro
+        try:
+            return await asyncio.wait_for(coro, timeout=timeout_s)
+        except asyncio.TimeoutError:
+            return LLMResponse(
+                content=f"Error calling LLM: timed out after {timeout_s:g}s",
+                finish_reason="error",
+                error_kind="timeout",
+            )
 
     @staticmethod
     def _usage_dict(usage: dict[str, Any] | None) -> dict[str, int]:

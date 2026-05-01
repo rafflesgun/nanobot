@@ -254,6 +254,121 @@ async def test_runner_returns_max_iterations_fallback():
 
 
 @pytest.mark.asyncio
+async def test_runner_finalizes_after_tool_iteration_budget_exhausted():
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    calls: list[list[dict]] = []
+
+    async def chat_with_retry(*, messages, tools, **kwargs):
+        calls.append(messages)
+        if tools is not None:
+            return LLMResponse(
+                content="still working",
+                tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
+            )
+        return LLMResponse(content="final summary from gathered evidence", tool_calls=[])
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="tool result")
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert len(calls) == 2
+    assert result.stop_reason == "finalized_after_max_iterations"
+    assert result.final_content == "final summary from gathered evidence"
+    assert result.messages[-1]["content"] == result.final_content
+
+
+@pytest.mark.asyncio
+async def test_runner_max_iteration_finalization_timeout_falls_back():
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    call_count = 0
+
+    async def chat_with_retry(*, tools, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return LLMResponse(
+                content="still working",
+                tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
+            )
+        await asyncio.sleep(3600)
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="tool result")
+
+    runner = AgentRunner(provider)
+    started = time.monotonic()
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        llm_timeout_s=0.05,
+    ))
+
+    assert (time.monotonic() - started) < 1.0
+    assert result.stop_reason == "max_iterations"
+    assert result.final_content.startswith("I reached the maximum number of tool call iterations")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "final_response",
+    [
+        LLMResponse(content="", tool_calls=[]),
+        LLMResponse(content="provider error", finish_reason="error", tool_calls=[]),
+        LLMResponse(
+            content="more tools",
+            tool_calls=[ToolCallRequest(id="call_2", name="list_dir", arguments={"path": "."})],
+        ),
+    ],
+)
+async def test_runner_max_iteration_finalization_invalid_response_falls_back(final_response):
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    calls = iter([
+        LLMResponse(
+            content="still working",
+            tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
+        ),
+        final_response,
+    ])
+    provider.chat_with_retry = AsyncMock(side_effect=lambda *args, **kwargs: next(calls))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="tool result")
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.stop_reason == "max_iterations"
+    assert result.final_content.startswith("I reached the maximum number of tool call iterations")
+
+
+@pytest.mark.asyncio
 async def test_runner_times_out_hung_llm_request():
     from nanobot.agent.runner import AgentRunSpec, AgentRunner
 

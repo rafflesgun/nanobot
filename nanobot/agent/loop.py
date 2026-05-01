@@ -1393,7 +1393,7 @@ class AgentLoop:
                 raise ValueError("_run_agent_loop returned unexpected result shape")
             if final_content:
                 final_content = self._strip_message_time_prefix(final_content)
-                if all_msgs and all_msgs[-1].get("role") == "assistant":
+                if stop_reason != "error" and all_msgs and all_msgs[-1].get("role") == "assistant":
                     all_msgs[-1] = {**all_msgs[-1], "content": final_content}
             self._save_turn(session, all_msgs, 1 + len(history))
             self._clear_pending_user_turn(session)
@@ -1565,7 +1565,7 @@ class AgentLoop:
             final_content = EMPTY_FINAL_RESPONSE_MESSAGE
         else:
             final_content = self._strip_message_time_prefix(final_content)
-            if all_msgs and all_msgs[-1].get("role") == "assistant":
+            if stop_reason != "error" and all_msgs and all_msgs[-1].get("role") == "assistant":
                 all_msgs[-1] = {**all_msgs[-1], "content": final_content}
 
         if session is not None:
@@ -1589,7 +1589,7 @@ class AgentLoop:
             ask_user_options_from_messages(all_msgs) if stop_reason == "ask_user" else [],
             msg.channel,
         )
-        if on_stream is not None and stop_reason not in {"ask_user", "error"}:
+        if on_stream is not None and stop_reason == "completed":
             meta["_streamed"] = True
             if is_provider_error_message(final_content):
                 meta["_streamed_error"] = True

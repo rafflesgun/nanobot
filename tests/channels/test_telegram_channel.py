@@ -722,6 +722,24 @@ async def test_send_progress_keeps_message_in_topic() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_empty_progress_is_suppressed_in_topic() -> None:
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"])
+    channel = TelegramChannel(config, MessageBus())
+    channel._app = _FakeApp(lambda: None)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="",
+            metadata={"_progress": True, "message_thread_id": 42},
+        )
+    )
+
+    assert channel._app.bot.sent_messages == []
+
+
+@pytest.mark.asyncio
 async def test_send_reply_infers_topic_from_message_id_cache() -> None:
     config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], reply_to_message=True)
     channel = TelegramChannel(config, MessageBus())
