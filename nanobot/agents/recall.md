@@ -1,7 +1,7 @@
 ---
 name: recall
 description: Searches past conversations and returns distilled summaries
-model: openai/gpt-4o-mini
+model: deepseek-v4-flash
 temperature: 0.1
 tools:
   - session_search

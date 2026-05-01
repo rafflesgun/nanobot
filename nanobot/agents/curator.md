@@ -1,7 +1,7 @@
 ---
 name: curator
 description: Maintains the skill library — archives stale skills, merges narrow siblings into umbrellas
-model: openai/gpt-4o-mini
+model: kimi-k2.5
 temperature: 0.2
 tools:
   - skill_manage
