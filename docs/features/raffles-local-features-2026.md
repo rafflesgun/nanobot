@@ -50,7 +50,7 @@ understand intended behavior quickly.
 | **Proposal metadata index + doctor drift visibility** | ✅ | agent/skill_proposal_metadata.py, agent/skill_proposals.py, agent/tools/skill_manage.py, doctor/checks/skills.py | tests/agent/test_skill_proposal_metadata.py, tests/agent/test_skill_proposals.py, tests/tools/test_skill_manage_tool.py, tests/doctor/test_skill_checks.py | Metadata index tracks `pending`/`applied`/`rejected`; doctor reports proposal health and drift |
 | **OpenAI-compatible image generation tool** | ✅ | image_generation.py, agent/tools/image_generation.py, agent/loop.py, cli/commands.py, config/schema.py | tests/test_image_generation_*.py, tests/tools/test_image_generation_tool.py, tests/agent/test_loop_tool_context.py | `tools.imageGeneration.enabled = false`; gateway-only tool registration; uses `providers.openai` or `providers.custom` |
 | Web search enhancements merged into main   | ℹ️     | agent/tools/web.py, README.md                          | tests/tools/test_web_search_tool.py    | Multi-provider search now upstream (`brave`, `tavily`, `duckduckgo`, `searxng`, `jina`) |
-| Runtime hardening (PR #2733)               | ℹ️     | agent/runner.py, agent/hook.py, agent/loop.py          | tests/agent/test_runner.py             | Now upstream: AgentRunner, checkpoints, tool batching, provider retry |
+| Sub-agent architecture (delegate tool)          | ✅     | agent/subagents.py, agent/tools/delegate.py, agent/loop.py, config/schema.py, pyproject.toml, utils/stats.py, agents/*.md | tests/agent/test_subagents.py, tests/tools/test_delegate.py, tests/agent/test_curator.py, tests/agent/test_context_fencing.py, tests/utils/test_stats.py, tests/agent/test_skill_usage.py | `subagents.<name>.model`, `fallbackModels`, `timeout_s`; delegate tool replaces spawn for agent-file tasks; per-sub-agent fallback chain; runtime agent discovery; cached token tracking in `/stats` |
 
 ## Detailed Descriptions & Merge Guidance
 
@@ -1055,9 +1055,23 @@ python3 -m pytest tests/workflows tests/tools/test_workflow_tool.py tests/comman
 
 **Per-sub-agent fallback models**
 - `fallback_models` supported in both agent `.md` frontmatter and config overrides (config wins if both set)
-- Config override schema (`SubAgentConfig`): `model`, `temperature`, `tools`, `fallbackModels`, `provider`
+- Config override schema (`SubAgentConfig`): `model`, `temperature`, `tools`, `fallbackModels`, `provider`, `timeout_s`
 - If not configured, sub-agent inherits main agent's `fallbackModels` list
 - Recommended: set sub-agent fallbacks to cheap/medium models to avoid escalating to premium unnecessarily
+
+**Per-sub-agent timeout**
+- Sub-agents inherit the provider's HTTP timeout (120s for OpenAI-compat, configurable via `NANOBOT_OPENAI_COMPAT_TIMEOUT_S`)
+- `timeout_s` field overrides per agent: set `300` for slow models like kimi-k2.5 or glm-5.1
+- Configurable in agent `.md` frontmatter (`timeout_s: 300`) or config override (`"timeout_s": 300`)
+- Default `0` = inherit provider default
+
+**Delegate tool schema enrichment**
+- The `agent` parameter description includes each agent's model and tool list so the model doesn't need `glob`/`read_file` turns to discover agent capabilities
+- Description explicitly says "PREFER this over spawn for agent-file-based tasks" to prevent model confusion with the old spawn tool
+- Agent list is discovered from disk on every tool schema build — newly-created agents appear without restart
+
+**Pip packaging**
+- `nanobot/agents/**/*.md` is included in the hatch build so built-in recall and curator agents are available in Docker installs
 
 **Agent file format**
 ```yaml
@@ -1069,6 +1083,7 @@ temperature: 0.1
 fallback_models:
   - minimax-m2.7
   - glm-5.1
+timeout_s: 300
 tools:
   - read_file
   - shell
@@ -1089,22 +1104,25 @@ You are a stock market analysis agent.
     },
     "curator": {
       "model": "kimi-k2.5",
-      "fallbackModels": ["glm-5.1"]
+      "fallbackModels": ["glm-5.1"],
+      "timeout_s": 300
     }
   }
 }
 ```
 
 **Files to protect**
-- `nanobot/agent/subagents.py` — AgentConfig dataclass (with `fallback_models`), AgentLoader for YAML-frontmatter .md agent files
-- `nanobot/agent/tools/delegate.py` — DelegateTool dispatches LLM tasks to sub-agents with fallback chain + cumulative usage tracking
-- `nanobot/agents/` — built-in agent definitions
-- `nanobot/agent/loop.py` — delegate registration, tool factory map, curator wiring, sub-agent usage merge into `_last_usage`
-- `nanobot/config/schema.py` — SubAgentConfig (with `fallbackModels`, `provider`), SubAgentsConfig, CuratorConfig
+- `nanobot/agent/subagents.py` — AgentConfig dataclass (with `fallback_models`, `timeout_s`), AgentLoader for YAML-frontmatter .md agent files
+- `nanobot/agent/tools/delegate.py` — DelegateTool with fallback chain, cumulative usage tracking, enriched agent descriptions (model+tools in schema)
+- `nanobot/agents/` — built-in agent definitions (curator.md, recall.md)
+- `nanobot/agent/loop.py` — delegate registration, tool factory map, curator wiring, sub-agent usage merge into `_last_usage`, stats_manager.record_usage() persistence
+- `nanobot/config/schema.py` — SubAgentConfig (with `model`, `temperature`, `tools`, `fallbackModels`, `provider`, `timeout_s`), SubAgentsConfig, CuratorConfig
+- `pyproject.toml` — hatch build include for `nanobot/agents/**/*.md` (pip packaging)
+- `nanobot/utils/stats.py` — StatsManager with `cached_tokens` tracking and persistence
 
 **Quick validation**
 ```bash
-python3 -m pytest tests/agent/test_subagents.py tests/tools/test_delegate.py -q
+python3 -m pytest tests/agent/test_subagents.py tests/tools/test_delegate.py tests/agent/test_curator.py tests/agent/test_context_fencing.py tests/utils/test_stats.py tests/agent/test_skill_usage.py -q
 ```
 
 ### 33. SQLite + FTS5 Session Store
@@ -1167,7 +1185,11 @@ python3 -m pytest tests/agent/test_skill_usage.py -q
 
 **Context-length auto-compact** — Compaction triggers when prompt tokens exceed 75% of model context window (matching opencode CLI behavior). Keeps existing time-based trigger as fallback.
 
-**Trivial-prompt skip** — Skips memory injection for user messages ≤3 tokens (e.g., "ok", "yes", "/status"). Saves ~200-500 tokens on meaningless turns.
+**Trivial-prompt skip** — Skips memory injection for user messages ≤3 raw tokens (using tiktoken, not chat template). Saves ~200-500 tokens on meaningless turns like "/s" or "ok".
+
+**Stats persistence** — `stats_manager.record_usage()` called after each agent turn. Persists `prompt_tokens`, `completion_tokens`, `total_tokens`, and `cached_tokens` to `workspace/stats/usage.jsonl`. `/stats` command aggregates across channels including cache token totals.
+
+**Sub-agent token merge** — `DelegateTool.cumulative_usage` accumulates sub-agent tokens per turn. Main loop merges into `_last_usage` before persisting to StatsManager. Cache tokens from deepseek's `prompt_cache_hit_tokens` are normalized and included.
 
 **Files to protect**
 - `nanobot/agent/context.py` — memory fencing, trivial-prompt skip
