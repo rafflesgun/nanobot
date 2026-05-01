@@ -376,5 +376,7 @@ def test_customized_memory_md_is_injected(tmp_path) -> None:
     builder = ContextBuilder(workspace)
     prompt = builder.build_system_prompt()
 
-    assert "# Memory\n\n## Long-term Memory" in prompt
+    assert "<memory-context>" in prompt
+    assert "## Long-term Memory" in prompt
     assert "User prefers dark mode" in prompt
+    assert "</memory-context>" in prompt

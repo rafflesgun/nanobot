@@ -613,6 +613,14 @@ class Consolidator:
         if not session.messages or self.context_window_tokens <= 0:
             return
 
+        try:
+            threshold_tokens = int(self.context_window_tokens * 0.75)
+            current_tokens = sum(estimate_message_tokens(m) for m in session.messages)
+            if current_tokens <= threshold_tokens:
+                return
+        except Exception:
+            pass
+
         lock = self.get_lock(session.key)
         async with lock:
             budget = self._input_token_budget

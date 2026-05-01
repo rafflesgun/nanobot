@@ -1581,7 +1581,7 @@ class AgentLoop:
         pending_ask_id = pending_ask_user_id(history)
         if pending_ask_id:
             initial_messages = ask_user_tool_result_messages(
-                self.context.build_system_prompt(channel=msg.channel),
+                self.context.build_system_prompt(channel=msg.channel, user_message=msg.content),
                 history,
                 pending_ask_id,
                 msg.content,

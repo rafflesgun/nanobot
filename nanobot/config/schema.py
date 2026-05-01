@@ -348,6 +348,27 @@ class AgentDefaults(Base):
     reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
 
 
+class SubAgentConfig(Base):
+    """Per-sub-agent override configuration."""
+    model: str | None = None
+    temperature: float | None = None
+    tools: list[str] | None = None
+
+
+class SubAgentsConfig(Base):
+    """Sub-agent overrides. Keys match agent names from agents/ directory."""
+    recall: SubAgentConfig | None = None
+    curator: SubAgentConfig | None = None
+
+
+class CuratorConfig(Base):
+    """Curator autonomous skill maintenance configuration."""
+    enabled: bool = True
+    interval_hours: int = Field(default=168, ge=1)
+    stale_after_days: int = Field(default=30, ge=1)
+    archive_after_days: int = Field(default=90, ge=1)
+
+
 class AgentsConfig(Base):
     """Agent configuration."""
 
@@ -584,6 +605,8 @@ class Config(BaseSettings):
     api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    subagents: SubAgentsConfig = Field(default_factory=SubAgentsConfig)
+    curator: CuratorConfig = Field(default_factory=CuratorConfig)
 
     @property
     def workspace_path(self) -> Path:
