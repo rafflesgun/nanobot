@@ -60,10 +60,21 @@ class DelegateTool(Tool):
     def parameters(self) -> dict[str, Any]:
         agents = self._loader.list_all()
         names = [a.name for a in agents]
+
+        # Build per-agent description with tools + model so the model
+        # doesn't need glob/read_file to discover agent capabilities.
+        agent_desc_parts: list[str] = []
+        for a in agents:
+            tools_str = ", ".join(a.tools) if a.tools else "no tools"
+            agent_desc_parts.append(
+                f"{a.name} [{a.model or 'default model'}, tools: {tools_str}] — {a.description}"
+            )
+        agent_desc = " ".join(agent_desc_parts) if agent_desc_parts else "none (create agents/*.md to add)"
+
         props: dict[str, Any] = {
             "agent": {
                 "type": "string",
-                "description": f"Sub-agent to delegate to: {', '.join(names)}",
+                "description": f"Sub-agent to run: {agent_desc}",
             },
             "task": {
                 "type": "string",
