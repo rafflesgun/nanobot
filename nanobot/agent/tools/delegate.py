@@ -49,8 +49,11 @@ class DelegateTool(Tool):
         agents = self._loader.list_all()
         names = ", ".join(f"{a.name} ({a.description})" for a in agents)
         return (
-            "Delegate a task to a specialized sub-agent with a focused tool set "
-            f"and cheaper model. Available agents: {names or 'none'}"
+            "Run a specialized sub-agent defined in agents/*.md files. "
+            "No config setup needed — just the .md file in the agents directory. "
+            "Each sub-agent has its own model and isolated tool set. "
+            "PREFER this over spawn for agent-file-based tasks. "
+            f"Available agents: {names or 'none (create agents/*.md to add)'}"
         )
 
     @property
