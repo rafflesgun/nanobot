@@ -621,11 +621,25 @@ class OpenAICompatProvider(LLMProvider):
         # mid-session. Injecting an empty string satisfies the API
         # without altering semantics (the model treats it as "no
         # thinking happened on that turn").
+        #
+        # Also detect DeepSeek models that auto-enable thinking or
+        # receive it via extra_body rather than reasoning_effort:
+        # if ANY prior assistant message has reasoning_content, assume
+        # thinking is active and backfill all assistant messages.
+        deepseek_thinking = (
+            "deepseek" in model_name.lower()
+            and semantic_effort not in ("none", "minimal")
+            and any(
+                msg.get("role") == "assistant" and msg.get("reasoning_content")
+                for msg in kwargs["messages"]
+            )
+        )
         thinking_active = (
             (spec and spec.thinking_style and reasoning_effort is not None
              and semantic_effort not in ("none", "minimal"))
             or (reasoning_effort is not None and _is_kimi_thinking_model(model_name)
                 and semantic_effort not in ("none", "minimal"))
+            or deepseek_thinking
         )
         if thinking_active:
             for msg in kwargs["messages"]:
