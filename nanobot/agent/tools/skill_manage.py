@@ -13,10 +13,11 @@ from nanobot.agent.tools.base import Tool
 
 
 class SkillManageTool(Tool):
-    def __init__(self, workspace) -> None:
+    def __init__(self, workspace: Path, skill_usage: Any = None) -> None:
         self._manager = SkillsManager(workspace)
         self._proposals = SkillProposalStore(workspace)
         self._metadata = ProposalMetadataStore(Path(workspace))
+        self._skill_usage = skill_usage
 
     @property
     def name(self) -> str:
