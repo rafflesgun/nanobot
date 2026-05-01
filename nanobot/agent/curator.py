@@ -48,7 +48,7 @@ class CuratorScheduler:
         state["last_run_at"] = datetime.now(timezone.utc).isoformat()
         state["run_count"] = state.get("run_count", 0) + 1
         self._save_state(state)
-        logger.info("Curator marked as ran (count=%d)", state["run_count"])
+        logger.info("curator marked ran count=%d", state["run_count"])
 
     def apply_lifecycle(self, now: datetime | None = None) -> dict[str, int]:
         """Phase 1: automatic state transitions (pure logic, zero LLM tokens)."""
@@ -155,10 +155,13 @@ class CuratorScheduler:
         )
 
         runner = AgentRunner(provider)
+        logger.info("curator phase2 starting model=%s", config.model)
         result = await runner.run(spec)
         logger.info(
-            "Curator Phase 2 complete: stop_reason=%s, tool_events=%d",
+            "curator phase2 complete stop=%s tokens_in=%d tokens_out=%d tool_events=%d",
             result.stop_reason,
+            (result.usage or {}).get("prompt_tokens", 0),
+            (result.usage or {}).get("completion_tokens", 0),
             len(result.tool_events or []),
         )
         return {

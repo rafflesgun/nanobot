@@ -937,7 +937,7 @@ class AgentLoop:
                 if self._curator.should_run():
                     counts = self._curator.apply_lifecycle()
                     if any(v > 0 for v in counts.values()):
-                        logger.info("Curator lifecycle: {}", counts)
+                        logger.info("curator lifecycle: %s", counts)
                     self._curator.mark_ran()
                 continue
             except asyncio.CancelledError:

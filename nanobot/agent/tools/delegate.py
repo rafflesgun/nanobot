@@ -88,11 +88,13 @@ class DelegateTool(Tool):
                 "error": f"Agent '{agent}' runner not initialized. Delegate unavailable."
             })
 
+        logger.info("delegate agent=%s model=%s task=%.80s", agent, config.model, task)
         try:
             result = await self._run_subagent(config, task)
+            logger.info("delegate agent=%s completed", agent)
             return json.dumps({"success": True, "agent": agent, "result": result})
         except Exception as e:
-            logger.exception("Delegate to %s failed", agent)
+            logger.exception("delegate agent=%s failed", agent)
             return json.dumps({"success": False, "agent": agent, "error": str(e)})
 
     async def _run_subagent(self, config: AgentConfig, task: str) -> str:
@@ -107,6 +109,13 @@ class DelegateTool(Tool):
 
         models_to_try = [config.model] + config.fallback_models
         last_error: Exception | None = None
+
+        if len(models_to_try) > 1:
+            logger.debug("delegate fallback chain: %s", models_to_try)
+
+        for idx, model in enumerate(models_to_try):
+            if idx > 0:
+                logger.info("delegate falling back to model=%s (attempt %d/%d)", model, idx + 1, len(models_to_try))
 
         for model in models_to_try:
             spec = AgentRunSpec(
@@ -125,6 +134,17 @@ class DelegateTool(Tool):
             try:
                 runner = AgentRunner(self._provider)
                 result = await runner.run(spec)
+                # Log token usage for visibility
+                u = result.usage or {}
+                logger.info(
+                    "delegate model=%s stop=%s tokens_in=%d tokens_out=%d cached=%d iters=%d",
+                    model,
+                    result.stop_reason,
+                    u.get("prompt_tokens", 0),
+                    u.get("completion_tokens", 0),
+                    u.get("cached_tokens", 0),
+                    len(result.tool_events or []),
+                )
                 # Accumulate sub-agent token usage for stats visibility
                 if result.usage:
                     for k, v in result.usage.items():
