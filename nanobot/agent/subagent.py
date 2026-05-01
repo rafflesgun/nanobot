@@ -22,7 +22,7 @@ from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import ExecToolConfig
+from nanobot.config.schema import AgentDefaults, ExecToolConfig, WebToolsConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.utils.stats import StatsManager
 
@@ -93,6 +93,7 @@ class SubagentManager:
         extra_read: list[str] | None = None,
         extra_write: list[str] | None = None,
         disabled_skills: list[str] | None = None,
+        max_iterations: int | None = None,
     ):
         from nanobot.config.schema import (
             AgentsConfig,
@@ -125,6 +126,11 @@ class SubagentManager:
         self.extra_read = extra_read or []
         self.extra_write = extra_write or []
         self.disabled_skills = set(disabled_skills or [])
+        self.max_iterations = (
+            max_iterations
+            if max_iterations is not None
+            else AgentDefaults().max_tool_iterations
+        )
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
@@ -286,9 +292,19 @@ class SubagentManager:
             tools.register(GrepTool(workspace=self.workspace, allowed_dir=allowed_dir))
             if self.web_config.enable:
                 tools.register(
-                    WebSearchTool(config=self.web_config.search, proxy=self.web_config.proxy)
+                    WebSearchTool(
+                        config=self.web_config.search,
+                        proxy=self.web_config.proxy,
+                        user_agent=self.web_config.user_agent,
+                    )
                 )
-                tools.register(WebFetchTool(proxy=self.web_config.proxy))
+                tools.register(
+                    WebFetchTool(
+                        config=self.web_config.fetch,
+                        proxy=self.web_config.proxy,
+                        user_agent=self.web_config.user_agent,
+                    )
+                )
             system_prompt = self._build_subagent_prompt()
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
@@ -299,7 +315,7 @@ class SubagentManager:
                 initial_messages=messages,
                 tools=tools,
                 model=model_override or agent_config.model,
-                max_iterations=15,
+                max_iterations=self.max_iterations,
                 max_tool_result_chars=self.max_tool_result_chars,
                 error_message="Subagent task failed.",
                 concurrent_tools=False,

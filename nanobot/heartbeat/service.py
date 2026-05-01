@@ -197,6 +197,40 @@ class HeartbeatService:
             except Exception as e:
                 logger.error("Heartbeat error: {}", e)
 
+    @staticmethod
+    def _is_deliverable(response: str) -> bool:
+        """Check if a heartbeat response is suitable for user delivery.
+
+        Filters out two classes of bad output before the evaluator runs:
+
+        1. **Finalization fallback** — the runner hit empty-response retries
+           and produced a canned error message.  For heartbeat, empty output
+           is a valid "nothing to report" outcome, not a failure.
+        2. **Leaked reasoning** — the model reflected internal file names,
+           decision logic, or meta-commentary instead of a user-facing report.
+        """
+        text = response.lower()
+
+        # Runner finalization fallback
+        if "couldn't produce a final answer" in text:
+            return False
+
+        # Leaked internal reasoning patterns
+        leaked_patterns = [
+            "heartbeat.md",
+            "awareness.md",
+            "judgment call:",
+            "decision logic",
+            "valid options are",
+            "my instructions",
+            "i am supposed to",
+            "strict heartbeat interpretation",
+        ]
+        if any(pattern in text for pattern in leaked_patterns):
+            return False
+
+        return True
+
     async def _tick(self) -> None:
         """Execute a single heartbeat tick."""
         content = self._read_heartbeat_file()
@@ -224,7 +258,16 @@ class HeartbeatService:
                     response = await self.on_execute(tasks)
                     preview = (response[:120] + "...") if response and len(response) > 120 else (response or "(empty)")
                     logger.info("Heartbeat: execution result — {}", preview)
-                    if response and self.on_notify:
+                    if not response:
+                        logger.info("Heartbeat: no response from execution")
+                        return
+                    if not self._is_deliverable(response):
+                        logger.info(
+                            "Heartbeat: suppressed non-deliverable response ({})",
+                            response[:80],
+                        )
+                        return
+                    if self.on_notify:
                         from nanobot.utils.evaluator import evaluate_response
                         should_notify = await evaluate_response(
                             response=response,
@@ -237,8 +280,6 @@ class HeartbeatService:
                             await self.on_notify(response)
                         else:
                             logger.info("Heartbeat: evaluator suppressed notification")
-                    elif not response:
-                        logger.info("Heartbeat: execution produced no response, skipping delivery")
                     else:
                         logger.info("Heartbeat: no notification callback configured")
             except Exception:

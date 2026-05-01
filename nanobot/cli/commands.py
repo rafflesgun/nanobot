@@ -551,6 +551,7 @@ def serve(
         disabled_skills=runtime_config.agents.defaults.disabled_skills,
         session_ttl_minutes=runtime_config.agents.defaults.session_ttl_minutes,
         consolidation_ratio=runtime_config.agents.defaults.consolidation_ratio,
+        max_messages=runtime_config.agents.defaults.max_messages,
         tools_config=runtime_config.tools,
         image_generation_provider=runtime_config.get_image_generation_provider(),
     )
@@ -670,6 +671,7 @@ def _run_gateway(
         disabled_skills=config.agents.defaults.disabled_skills,
         session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
         consolidation_ratio=config.agents.defaults.consolidation_ratio,
+        max_messages=config.agents.defaults.max_messages,
         tools_config=config.tools,
         image_generation_provider=config.get_image_generation_provider(),
         enable_image_generation_tool=True,
@@ -824,6 +826,14 @@ def _run_gateway(
         return "cli", "direct"
 
     # Create heartbeat service
+    heartbeat_preamble = (
+        "[Your response will be delivered directly to the user's messaging app. "
+        "Output ONLY the final user-facing message. Never reference internal "
+        "files (HEARTBEAT.md, AWARENESS.md, etc.), your instructions, or your "
+        "decision process. If nothing needs reporting, respond with just "
+        "'All clear.' and nothing else.]\n\n"
+    )
+
     async def on_heartbeat_execute(tasks: str) -> str:
         """Phase 2: execute heartbeat tasks through the full agent loop."""
         channel, chat_id = _pick_heartbeat_target()
@@ -832,7 +842,7 @@ def _run_gateway(
             pass
 
         resp = await agent.process_direct(
-            tasks,
+            heartbeat_preamble + tasks,
             session_key="heartbeat",
             channel=channel,
             chat_id=chat_id,
@@ -1080,6 +1090,7 @@ def agent(
         disabled_skills=config.agents.defaults.disabled_skills,
         session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
         consolidation_ratio=config.agents.defaults.consolidation_ratio,
+        max_messages=config.agents.defaults.max_messages,
         tools_config=config.tools,
         image_generation_provider=config.get_image_generation_provider(),
     )
@@ -1314,6 +1325,7 @@ def channels_status(
 
 def _get_bridge_dir() -> Path:
     """Get the bridge directory, setting it up if needed."""
+    import hashlib
     import shutil
     import subprocess
 
@@ -1321,16 +1333,7 @@ def _get_bridge_dir() -> Path:
     from nanobot.config.paths import get_bridge_install_dir
 
     user_bridge = get_bridge_install_dir()
-
-    # Check if already built
-    if (user_bridge / "dist" / "index.js").exists():
-        return user_bridge
-
-    # Check for npm
-    npm_path = shutil.which("npm")
-    if not npm_path:
-        console.print("[red]npm not found. Please install Node.js >= 18.[/red]")
-        raise typer.Exit(1)
+    stamp_file = user_bridge / ".nanobot-bridge-source-hash"
 
     # Find source bridge: first check package data, then source dir
     pkg_bridge = Path(__file__).parent.parent / "bridge"  # nanobot/bridge (installed)
@@ -1345,6 +1348,36 @@ def _get_bridge_dir() -> Path:
     if not source:
         console.print("[red]Bridge source not found.[/red]")
         console.print("Try reinstalling: pip install --force-reinstall nanobot")
+        raise typer.Exit(1)
+
+    def source_hash(root: Path) -> str:
+        digest = hashlib.sha256()
+        for path in sorted(root.rglob("*")):
+            if not path.is_file():
+                continue
+            rel = path.relative_to(root)
+            if rel.parts and rel.parts[0] in {"node_modules", "dist"}:
+                continue
+            digest.update(rel.as_posix().encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
+        return digest.hexdigest()
+
+    expected_hash = source_hash(source)
+    current_hash = stamp_file.read_text().strip() if stamp_file.exists() else None
+
+    # Reuse only a bridge built from the currently installed source.
+    if (user_bridge / "dist" / "index.js").exists() and current_hash == expected_hash:
+        return user_bridge
+
+    if (user_bridge / "dist" / "index.js").exists() and current_hash != expected_hash:
+        console.print(f"{__logo__} WhatsApp bridge source changed; rebuilding bridge...")
+
+    # Check for npm
+    npm_path = shutil.which("npm")
+    if not npm_path:
+        console.print("[red]npm not found. Please install Node.js >= 18.[/red]")
         raise typer.Exit(1)
 
     console.print(f"{__logo__} Setting up bridge...")
@@ -1362,6 +1395,7 @@ def _get_bridge_dir() -> Path:
 
         console.print("  Building...")
         subprocess.run([npm_path, "run", "build"], cwd=user_bridge, check=True, capture_output=True)
+        stamp_file.write_text(expected_hash + "\n")
 
         console.print("[green]✓[/green] Bridge ready\n")
     except subprocess.CalledProcessError as e:

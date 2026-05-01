@@ -13,14 +13,15 @@ from typing import Any, Literal
 
 from loguru import logger
 from pydantic import Field
-from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters, Update
-
-try:
-    from telegram import ReactionTypeEmoji
-
-    HAS_REACTION_TYPE = True
-except ImportError:
-    HAS_REACTION_TYPE = False
+from telegram import (
+    BotCommand,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    ReactionTypeEmoji,
+    ReplyParameters,
+    Update,
+)
+HAS_REACTION_TYPE = True
 from telegram.error import BadRequest, NetworkError, TimedOut
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
@@ -273,17 +274,18 @@ class TelegramChannel(BaseChannel):
     BOT_COMMANDS = [
         BotCommand("start", "Start the bot"),
         BotCommand("new", "Start a new conversation"),
-        BotCommand("dream", "Trigger dream memory processing"),
-        BotCommand("dream_log", "Show latest dream diff"),
-        BotCommand("dream_restore", "Restore a dream snapshot"),
         BotCommand("stop", "Stop the current task"),
         BotCommand("model", "Show or switch the LLM model"),
         BotCommand("tts", "Control TTS settings (on/off, voices, voice, provider)"),
         BotCommand("trace", "Toggle agent trace output (on/off/status)"),
         BotCommand("stats", "Show token usage statistics"),
-        BotCommand("help", "Show available commands"),
         BotCommand("restart", "Restart the bot"),
         BotCommand("status", "Show bot status"),
+        BotCommand("history", "Show recent conversation messages"),
+        BotCommand("dream", "Run Dream memory consolidation now"),
+        BotCommand("dream_log", "Show the latest Dream memory change"),
+        BotCommand("dream_restore", "Restore Dream memory to an earlier version"),
+        BotCommand("help", "Show available commands"),
     ]
 
     @classmethod
@@ -679,13 +681,15 @@ class TelegramChannel(BaseChannel):
                     continue
 
                 media_bytes = Path(media_path).read_bytes()
+                filename = Path(media_path).name
+                send_kwargs = {param: media_bytes, "filename": filename}
                 await self._call_with_retry(
                     sender,
                     chat_id=chat_id,
-                    **{param: media_bytes},
                     reply_parameters=reply_params,
                     **thread_kwargs,
                     **extra,
+                    **send_kwargs,
                 )
             except Exception as e:
                 filename = media_path.rsplit("/", 1)[-1]

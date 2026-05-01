@@ -144,7 +144,7 @@ class _LoopHook(AgentHook):
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         if self._on_progress:
-            if not self._on_stream:
+            if not self._on_stream and not context.streamed_content:
                 thought = self._loop._strip_think(
                     context.response.content if context.response else None
                 )
@@ -274,6 +274,7 @@ class AgentLoop:
         timezone: str | None = None,
         session_ttl_minutes: int = 0,
         consolidation_ratio: float = 0.5,
+        max_messages: int = 120,
         hooks: list[AgentHook] | None = None,
         fallback_models: list[str] | None = None,
         unified_session: bool = False,
@@ -341,8 +342,10 @@ class AgentLoop:
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
             disabled_skills=disabled_skills,
+            max_iterations=self.max_iterations,
         )
         self._unified_session = unified_session
+        self._max_messages = max_messages if max_messages > 0 else 120
         self._running = False
         self._mcp_servers = mcp_servers or {}
         self._mcp_stacks: dict[str, AsyncExitStack] = {}
@@ -395,6 +398,10 @@ class AgentLoop:
         if not isinstance(content, str):
             return content
         return re.sub(r"^(?:\[Message Time: [^\]\n]+\](?:\n+|$))+", "", content).lstrip("\n")
+
+    def _sync_subagent_runtime_limits(self) -> None:
+        """Keep subagent runtime limits aligned with mutable loop settings."""
+        self.subagents.max_iterations = self.max_iterations
 
     def _apply_provider_snapshot(self, snapshot: ProviderSnapshot) -> None:
         """Swap model/provider for future turns without disturbing an active one."""
@@ -459,10 +466,20 @@ class AgentLoop:
             )
         if self.web_config.enable:
             self.tools.register(
-                WebSearchTool(config=self.web_config.search, proxy=self.web_config.proxy)
+                WebSearchTool(
+                    config=self.web_config.search,
+                    proxy=self.web_config.proxy,
+                    user_agent=self.web_config.user_agent,
+                )
             )
-            self.tools.register(WebFetchTool(proxy=self.web_config.proxy))
-        self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
+            self.tools.register(
+                WebFetchTool(
+                    config=self.web_config.fetch,
+                    proxy=self.web_config.proxy,
+                    user_agent=self.web_config.user_agent,
+                )
+            )
+        self.tools.register(MessageTool(send_callback=self.bus.publish_outbound, workspace=self.workspace))
         image_cfg = self.tools_config.image_generation
         image_provider = self.image_generation_provider
         if (
@@ -523,12 +540,17 @@ class AgentLoop:
         session_key: str | None = None,
     ) -> None:
         """Update context for all tools that need routing info."""
+        # When the caller threads a thread-scoped session_key, honor it so
+        # spawn announces route back to the originating thread session.
         metadata = dict(metadata or {})
         if thread_id is not None:
             metadata.setdefault("message_thread_id", thread_id)
-        effective_key = session_key or (
-            UNIFIED_SESSION_KEY if self._unified_session else f"{channel}:{chat_id}"
-        )
+        if session_key is not None:
+            effective_key = session_key
+        elif self._unified_session:
+            effective_key = UNIFIED_SESSION_KEY
+        else:
+            effective_key = f"{channel}:{chat_id}"
         model_override = self._model_overrides.get(effective_key)
         for name in (
             "message",
@@ -581,6 +603,11 @@ class AgentLoop:
         from nanobot.utils.helpers import strip_think
 
         return strip_think(text) or None
+
+    @staticmethod
+    def _runtime_chat_id(msg: InboundMessage) -> str:
+        """Return the chat id shown in runtime metadata for the model."""
+        return str(msg.metadata.get("context_chat_id") or msg.chat_id)
 
     @staticmethod
     def _tool_hint(tool_calls: list) -> str:
@@ -685,6 +712,18 @@ class AgentLoop:
             content=f"✅ Model switched to `{new_model}` for this session.\nUse `/model reset` to revert to default.",
             metadata=_meta,
         )
+
+    def _replay_token_budget(self) -> int:
+        """Derive a token budget for session history replay from the context window."""
+        if self.context_window_tokens <= 0:
+            return 0
+        max_output = getattr(getattr(self.provider, "generation", None), "max_tokens", 4096)
+        try:
+            reserved_output = int(max_output)
+        except (TypeError, ValueError):
+            reserved_output = 4096
+        budget = self.context_window_tokens - max(1, reserved_output) - 1024
+        return budget if budget > 0 else max(128, self.context_window_tokens // 2)
 
     def _handle_temp_command(
         self, msg: InboundMessage, session_key: str, temp_arg: str, _meta: dict
@@ -927,8 +966,9 @@ class AgentLoop:
         *on_stream_end(resuming)*: called when a streaming session finishes.
         ``resuming=True`` means tool calls follow (spinner should restart);
         ``resuming=False`` means this is the final response.
-        *on_turn_saved*: callback triggered after each turn is saved incrementally.
+         *on_turn_saved*: callback triggered after each turn is saved incrementally.
         """
+        self._sync_subagent_runtime_limits()
         effective_model = model_override or self.model
         # Derive session_key for tool context
         if session_key:
@@ -1316,10 +1356,13 @@ class AgentLoop:
             )
             logger.info("Processing system message from {}", msg.sender_id)
 
-            # Include topic in session key if thread_id is in metadata
             thread_id = msg.metadata.get("message_thread_id")
-            logger.debug("System message metadata: {}, thread_id={}", msg.metadata, thread_id)
-            if thread_id is not None:
+            # Honor session_key_override so subagent announces from threaded
+            # callers route to the originating thread session.
+            sk_override = getattr(msg, "session_key_override", None)
+            if isinstance(sk_override, str) and sk_override:
+                key = sk_override
+            elif thread_id is not None:
                 key = f"{channel}:{chat_id}:topic:{thread_id}"
             else:
                 key = f"{channel}:{chat_id}"
@@ -1351,7 +1394,12 @@ class AgentLoop:
                 metadata=msg.metadata,
                 session_key=key,
             )
-            history = session.get_history(max_messages=0, include_timestamps=True)
+            _hist_kwargs: dict[str, Any] = {
+                "max_messages": self._max_messages,
+                "max_tokens": self._replay_token_budget(),
+                "include_timestamps": True,
+            }
+            history = session.get_history(**_hist_kwargs)
             current_role = "assistant" if is_subagent else "user"
 
             # Subagent content is already in `history` above; passing it again
@@ -1397,6 +1445,7 @@ class AgentLoop:
                     all_msgs[-1] = {**all_msgs[-1], "content": final_content}
             self._save_turn(session, all_msgs, 1 + len(history))
             self._clear_pending_user_turn(session)
+            session.enforce_file_cap(on_archive=self.context.memory.raw_archive)
             self._clear_runtime_checkpoint(session)
             self.sessions.save(session)
             self._schedule_background(self.consolidator.maybe_consolidate_by_tokens(session))
@@ -1411,12 +1460,20 @@ class AgentLoop:
                 options,
                 channel,
             )
+            # Reconstruct channel-specific metadata from session.key so the
+            # outbound reply lands in the originating thread (not the channel
+            # top-level). The announce InboundMessage carries only
+            # injected_event metadata; we recover thread_ts from the session
+            # key, which slack writes as "slack:<chat_id>:<thread_ts>".
+            outbound_metadata: dict[str, Any] = {}
+            if channel == "slack" and key.startswith("slack:") and key.count(":") >= 2:
+                outbound_metadata["slack"] = {"thread_ts": key.split(":", 2)[2]}
             return OutboundMessage(
                 channel=channel,
                 chat_id=chat_id,
                 content=content,
-                metadata=metadata,
                 buttons=buttons,
+                metadata={**metadata, **outbound_metadata},
             )
 
         # Extract document text from media at the processing boundary so all
@@ -1475,7 +1532,12 @@ class AgentLoop:
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
 
-        history = session.get_history(max_messages=0, include_timestamps=True) if session else []
+        _hist_kwargs: dict[str, Any] = {
+            "max_messages": self._max_messages,
+            "max_tokens": self._replay_token_budget(),
+            "include_timestamps": True,
+        }
+        history = session.get_history(**_hist_kwargs) if session else []
 
         pending_ask_id = pending_ask_user_id(history)
         if pending_ask_id:
@@ -1492,7 +1554,7 @@ class AgentLoop:
                 session_summary=pending,
                 media=msg.media if msg.media else None,
                 channel=msg.channel,
-                chat_id=msg.chat_id,
+                chat_id=self._runtime_chat_id(msg),
                 thread_id=msg.metadata.get("message_thread_id"),
             )
 
@@ -1568,9 +1630,11 @@ class AgentLoop:
             if stop_reason != "error" and all_msgs and all_msgs[-1].get("role") == "assistant":
                 all_msgs[-1] = {**all_msgs[-1], "content": final_content}
 
+        # Skip the already-persisted user message when saving the turn
+        save_skip = 1 + len(history) + (1 if user_persisted_early else 0)
         if session is not None:
-            save_skip = 1 + len(history) + (1 if user_persisted_early else 0)
             self._save_turn(session, all_msgs, save_skip)
+            session.enforce_file_cap(on_archive=self.context.memory.raw_archive)
             self._clear_pending_user_turn(session)
             self._clear_runtime_checkpoint(session)
             self.sessions.save(session)
