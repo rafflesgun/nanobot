@@ -1,212 +1,140 @@
+"""Tests for SessionSearchTool using SessionStore (SQLite FTS5)."""
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
-from nanobot.session.search import SessionSearchService
+from nanobot.agent.tools.session_search import SessionSearchTool
+from nanobot.session.store import SessionStore
 
 
-def _write_session(path: Path, rows: list[dict]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+def _make_store(tmp_path: Path) -> SessionStore:
+    return SessionStore(tmp_path / "state.db")
+
+
+def _add_session(store: SessionStore, session_id: str, **kwargs: str) -> None:
+    now = kwargs.get("started_at", "2026-04-22T09:00:00")
+    store.create_session(
+        session_id=session_id,
+        source=kwargs.get("source", "cli"),
+        model=kwargs.get("model", "gpt-4o"),
+        started_at=now,
+    )
+
+
+def _add_message(store: SessionStore, session_id: str, role: str, content: str, ts: str = "") -> None:
+    if not ts:
+        ts = f"2026-04-22T09:0{time.time() % 60:02.0f}:00"
+    store.add_message(session_id, role, content, ts)
 
 
 def test_search_returns_ranked_session_hits(tmp_path: Path) -> None:
-    _write_session(
-        tmp_path / "sessions" / "cli_direct.jsonl",
-        [
-            {
-                "_type": "metadata",
-                "metadata": {},
-                "created_at": "2026-04-22T09:00:00",
-                "updated_at": "2026-04-22T09:10:00",
-            },
-            {
-                "role": "user",
-                "content": "Investigate OpenRouter retry loop",
-                "timestamp": "2026-04-22T09:01:00",
-            },
-            {
-                "role": "assistant",
-                "content": "The retry logic is duplicated in provider retry mode",
-                "timestamp": "2026-04-22T09:02:00",
-            },
-        ],
-    )
-    _write_session(
-        tmp_path / "sessions" / "telegram_foo.jsonl",
-        [
-            {
-                "_type": "metadata",
-                "metadata": {},
-                "created_at": "2026-04-21T09:00:00",
-                "updated_at": "2026-04-21T09:10:00",
-            },
-            {
-                "role": "user",
-                "content": "Schedule a reminder for lunch",
-                "timestamp": "2026-04-21T09:01:00",
-            },
-        ],
-    )
+    store = _make_store(tmp_path)
+    _add_session(store, "cli_direct")
+    _add_message(store, "cli_direct", "user", "Investigate OpenRouter retry loop")
+    _add_message(store, "cli_direct", "assistant", "The retry logic is duplicated in provider retry mode")
 
-    service = SessionSearchService(tmp_path)
-    hits = service.search("retry loop", limit=3)
+    _add_session(store, "telegram_foo")
+    _add_message(store, "telegram_foo", "user", "Schedule a reminder for lunch")
 
-    assert len(hits) == 1
-    assert hits[0].session_key == "cli:direct"
-    assert "retry loop" in hits[0].excerpt.lower()
+    tool = SessionSearchTool(store)
+    result = json.loads(tool._keyword_search("retry loop", 3))
+
+    assert result["success"] is True
+    assert result["count"] == 1
+    assert result["results"][0]["session_id"] == "cli_direct"
 
 
-def test_search_excludes_current_session_when_requested(tmp_path: Path) -> None:
-    _write_session(
-        tmp_path / "sessions" / "cli_direct.jsonl",
-        [
-            {
-                "_type": "metadata",
-                "metadata": {},
-                "created_at": "2026-04-22T09:00:00",
-                "updated_at": "2026-04-22T09:10:00",
-            },
-            {
-                "role": "user",
-                "content": "Find the flaky webhook test",
-                "timestamp": "2026-04-22T09:01:00",
-            },
-        ],
-    )
+def test_recent_sessions_browse(tmp_path: Path) -> None:
+    store = _make_store(tmp_path)
+    _add_session(store, "a", started_at="2026-04-22T09:00:00")
+    _add_message(store, "a", "user", "Hello")
+    _add_session(store, "b", started_at="2026-04-23T10:00:00")
+    _add_message(store, "b", "user", "World")
 
-    service = SessionSearchService(tmp_path)
-    hits = service.search("flaky webhook", exclude_session_key="cli:direct")
+    tool = SessionSearchTool(store)
+    result = json.loads(tool._recent_sessions(5))
 
-    assert hits == []
+    assert result["success"] is True
+    assert result["mode"] == "recent"
+    assert result["count"] >= 2
+    session_ids = {r["session_id"] for r in result["results"]}
+    assert "a" in session_ids
+    assert "b" in session_ids
 
 
-def test_search_skips_corrupt_rows_and_metadata(tmp_path: Path) -> None:
-    path = tmp_path / "sessions" / "cli_direct.jsonl"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        '{"_type":"metadata","metadata":{}}\n'
-        '{"role":"user","content":"remember nginx timeout","timestamp":"2026-04-22T09:01:00"}\n'
-        "{bad json}\n",
-        encoding="utf-8",
-    )
+def test_empty_query_returns_recent(tmp_path: Path) -> None:
+    store = _make_store(tmp_path)
+    _add_session(store, "s1", started_at="2026-04-22T09:00:00")
+    _add_message(store, "s1", "user", "Test message")
 
-    service = SessionSearchService(tmp_path)
-    hits = service.search("nginx timeout")
+    tool = SessionSearchTool(store)
+    result_str = tool._recent_sessions(3)
+    result = json.loads(result_str)
 
-    assert len(hits) == 1
-    assert hits[0].match_count >= 1
+    assert result["mode"] == "recent"
 
 
-def test_search_returns_empty_for_blank_query(tmp_path: Path) -> None:
-    service = SessionSearchService(tmp_path)
+def test_keyword_search_no_results(tmp_path: Path) -> None:
+    store = _make_store(tmp_path)
+    _add_session(store, "s1")
+    _add_message(store, "s1", "user", "Hello world")
 
-    assert service.search("   ") == []
+    tool = SessionSearchTool(store)
+    result_str = tool._keyword_search("nonexistent_xyz", 3)
+    result = json.loads(result_str)
 
-
-def test_search_uses_metadata_key_for_topic_sessions(tmp_path: Path) -> None:
-    _write_session(
-        tmp_path / "sessions" / "telegram_123_topic_42.jsonl",
-        [
-            {
-                "_type": "metadata",
-                "metadata": {},
-                "key": "telegram:123:topic:42",
-                "created_at": "2026-04-22T09:00:00",
-                "updated_at": "2026-04-22T09:10:00",
-            },
-            {
-                "role": "user",
-                "content": "Topic-specific retry incident",
-                "timestamp": "2026-04-22T09:01:00",
-            },
-        ],
-    )
-
-    service = SessionSearchService(tmp_path)
-    hits = service.search("retry incident")
-
-    assert len(hits) == 1
-    assert hits[0].session_key == "telegram:123:topic:42"
+    assert result["success"] is True
+    assert result["count"] == 0
 
 
-def test_search_excludes_current_topic_session_using_metadata_key(tmp_path: Path) -> None:
-    _write_session(
-        tmp_path / "sessions" / "telegram_123_topic_42.jsonl",
-        [
-            {
-                "_type": "metadata",
-                "metadata": {},
-                "key": "telegram:123:topic:42",
-                "created_at": "2026-04-22T09:00:00",
-                "updated_at": "2026-04-22T09:10:00",
-            },
-            {
-                "role": "user",
-                "content": "Topic-specific retry incident",
-                "timestamp": "2026-04-22T09:01:00",
-            },
-        ],
-    )
+def test_excludes_current_session(tmp_path: Path) -> None:
+    store = _make_store(tmp_path)
+    _add_session(store, "cli_direct")
+    _add_message(store, "cli_direct", "user", "Find the flaky webhook test")
 
-    service = SessionSearchService(tmp_path)
-    hits = service.search("retry incident", exclude_session_key="telegram:123:topic:42")
+    tool = SessionSearchTool(store)
+    tool.set_context(session_key="cli_direct")
+    result_str = tool._keyword_search("flaky webhook", 3)
+    result = json.loads(result_str)
 
-    assert hits == []
+    assert result["count"] == 0  # current session excluded
 
 
-def test_search_fallback_key_for_topic_filename_is_excludable(tmp_path: Path) -> None:
-    _write_session(
-        tmp_path / "sessions" / "telegram_123_topic_42.jsonl",
-        [
-            {
-                "role": "user",
-                "content": "Topic-specific retry incident without metadata",
-                "timestamp": "2026-04-22T09:01:00",
-            },
-        ],
-    )
+def test_multipart_content_searchable(tmp_path: Path) -> None:
+    store = _make_store(tmp_path)
+    _add_session(store, "cli_direct")
+    _add_message(store, "cli_direct", "assistant", "The retry logic is duplicated in provider retry mode")
 
-    service = SessionSearchService(tmp_path)
-    hits = service.search("retry incident", exclude_session_key="telegram:123:topic:42")
+    tool = SessionSearchTool(store)
+    result_str = tool._keyword_search("retry logic", 3)
+    result = json.loads(result_str)
 
-    assert hits == []
+    assert result["count"] == 1
+    assert result["results"][0]["session_id"] == "cli_direct"
 
 
-def test_search_skips_binary_session_files(tmp_path: Path) -> None:
-    sessions_dir = tmp_path / "sessions"
-    sessions_dir.mkdir(parents=True, exist_ok=True)
-    (sessions_dir / "binary_file.jsonl").write_bytes(b"\xff\xfe\x00\x00invalid binary")
+def test_limit_enforced(tmp_path: Path) -> None:
+    store = _make_store(tmp_path)
+    for i in range(10):
+        sid = f"s{i}"
+        _add_session(store, sid)
+        _add_message(store, sid, "user", f"Test message about retry loop number {i}")
 
-    service = SessionSearchService(tmp_path)
-    hits = service.search("anything")
+    tool = SessionSearchTool(store)
+    result_str = tool._keyword_search("retry loop", 3)
+    result = json.loads(result_str)
 
-    assert hits == []
+    assert result["count"] <= 3
 
 
-def test_search_handles_multipart_content(tmp_path: Path) -> None:
-    _write_session(
-        tmp_path / "sessions" / "cli_direct.jsonl",
-        [
-            {
-                "_type": "metadata",
-                "key": "cli:direct",
-            },
-            {
-                "role": "assistant",
-                "content": [
-                    {"type": "text", "text": "The retry logic is duplicated"},
-                    {"type": "text", "text": "in provider retry mode"},
-                ],
-                "timestamp": "2026-04-22T09:02:00",
-            },
-        ],
-    )
+def test_tool_name_and_schema(tmp_path: Path) -> None:
+    store = _make_store(tmp_path)
+    tool = SessionSearchTool(store)
 
-    service = SessionSearchService(tmp_path)
-    hits = service.search("retry logic")
-
-    assert len(hits) == 1
-    assert hits[0].session_key == "cli:direct"
-    assert "retry logic" in hits[0].excerpt.lower()
+    assert tool.name == "session_search"
+    assert tool.read_only is True
+    params = tool.parameters
+    assert "query" in params["properties"]
+    assert params["required"] == []

@@ -27,6 +27,7 @@ from nanobot.agent.runner import (
 )
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.subagent import SubagentManager
+import nanobot.agent.subagents as _subagents_mod
 from nanobot.agent.tools.ask import (
     AskUserTool,
     ask_user_options_from_messages,
@@ -42,7 +43,6 @@ from nanobot.agent.tools.search import GlobTool, GrepTool
 from nanobot.agent.tools.self import MyTool
 from nanobot.agent.tools.session_search import SessionSearchTool
 from nanobot.agent.tools.shell import ExecTool
-from nanobot.agent.tools.skill_manage import SkillManageTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.agent.tools.workflow import WorkflowListTool, WorkflowRunTool
@@ -89,6 +89,8 @@ if TYPE_CHECKING:
 
 
 UNIFIED_SESSION_KEY = "unified:default"
+
+_tool_factories: dict[str, Any] = {}
 
 
 class _LoopHook(AgentHook):
@@ -330,7 +332,25 @@ class AgentLoop:
         self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
+
+        # Sub-agent infrastructure
+        from nanobot.session.store import SessionStore
+        from nanobot.agent.tools.delegate import DelegateTool
+        from nanobot.agent.skill_usage import SkillUsageStore
+
+        self._session_store = SessionStore(self.workspace / "state.db")
+        self._skill_usage = SkillUsageStore(self.workspace / "skills" / ".skill_usage.json")
+        self._agent_loader = _subagents_mod.AgentLoader(
+            workspace_agents_dir=self.workspace / "agents",
+            builtin_dir=Path(__file__).parent.parent / "agents",
+        )
+        self._delegate_tool = DelegateTool(self._agent_loader)
+        self._delegate_tool.set_tool_factories(_tool_factories)
+
         self.runner = AgentRunner(provider)
+        self._delegate_tool.set_provider(provider)
+        self._delegate_tool.set_runner(self.runner)
+
         self.subagents = SubagentManager(
             provider=provider,
             workspace=workspace,
@@ -449,8 +469,17 @@ class AgentLoop:
             self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
         for cls in (GlobTool, GrepTool):
             self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
-        self.tools.register(SessionSearchTool(workspace=self.workspace))
-        self.tools.register(SkillManageTool(workspace=self.workspace))
+
+        # Factories for sub-agent tools (used by recall/curator agents)
+        from nanobot.agent.tools.session_search import SessionSearchTool
+        from nanobot.agent.tools.skill_manage import SkillManageTool
+        _tool_factories["session_search"] = lambda: SessionSearchTool(self._session_store)
+        _tool_factories["skill_manage"] = lambda: SkillManageTool(
+            workspace=self.workspace, skill_usage=self._skill_usage
+        )
+
+        # Register delegate instead of session_search on main agent
+        self.tools.register(self._delegate_tool)
         self.tools.register(WorkflowListTool(workspace=self.workspace))
         self.tools.register(WorkflowRunTool(workspace=self.workspace, progress=self._workflow_progress))
         if self.exec_config.enable:
@@ -1906,3 +1935,7 @@ class AgentLoop:
         if ephemeral_session:
             kwargs["ephemeral_session"] = True
         return await self._process_message(msg, **kwargs)
+
+
+def get_tool_factories() -> dict[str, Any]:
+    return _tool_factories
