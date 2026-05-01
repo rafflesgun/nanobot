@@ -24,6 +24,7 @@ class AgentConfig:
     trigger: str = "on_demand"
     channel: str | None = None
     fallback_models: list[str] = field(default_factory=list)
+    timeout_s: float = 0  # 0 = inherit provider default
 
 
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
@@ -40,7 +41,7 @@ class AgentLoader:
             return None
         config = self._parse(content)
         if overrides:
-            for key in ("model", "temperature", "tools", "max_iterations", "max_tokens", "fallback_models"):
+            for key in ("model", "temperature", "tools", "max_iterations", "max_tokens", "fallback_models", "timeout_s"):
                 if key in overrides and overrides[key] is not None:
                     setattr(config, key, overrides[key])
         return config
@@ -95,4 +96,5 @@ class AgentLoader:
             trigger=frontmatter.get("trigger", "on_demand"),
             channel=frontmatter.get("channel"),
             fallback_models=frontmatter.get("fallback_models") or [],
+            timeout_s=float(frontmatter.get("timeout_s", 0)),
         )

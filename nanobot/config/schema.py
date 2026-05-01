@@ -355,6 +355,7 @@ class SubAgentConfig(Base):
     tools: list[str] | None = None
     fallback_models: list[str] | None = Field(default=None, alias="fallbackModels")
     provider: str | None = None
+    timeout_s: float | None = None
 
 
 class SubAgentsConfig(Base):

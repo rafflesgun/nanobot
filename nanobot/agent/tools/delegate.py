@@ -131,7 +131,6 @@ class DelegateTool(Tool):
             if idx > 0:
                 logger.info("delegate falling back to model=%s (attempt %d/%d)", model, idx + 1, len(models_to_try))
 
-        for model in models_to_try:
             spec = AgentRunSpec(
                 initial_messages=[
                     {"role": "system", "content": config.system_prompt},
@@ -144,6 +143,8 @@ class DelegateTool(Tool):
                 temperature=config.temperature,
                 max_tokens=config.max_tokens,
             )
+            if config.timeout_s > 0:
+                spec.llm_timeout_s = config.timeout_s
 
             try:
                 runner = AgentRunner(self._provider)
