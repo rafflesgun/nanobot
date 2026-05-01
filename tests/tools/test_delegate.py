@@ -47,3 +47,12 @@ class TestDelegateTool:
     def test_valid_agent_sync_response(self, tool: DelegateTool) -> None:
         result = tool.execute_sync("recall", "find past conversations about retry")
         assert "recall" in result
+
+    def test_cumulative_usage_starts_empty(self, tool: DelegateTool) -> None:
+        assert tool.cumulative_usage == {}
+
+    def test_cumulative_usage_is_mutable(self, tool: DelegateTool) -> None:
+        tool.cumulative_usage["prompt_tokens"] = 100
+        tool.cumulative_usage["cached_tokens"] = 80
+        assert tool.cumulative_usage["prompt_tokens"] == 100
+        assert tool.cumulative_usage["cached_tokens"] == 80

@@ -1145,6 +1145,13 @@ class AgentLoop:
                     )
                 )
                 self._last_usage = result.usage
+                # Merge sub-agent token usage accumulated since last turn
+                if hasattr(self, "_delegate_tool"):
+                    sa = self._delegate_tool.cumulative_usage
+                    if sa:
+                        for k, v in sa.items():
+                            self._last_usage[k] = self._last_usage.get(k, 0) + v
+                        self._delegate_tool.cumulative_usage = {}
 
                 # Check for errors that should trigger fallback
                 if result.stop_reason == "error":

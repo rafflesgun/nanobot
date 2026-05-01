@@ -26,6 +26,7 @@ class DelegateTool(Tool):
         self._runner = runner
         self._tool_factories: dict[str, Any] = {}
         self._overrides: dict[str, dict[str, Any]] = {}
+        self.cumulative_usage: dict[str, int] = {}
 
     def set_provider(self, provider: "LLMProvider") -> None:
         self._provider = provider
@@ -124,6 +125,10 @@ class DelegateTool(Tool):
             try:
                 runner = AgentRunner(self._provider)
                 result = await runner.run(spec)
+                # Accumulate sub-agent token usage for stats visibility
+                if result.usage:
+                    for k, v in result.usage.items():
+                        self.cumulative_usage[k] = self.cumulative_usage.get(k, 0) + v
                 if result.stop_reason != "error" or model == models_to_try[-1]:
                     return result.final_content or "(no output)"
                 last_error = Exception(result.error or "sub-agent returned error")
