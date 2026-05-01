@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from loguru import logger
 
 from nanobot.agent.autocompact import AutoCompact
+from nanobot.agent.curator import CuratorScheduler
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.hook import AgentHook, AgentHookContext, CompositeHook
 from nanobot.agent.memory import Consolidator, Dream
@@ -397,6 +398,10 @@ class AgentLoop:
             sessions=self.sessions,
             consolidator=self.consolidator,
             session_ttl_minutes=session_ttl_minutes,
+        )
+        self._curator = CuratorScheduler(
+            state_path=self.workspace / "skills" / ".curator_state",
+            usage_store=self._skill_usage,
         )
         self.dream = Dream(
             store=self.context.memory,
@@ -911,6 +916,11 @@ class AgentLoop:
                     self._schedule_background,
                     active_session_keys=self._pending_queues.keys(),
                 )
+                if self._curator.should_run():
+                    counts = self._curator.apply_lifecycle()
+                    if any(v > 0 for v in counts.values()):
+                        logger.info("Curator lifecycle: {}", counts)
+                    self._curator.mark_ran()
                 continue
             except asyncio.CancelledError:
                 # Preserve real task cancellation so shutdown can complete cleanly.
