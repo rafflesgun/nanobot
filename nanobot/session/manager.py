@@ -11,6 +11,7 @@ from typing import Any
 from loguru import logger
 
 from nanobot.config.paths import get_legacy_sessions_dir
+from nanobot.session.store import SessionStore
 from nanobot.utils.helpers import (
     ensure_dir,
     estimate_message_tokens,
@@ -263,16 +264,33 @@ class SessionManager:
     Sessions are stored as JSONL files in the sessions directory.
     """
 
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, store: SessionStore | None = None):
         self.workspace = workspace
         self.sessions_dir = ensure_dir(self.workspace / "sessions")
         self.legacy_sessions_dir = get_legacy_sessions_dir()
         self._cache: dict[str, Session] = {}
+        self._store = store or SessionStore(workspace / "sessions" / "state.db")
+
+    @property
+    def store(self) -> SessionStore:
+        return self._store
 
     @staticmethod
     def safe_key(key: str) -> str:
         """Public helper used by HTTP handlers to map an arbitrary key to a stable filename stem."""
         return safe_filename(key.replace(":", "_"))
+
+    def _maybe_migrate(self) -> None:
+        mig_flag = self.sessions_dir / ".sqlite_migrated"
+        if mig_flag.exists():
+            return
+        try:
+            count = self._store.migrate_from_jsonl(self.sessions_dir)
+            if count > 0:
+                logger.info("Migrated {} sessions to SQLite", count)
+        except Exception:
+            logger.exception("SQLite migration failed")
+        mig_flag.touch()
 
     def _get_session_path(self, key: str) -> Path:
         """Get the file path for a session."""
@@ -294,6 +312,8 @@ class SessionManager:
         """
         if key in self._cache:
             return self._cache[key]
+
+        self._maybe_migrate()
 
         session = self._load(key)
         if session is None:
@@ -455,6 +475,17 @@ class SessionManager:
                     os.fsync(f.fileno())
 
             os.replace(tmp_path, path)
+
+            # SQLite write-through (best-effort)
+            try:
+                self._store.create_session(
+                    session_id=session.key,
+                    source="cli",
+                    model=session.metadata.get("model", "unknown"),
+                    started_at=session.created_at.isoformat(),
+                )
+            except Exception:
+                pass
 
             if fsync:
                 # fsync the directory so the rename is durable.
