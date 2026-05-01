@@ -48,10 +48,10 @@ class ContextBuilder:
         skip_memory = False
         if user_message:
             try:
-                from nanobot.utils.helpers import estimate_message_tokens
-                skip_memory = estimate_message_tokens(
-                    [{"role": "user", "content": user_message}]
-                ) <= 3
+                import tiktoken
+                enc = tiktoken.get_encoding("cl100k_base")
+                raw_tokens = len(enc.encode(user_message))
+                skip_memory = raw_tokens <= 3
             except Exception:
                 pass
 
