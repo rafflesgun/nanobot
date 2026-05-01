@@ -428,7 +428,8 @@ async def test_runner_returns_structured_tool_error():
 
 
 @pytest.mark.asyncio
-async def test_runner_stops_on_workspace_violation_without_fail_on_tool_error():
+async def test_runner_allows_retry_on_workspace_violation():
+    """Workspace violations should not abort the turn — model gets chance to retry."""
     from nanobot.agent.runner import AgentRunSpec, AgentRunner
 
     provider = MagicMock()
@@ -437,7 +438,7 @@ async def test_runner_stops_on_workspace_violation_without_fail_on_tool_error():
             content="working",
             tool_calls=[ToolCallRequest(id="call_1", name="read_file", arguments={"path": "/tmp/outside.md"})],
         ),
-        LLMResponse(content="should not continue", tool_calls=[]),
+        LLMResponse(content="let me try a different path", tool_calls=[]),
     ])
     tools = MagicMock()
     tools.get_definitions.return_value = []
@@ -455,9 +456,9 @@ async def test_runner_stops_on_workspace_violation_without_fail_on_tool_error():
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
-    assert provider.chat_with_retry.await_count == 1
-    assert result.stop_reason == "tool_error"
-    assert "outside allowed directory" in (result.error or "")
+    assert provider.chat_with_retry.await_count == 2
+    assert result.stop_reason == "completed"
+    assert result.final_content == "let me try a different path"
     assert result.tool_events == [
         {
             "name": "read_file",
