@@ -63,12 +63,22 @@ _DEFAULT_OPENROUTER_HEADERS = {
     "X-OpenRouter-Title": "nanobot",
     "X-OpenRouter-Categories": "cli-agent,personal-agent",
 }
-_KIMI_THINKING_MODELS: frozenset[str] = frozenset({
+_DEEPSEEK_THINKING_TOKENS: frozenset[str] = frozenset({
+    "deepseek-r1",
+    "deepseek-reasoner",
+    "deepseek-v4-pro",
+    "deepseek-v4-flash",
+})
+_DEEPSEEK_THINKING_MODELS: frozenset[str] = _DEEPSEEK_THINKING_TOKENS
+_KIMI_THINKING_TOKENS: frozenset[str] = frozenset({
     "kimi-k2.5",
+    "kimi-k25",
     "kimi-k2.6",
+    "kimi-k26",
     "k2.6-code-preview",
 })
-_OPENAI_COMPAT_REQUEST_TIMEOUT_S = 120.0
+_KIMI_THINKING_MODELS: frozenset[str] = _KIMI_THINKING_TOKENS
+_OPENAI_COMPAT_REQUEST_TIMEOUT_S = 210.0
 
 # Maps ProviderSpec.thinking_style → extra_body builder.
 # Each builder takes a bool (thinking_enabled) and returns the dict to
@@ -83,18 +93,38 @@ _THINKING_STYLE_MAP: dict[str, Any] = {
 def _is_kimi_thinking_model(model_name: str) -> bool:
     """Return True if model_name refers to a Kimi thinking-capable model.
 
-    Supports two forms:
-    - Exact match: e.g. kimi-k2.5 / kimi-k2.6 in _KIMI_THINKING_MODELS
-    - Slug match:  moonshotai/kimi-k2.5 -> the part after the last "/"
-                   is checked against _KIMI_THINKING_MODELS
-
-    This covers both the native Moonshot provider (bare slug) and
-    OpenRouter-style names (``"publisher/slug"``).
+    Matching priority:
+    1. Exact match against _KIMI_THINKING_MODELS
+    2. Slug match after ``/`` (e.g. ``moonshotai/kimi-k2.5``)
+    3. Substring token match (e.g. ``infini-kimi-k25``, ``ollama-kimi-k2.5``)
     """
     name = model_name.lower()
     if name in _KIMI_THINKING_MODELS:
         return True
     if "/" in name and name.rsplit("/", 1)[1] in _KIMI_THINKING_MODELS:
+        return True
+    if any(token in name for token in _KIMI_THINKING_TOKENS):
+        return True
+    return False
+
+
+def _is_deepseek_thinking_model(model_name: str) -> bool:
+    """Return True if model_name is a DeepSeek model that uses thinking mode.
+
+    These models auto-enable thinking and require ``reasoning_content`` on
+    all assistant messages, even without ``reasoning_effort`` being set.
+
+    Matching priority:
+    1. Exact match against _DEEPSEEK_THINKING_MODELS
+    2. Slug match after ``/`` (e.g. ``openrouter/deepseek-r1``)
+    3. Substring token match (e.g. ``infini-deepseek-v4-pro``, ``ollama-deepseek-r1``)
+    """
+    name = model_name.lower()
+    if name in _DEEPSEEK_THINKING_MODELS:
+        return True
+    if "/" in name and name.rsplit("/", 1)[1] in _DEEPSEEK_THINKING_MODELS:
+        return True
+    if any(token in name for token in _DEEPSEEK_THINKING_TOKENS):
         return True
     return False
 
@@ -623,15 +653,23 @@ class OpenAICompatProvider(LLMProvider):
         # thinking happened on that turn").
         #
         # Also detect DeepSeek models that auto-enable thinking or
-        # receive it via extra_body rather than reasoning_effort:
-        # if ANY prior assistant message has reasoning_content, assume
-        # thinking is active and backfill all assistant messages.
+        # receive it via extra_body rather than reasoning_effort.
+        # Known thinking models (deepseek-r1, deepseek-v4-pro, etc.)
+        # always require reasoning_content on assistant messages even
+        # without reasoning_effort being explicitly set. For other
+        # DeepSeek models, only activate if at least one prior
+        # assistant message already has reasoning_content (i.e. the
+        # model previously responded in thinking mode).
+        is_known_thinking = _is_deepseek_thinking_model(model_name)
         deepseek_thinking = (
             "deepseek" in model_name.lower()
             and semantic_effort not in ("none", "minimal")
-            and any(
-                msg.get("role") == "assistant" and msg.get("reasoning_content")
-                for msg in kwargs["messages"]
+            and (
+                is_known_thinking
+                or any(
+                    msg.get("role") == "assistant" and msg.get("reasoning_content")
+                    for msg in kwargs["messages"]
+                )
             )
         )
         thinking_active = (

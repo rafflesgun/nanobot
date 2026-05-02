@@ -5,7 +5,7 @@ from nanobot.providers.registry import ProviderSpec
 
 
 def _assert_openai_compat_timeout(timeout) -> None:
-    assert timeout == 120.0
+    assert timeout == 210.0
 
 
 def test_openai_compat_provider_sets_sdk_timeout() -> None:

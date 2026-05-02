@@ -916,7 +916,9 @@ def test_deepseek_backfills_reasoning_content_on_legacy_tool_call_messages() -> 
 
 
 def test_backfill_does_not_touch_messages_when_thinking_off() -> None:
-    """When reasoning_effort is None or minimal, legacy messages must NOT be altered."""
+    """When reasoning_effort='minimal' (thinking disabled), legacy messages must NOT be altered.
+    For known thinking models like deepseek-v4-pro with reasoning_effort=None,
+    backfill IS expected because the model auto-enables thinking."""
     spec = find_by_name("deepseek")
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         p = OpenAICompatProvider(api_key="k", default_model="deepseek-v4-pro", spec=spec)
@@ -928,15 +930,40 @@ def test_backfill_does_not_touch_messages_when_thinking_off() -> None:
         {"role": "tool", "tool_call_id": "tc1", "content": "result"},
         {"role": "user", "content": "thanks"},
     ]
-    for effort in (None, "minimal"):
-        kw = p._build_kwargs(
-            messages=list(messages), tools=None, model="deepseek-v4-pro",
-            max_tokens=1024, temperature=0.7,
-            reasoning_effort=effort, tool_choice=None,
-        )
-        for msg in kw["messages"]:
-            if msg.get("role") == "assistant" and msg.get("tool_calls"):
-                assert "reasoning_content" not in msg
+    kw = p._build_kwargs(
+        messages=list(messages), tools=None, model="deepseek-v4-pro",
+        max_tokens=1024, temperature=0.7,
+        reasoning_effort="minimal", tool_choice=None,
+    )
+    for msg in kw["messages"]:
+        if msg.get("role") == "assistant" and msg.get("tool_calls"):
+            assert "reasoning_content" not in msg
+
+
+def test_backfill_does_not_touch_messages_for_non_thinking_model() -> None:
+    """For non-thinking DeepSeek models (deepseek-chat, deepseek-v3),
+    reasoning_effort=None should NOT trigger backfill."""
+    spec = find_by_name("deepseek")
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        p = OpenAICompatProvider(api_key="k", default_model="deepseek-chat", spec=spec)
+    messages = [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"id": "tc1", "type": "function", "function": {"name": "web_search", "arguments": "{}"}}
+        ]},
+        {"role": "tool", "tool_call_id": "tc1", "content": "result"},
+        {"role": "user", "content": "thanks"},
+    ]
+    for model in ("deepseek-chat", "deepseek-v3"):
+        for effort in (None, "minimal"):
+            kw = p._build_kwargs(
+                messages=list(messages), tools=None, model=model,
+                max_tokens=1024, temperature=0.7,
+                reasoning_effort=effort, tool_choice=None,
+            )
+            for msg in kw["messages"]:
+                if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                    assert "reasoning_content" not in msg
 
 
 def test_deepseek_coerces_list_content_to_string() -> None:
@@ -1103,3 +1130,130 @@ def test_deepseek_no_backfill_when_reasoning_effort_none_string() -> None:
     )
     assistant = kw["messages"][1]
     assert "reasoning_content" not in assistant
+
+
+def test_deepseek_v4_pro_backfills_without_prior_reasoning_content() -> None:
+    """deepseek-v4-pro is a known thinking model. Backfill must activate
+    even when no prior assistant message has reasoning_content and
+    reasoning_effort is not explicitly set."""
+    spec = find_by_name("deepseek")
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        p = OpenAICompatProvider(api_key="k", default_model="deepseek-v4-pro", spec=spec)
+    messages = [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "hello"},
+        {"role": "user", "content": "continue"},
+    ]
+    kw = p._build_kwargs(
+        messages=list(messages), tools=None, model="deepseek-v4-pro",
+        max_tokens=1024, temperature=0.7,
+        reasoning_effort=None, tool_choice=None,
+    )
+    assistant = kw["messages"][1]
+    assert "reasoning_content" in assistant, "known thinking model must backfill reasoning_content"
+    assert assistant["reasoning_content"] == ""
+
+
+def test_deepseek_v4_flash_backfills_without_prior_reasoning() -> None:
+    """deepseek-v4-flash is a thinking model. Backfill must activate
+    even when no prior assistant message has reasoning_content."""
+    spec = find_by_name("deepseek")
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        p = OpenAICompatProvider(api_key="k", default_model="deepseek-v4-flash", spec=spec)
+    messages = [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "hello"},
+        {"role": "user", "content": "continue"},
+    ]
+    kw = p._build_kwargs(
+        messages=list(messages), tools=None, model="deepseek-v4-flash",
+        max_tokens=1024, temperature=0.7,
+        reasoning_effort=None, tool_choice=None,
+    )
+    assistant = kw["messages"][1]
+    assert "reasoning_content" in assistant, "deepseek-v4-flash must backfill reasoning_content"
+    assert assistant["reasoning_content"] == ""
+
+
+def test_deepseek_r1_backfills_without_prior_reasoning_content() -> None:
+    """deepseek-r1 is a known thinking model. Backfill must activate
+    even when no prior assistant message has reasoning_content."""
+    spec = find_by_name("deepseek")
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        p = OpenAICompatProvider(api_key="k", default_model="deepseek-r1", spec=spec)
+    messages = [
+        {"role": "user", "content": "solve this"},
+        {"role": "assistant", "content": "thinking...", "tool_calls": [
+            {"id": "tc1", "type": "function", "function": {"name": "calc", "arguments": "{}"}}
+        ]},
+        {"role": "tool", "tool_call_id": "tc1", "content": "42"},
+        {"role": "user", "content": "thanks"},
+    ]
+    kw = p._build_kwargs(
+        messages=list(messages), tools=None, model="deepseek-r1",
+        max_tokens=1024, temperature=0.7,
+        reasoning_effort=None, tool_choice=None,
+    )
+    for msg in kw["messages"]:
+        if msg.get("role") == "assistant":
+            assert "reasoning_content" in msg, "deepseek-r1 must backfill reasoning_content"
+
+
+def test_infini_deepseek_v4_pro_backfills_without_prior_reasoning_content() -> None:
+    """Prefixed model names like 'infini-deepseek-v4-pro' must be detected
+    as thinking models via substring token match."""
+    spec = find_by_name("deepseek")
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        p = OpenAICompatProvider(api_key="k", default_model="infini-deepseek-v4-pro", spec=spec)
+    messages = [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "hello"},
+        {"role": "user", "content": "continue"},
+    ]
+    kw = p._build_kwargs(
+        messages=list(messages), tools=None, model="infini-deepseek-v4-pro",
+        max_tokens=1024, temperature=0.7,
+        reasoning_effort=None, tool_choice=None,
+    )
+    assistant = kw["messages"][1]
+    assert "reasoning_content" in assistant, "infini-deepseek-v4-pro must backfill reasoning_content"
+    assert assistant["reasoning_content"] == ""
+
+
+def test_nvd_deepseek_v4_flash_backfills() -> None:
+    """Prefixed flash model 'nvd-deepseek-v4-flash' must trigger backfill."""
+    spec = find_by_name("deepseek")
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        p = OpenAICompatProvider(api_key="k", default_model="nvd-deepseek-v4-flash", spec=spec)
+    messages = [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "hello"},
+        {"role": "user", "content": "continue"},
+    ]
+    kw = p._build_kwargs(
+        messages=list(messages), tools=None, model="nvd-deepseek-v4-flash",
+        max_tokens=1024, temperature=0.7,
+        reasoning_effort=None, tool_choice=None,
+    )
+    assistant = kw["messages"][1]
+    assert "reasoning_content" in assistant, "nvd-deepseek-v4-flash must backfill reasoning_content"
+
+
+def test_infini_kimi_k25_detected_as_thinking_model() -> None:
+    """'infini-kimi-k25' must be detected as a Kimi thinking model."""
+    from nanobot.providers.openai_compat_provider import _is_kimi_thinking_model
+    assert _is_kimi_thinking_model("infini-kimi-k25")
+    assert _is_kimi_thinking_model("infini-kimi-k2.5")
+    assert _is_kimi_thinking_model("ollama-kimi-k2.5")
+    assert not _is_kimi_thinking_model("infini-kimi-latest")
+
+
+def test_is_deepseek_thinking_model_prefixed() -> None:
+    """Substring token match must detect prefixed DeepSeek thinking models."""
+    from nanobot.providers.openai_compat_provider import _is_deepseek_thinking_model
+    assert _is_deepseek_thinking_model("infini-deepseek-v4-pro")
+    assert _is_deepseek_thinking_model("ollama-deepseek-r1")
+    assert _is_deepseek_thinking_model("openrouter/deepseek-v4-pro")
+    assert _is_deepseek_thinking_model("infini-deepseek-v4-flash")
+    assert not _is_deepseek_thinking_model("infini-deepseek-chat")
+    assert not _is_deepseek_thinking_model("ollama-deepseek-v3")

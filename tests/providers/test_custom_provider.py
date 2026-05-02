@@ -67,7 +67,7 @@ def test_custom_provider_client_disables_sdk_retries_and_sets_timeout() -> None:
 
     kwargs = mock_client.call_args.kwargs
     assert kwargs["max_retries"] == 0
-    assert kwargs["timeout"] == 120.0
+    assert kwargs["timeout"] == 210.0
 
 
 def test_local_provider_502_error_includes_reachability_hint() -> None:
