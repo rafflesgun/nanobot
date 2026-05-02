@@ -871,14 +871,23 @@ class AgentLoop:
                     metadata=_meta,
                 )
 
-            total_messages = sum(stats.values())
+            total_messages = sum(stat["count"] for stat in stats.values())
+            total_input = sum(stat["total_input_tokens"] for stat in stats.values())
+            total_cached = sum(stat.get("total_cached_tokens", 0) for stat in stats.values())
             total_tokens = sum(stat["total_tokens"] for stat in stats.values())
             response = "📊 Total Token Usage Statistics\n\n"
             response += f"• Total messages: {total_messages}\n"
+            if total_cached:
+                response += f"• Cached tokens: {total_cached:,}\n"
+                if total_input:
+                    response += f"• Cache hit rate: {total_cached * 100 // total_input}%\n"
             response += f"• Total tokens: {total_tokens:,}\n\n"
             for channel, stat in stats.items():
+                cached_text = ""
+                if stat.get("total_cached_tokens", 0):
+                    cached_text = f", {stat['total_cached_tokens']:,} cached"
                 response += (
-                    f"📡 {channel}: {stat['total_tokens']:,} tokens ({stat['count']} messages)\n"
+                    f"📡 {channel}: {stat['total_tokens']:,} tokens{cached_text} ({stat['count']} messages)\n"
                 )
 
             return OutboundMessage(
@@ -901,6 +910,7 @@ class AgentLoop:
         total_input = stats["total_input_tokens"]
         total_output = stats["total_output_tokens"]
         total_tokens = stats["total_tokens"]
+        total_cached = stats.get("total_cached_tokens", 0)
 
         response = "📊 Token Usage Statistics"
         if _meta.get("message_thread_id") is not None:
@@ -911,6 +921,10 @@ class AgentLoop:
         response += f"• Total messages: {total_messages}\n"
         response += f"• Input tokens: {total_input:,}\n"
         response += f"• Output tokens: {total_output:,}\n"
+        if total_cached:
+            response += f"• Cached tokens: {total_cached:,}\n"
+            if total_input:
+                response += f"• Cache hit rate: {total_cached * 100 // total_input}%\n"
         response += f"• Total tokens: {total_tokens:,}\n\n"
 
         return OutboundMessage(

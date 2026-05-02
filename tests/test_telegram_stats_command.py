@@ -47,6 +47,13 @@ def _make_telegram_update(*, text: str = None, args: list = None):
     ), SimpleNamespace(args=args if args else [])
 
 
+def _make_topic_update(*, text: str = None, args: list = None, thread_id: int = 42):
+    update, context = _make_telegram_update(text=text, args=args)
+    update.message.message_thread_id = thread_id
+    update.effective_message.message_thread_id = thread_id
+    return update, context
+
+
 @pytest.mark.asyncio
 async def test_stats_command_no_stats_file(tmp_path):
     """Test /stats command when no stats file exists."""
@@ -91,6 +98,7 @@ async def test_stats_command_with_data(tmp_path):
             "input_tokens": 150,
             "output_tokens": 100,
             "total_tokens": 250,
+            "cached_tokens": 120,
             "session_key": "test_session"
         },
         {
@@ -101,6 +109,7 @@ async def test_stats_command_with_data(tmp_path):
             "input_tokens": 200,
             "output_tokens": 150,
             "total_tokens": 350,
+            "cached_tokens": 80,
             "session_key": "test_session"
         }
     ]
@@ -121,6 +130,8 @@ async def test_stats_command_with_data(tmp_path):
     call_args = update.message.reply_text.call_args[0][0]
     assert "Token Usage Statistics (This Chat)" in call_args
     assert "2" in call_args
+    assert "Cached Tokens: <code>200</code>" in call_args
+    assert "Cache Hit Rate: <code>57%</code>" in call_args
 
 
 @pytest.mark.asyncio
@@ -145,6 +156,7 @@ async def test_stats_command_all(tmp_path):
             "input_tokens": 150,
             "output_tokens": 100,
             "total_tokens": 250,
+            "cached_tokens": 90,
             "session_key": "test_session"
         },
         {
@@ -155,6 +167,7 @@ async def test_stats_command_all(tmp_path):
             "input_tokens": 300,
             "output_tokens": 200,
             "total_tokens": 500,
+            "cached_tokens": 210,
             "session_key": "test_session"
         }
     ]
@@ -175,6 +188,8 @@ async def test_stats_command_all(tmp_path):
     call_args = update.message.reply_text.call_args[0][0]
     assert "Total Token Usage Statistics" in call_args
     assert "2" in call_args
+    assert "Cached Tokens: <code>300</code>" in call_args
+    assert "Cache Hit Rate: <code>66%</code>" in call_args
 
 
 @pytest.mark.asyncio
@@ -246,3 +261,38 @@ async def test_stats_command_topic_no_topic(tmp_path):
     update.message.reply_text.assert_called_once_with(
         "❌ This command is only available in topic threads.", parse_mode="HTML"
     )
+
+
+@pytest.mark.asyncio
+async def test_stats_command_topic_with_cached_tokens(tmp_path):
+    """Test /stats topic shows cached token totals when cache data exists."""
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"])
+    channel = TelegramChannel(config, MessageBus())
+    channel._app = _FakeApp()
+    channel._workspace_path = str(tmp_path)
+
+    stats_dir = tmp_path / "stats"
+    stats_dir.mkdir()
+    usage_file = stats_dir / "usage.jsonl"
+    usage_file.write_text(json.dumps({
+        "timestamp": "2024-01-01T00:00:00",
+        "channel": "telegram",
+        "chat_id": "123456789:topic:42",
+        "model": "claude-3-opus-20240229",
+        "input_tokens": 300,
+        "output_tokens": 100,
+        "total_tokens": 400,
+        "cached_tokens": 180,
+        "session_key": "test_session",
+    }) + "\n")
+
+    update, context = _make_topic_update(text="/stats topic", args=["topic"], thread_id=42)
+    update.message.reply_text = AsyncMock()
+
+    await channel._on_stats_command(update, context)
+
+    update.message.reply_text.assert_called_once()
+    call_args = update.message.reply_text.call_args[0][0]
+    assert "Token Usage Statistics (This Topic)" in call_args
+    assert "Cached Tokens: <code>180</code>" in call_args
+    assert "Cache Hit Rate: <code>60%</code>" in call_args

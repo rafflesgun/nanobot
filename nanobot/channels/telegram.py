@@ -2167,13 +2167,20 @@ class TelegramChannel(BaseChannel):
                         total_input = topic_stats.get("total_input_tokens", 0)
                         total_output = topic_stats.get("total_output_tokens", 0)
                         total_tokens = topic_stats.get("total_tokens", 0)
+                        total_cached = topic_stats.get("total_cached_tokens", 0)
                         count = topic_stats.get("count", 0)
+                        cache_lines = ""
+                        if total_cached:
+                            cache_lines = f"\n💾 Cached Tokens: <code>{total_cached:,}</code>"
+                            if total_input:
+                                cache_lines += f"\n♻️ Cache Hit Rate: <code>{total_cached * 100 // total_input}%</code>"
 
                         response = (
                             "📊 <b>Token Usage Statistics (This Topic)</b>\n\n"
                             f"🔢 Requests in this topic: <code>{count}</code>\n"
                             f"📥 Input Tokens: <code>{total_input:,}</code>\n"
                             f"📤 Output Tokens: <code>{total_output:,}</code>\n"
+                            f"{cache_lines}\n"
                             f"总计 Tokens: <code>{total_tokens:,}</code>"
                         )
                     else:
@@ -2189,13 +2196,20 @@ class TelegramChannel(BaseChannel):
                         total_input = stats.get("total_input_tokens", 0)
                         total_output = stats.get("total_output_tokens", 0)
                         total_tokens = stats.get("total_tokens", 0)
+                        total_cached = stats.get("total_cached_tokens", 0)
                         count = stats.get("count", 0)
+                        cache_lines = ""
+                        if total_cached:
+                            cache_lines = f"\n💾 Cached Tokens: <code>{total_cached:,}</code>"
+                            if total_input:
+                                cache_lines += f"\n♻️ Cache Hit Rate: <code>{total_cached * 100 // total_input}%</code>"
 
                         response = (
                             "📊 <b>Total Token Usage Statistics</b>\n\n"
                             f"🔢 Total Requests: <code>{count}</code>\n"
                             f"📥 Input Tokens: <code>{total_input:,}</code>\n"
                             f"📤 Output Tokens: <code>{total_output:,}</code>\n"
+                            f"{cache_lines}\n"
                             f"总计 Tokens: <code>{total_tokens:,}</code>"
                         )
                     else:
@@ -2207,13 +2221,20 @@ class TelegramChannel(BaseChannel):
                         total_input = stats.get("total_input_tokens", 0)
                         total_output = stats.get("total_output_tokens", 0)
                         total_tokens = stats.get("total_tokens", 0)
+                        total_cached = stats.get("total_cached_tokens", 0)
                         count = stats.get("count", 0)
+                        cache_lines = ""
+                        if total_cached:
+                            cache_lines = f"\n💾 Cached Tokens: <code>{total_cached:,}</code>"
+                            if total_input:
+                                cache_lines += f"\n♻️ Cache Hit Rate: <code>{total_cached * 100 // total_input}%</code>"
 
                         response = (
                             "📊 <b>Token Usage Statistics (This Chat)</b>\n\n"
                             f"🔢 Requests in this chat: <code>{count}</code>\n"
                             f"📥 Input Tokens: <code>{total_input:,}</code>\n"
                             f"📤 Output Tokens: <code>{total_output:,}</code>\n"
+                            f"{cache_lines}\n"
                             f"总计 Tokens: <code>{total_tokens:,}</code>"
                         )
                     else:

@@ -32,7 +32,7 @@ understand intended behavior quickly.
 | Telegram forwarded message debounce         | ✅     | channels/telegram.py                                   | tests/channels/test_telegram_channel.py | 80ms lane = `chat_id:thread_id`              |
 | **TTS voice notes (Edge + OpenAI + Riva)**  | ✅     | providers/tts.py, tts/manager.py, channels/telegram.py, utils/audio.py | tests/test_tts.py (new)                | `tts.enabled = false` (default), text sent before TTS, 30s timeout, overrides persist across restart |
 | **/trace command - AI thinking visibility** | ✅     | channels/telegram.py                                   | tests/test_trace_command_additional.py | `_trace_enabled[chat_id] = false` (default, chat-scoped not topic-scoped) |
-| **/stats command - token usage visibility** | ✅     | channels/telegram.py, utils/stats.py                   | tests/test_telegram_stats_command.py   | `/stats`, `/stats topic`, `/stats all`          |
+| **/stats command - token usage visibility** | ✅     | channels/telegram.py, agent/loop.py, utils/stats.py    | tests/test_telegram_stats_command.py, tests/agent/test_stats_command.py | `/stats`, `/stats topic`, `/stats all`; shows cached tokens + hit rate when available |
 | **/status shows session model override**   | ✅     | command/builtin.py, utils/helpers.py                   | tests/cli/test_restart_command.py      | shows `gpt-4o (default: claude-opus-4)` when overridden |
 | **Builtin commands preserve topic context** | ✅   | command/builtin.py, channels/telegram.py              | tests/test_telegram_builtin_commands_topic.py | `/new`, `/stop`, `/restart`, `/status`, `/help` |
 | **Channel Info includes Telegram thread_id** | ✅  | agent/context.py, agent/loop.py                       | tests/agent/test_context_prompt_cache.py, tests/agent/test_loop_save_turn.py | Telegram runtime block shows `Thread ID` above `Chat ID`; non-topic = `0` |
@@ -1187,7 +1187,7 @@ python3 -m pytest tests/agent/test_skill_usage.py -q
 
 **Trivial-prompt skip** — Skips memory injection for user messages ≤3 raw tokens (using tiktoken, not chat template). Saves ~200-500 tokens on meaningless turns like "/s" or "ok".
 
-**Stats persistence** — `stats_manager.record_usage()` called after each agent turn. Persists `prompt_tokens`, `completion_tokens`, `total_tokens`, and `cached_tokens` to `workspace/stats/usage.jsonl`. `/stats` command aggregates across channels including cache token totals.
+**Stats persistence** — `stats_manager.record_usage()` called after each agent turn. Persists `prompt_tokens`, `completion_tokens`, `total_tokens`, and `cached_tokens` to `workspace/stats/usage.jsonl`. `/stats`, `/stats topic`, and `/stats all` show cached token totals plus cache hit rate when providers report cache hits. Cached tokens remain part of input/total token accounting and are not double-counted.
 
 **Sub-agent token merge** — `DelegateTool.cumulative_usage` accumulates sub-agent tokens per turn. Main loop merges into `_last_usage` before persisting to StatsManager. Cache tokens from deepseek's `prompt_cache_hit_tokens` are normalized and included.
 
