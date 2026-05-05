@@ -479,13 +479,8 @@ async def test_runner_does_not_abort_on_workspace_violation_anymore():
     assert "workspace_violation" in result.tool_events[0]["detail"]
 
 
-def test_is_ssrf_violation_remains_fatal():
-    """SSRF rejections are the only marker that stays turn-fatal.
-
-    A single successful internal-URL fetch can leak cloud metadata, so we
-    never let the LLM "retry" with a different URL phrasing -- contrast
-    this with workspace-bound rejections which are soft + throttled in v2.
-    """
+def test_is_ssrf_violation_detects_internal_url_guard():
+    """SSRF rejections are detected without weakening the exec guard."""
     from nanobot.agent.runner import AgentRunner
 
     ssrf_msg = "Error: Command blocked by safety guard (internal/private URL detected)"
@@ -505,8 +500,8 @@ def test_is_ssrf_violation_remains_fatal():
 
 
 @pytest.mark.asyncio
-async def test_runner_aborts_on_ssrf_violation():
-    """SSRF still fatal-aborts the turn even though workspace ones are soft."""
+async def test_runner_lets_llm_recover_from_ssrf_violation():
+    """Blocked internal URLs stay blocked, but should not abort the whole task."""
     from nanobot.agent.runner import AgentRunSpec, AgentRunner
 
     provider = MagicMock()
@@ -519,7 +514,7 @@ async def test_runner_aborts_on_ssrf_violation():
                 arguments={"command": "curl http://169.254.169.254"},
             )],
         ),
-        LLMResponse(content="should NOT be reached", tool_calls=[]),
+        LLMResponse(content="continued without the local gateway", tool_calls=[]),
     ])
     tools = MagicMock()
     tools.get_definitions.return_value = []
@@ -536,9 +531,14 @@ async def test_runner_aborts_on_ssrf_violation():
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
-    assert provider.chat_with_retry.await_count == 1, "SSRF must abort immediately"
-    assert result.stop_reason == "tool_error"
-    assert "internal/private url detected" in (result.error or "").lower()
+    assert provider.chat_with_retry.await_count == 2, (
+        "blocked internal URL should be returned to the LLM as a tool error"
+    )
+    assert result.stop_reason != "tool_error"
+    assert result.error is None
+    assert result.final_content == "continued without the local gateway"
+    assert result.tool_events and result.tool_events[0]["status"] == "error"
+    assert "internal/private url detected" in result.tool_events[0]["detail"].lower()
 
 
 @pytest.mark.asyncio
@@ -1405,7 +1405,7 @@ async def test_streamed_flag_not_set_on_llm_error(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_streamed_flag_not_set_on_tool_error(tmp_path):
+async def test_streamed_flag_not_set_after_recoverable_tool_error(tmp_path):
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus
@@ -1422,7 +1422,14 @@ async def test_streamed_flag_not_set_on_tool_error(tmp_path):
         )],
         usage={},
     )
-    provider.chat_stream_with_retry = AsyncMock(return_value=tool_call_resp)
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        tool_call_resp,
+        LLMResponse(
+            content="I cannot access the local metadata endpoint, so I continued safely.",
+            tool_calls=[],
+            usage={},
+        ),
+    ])
 
     loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
     loop.tools.get_definitions = MagicMock(return_value=[])
@@ -1438,9 +1445,9 @@ async def test_streamed_flag_not_set_on_tool_error(tmp_path):
     )
 
     assert result is not None
-    assert "internal/private URL detected" in result.content
+    assert "continued safely" in result.content
     assert not result.metadata.get("_streamed"), \
-        "_streamed must not be set when stop_reason is tool_error"
+        "_streamed must not be set when only tool calls/errors were processed"
 
 
 @pytest.mark.asyncio

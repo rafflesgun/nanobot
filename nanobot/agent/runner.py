@@ -946,7 +946,8 @@ class AgentRunner:
             detail = detail[:120] + "..."
         return result, {"name": tool_call.name, "status": "ok", "detail": detail}, None
 
-    # SSRF remains fatal; workspace path boundaries are soft + throttled.
+    # Safety-boundary rejections are returned as tool errors so the model can
+    # recover without weakening the underlying exec/web-fetch guard.
     _SSRF_MARKER: str = "internal/private url detected"
 
     # Non-SSRF boundary markers returned to the LLM as recoverable tool errors.
@@ -987,12 +988,12 @@ class AgentRunner:
         """Classify safety-boundary failures, or return ``None`` to pass through."""
         if self._is_ssrf_violation(raw_text):
             logger.warning(
-                "Tool {} blocked by SSRF guard; aborting turn: {}",
+                "Tool {} blocked by SSRF guard; returning tool error: {}",
                 tool_call.name,
                 raw_text.replace("\n", " ").strip()[:200],
             )
             event["detail"] = self._event_detail("workspace_violation: ", raw_text)
-            return ssrf_payload, event, ssrf_error
+            return soft_payload, event, None
 
         if self._is_workspace_violation(raw_text):
             escalation = repeated_workspace_violation_error(
