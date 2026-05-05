@@ -252,6 +252,9 @@ class SessionStore:
             except json.JSONDecodeError:
                 continue
             if row.get("_type") == "metadata":
+                key = row.get("key")
+                if isinstance(key, str) and key:
+                    session_id = key
                 continue
             role = row.get("role", "user")
             content = row.get("content", "")

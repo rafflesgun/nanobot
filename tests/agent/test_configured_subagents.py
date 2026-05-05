@@ -72,6 +72,7 @@ async def test_spawn_tool_passes_subagent_id_to_manager() -> None:
         session_key="telegram:123",
         subagent_id="research",
         model_override=None,
+        origin_message_id=None,
     )
 
 
@@ -94,6 +95,7 @@ async def test_spawn_tool_keeps_topic_session_key() -> None:
         session_key="telegram:123:topic:42",
         subagent_id=None,
         model_override=None,
+        origin_message_id=None,
     )
 
 
@@ -116,6 +118,7 @@ async def test_spawn_tool_passes_model_override_to_manager() -> None:
         session_key="telegram:123:topic:42",
         subagent_id=None,
         model_override="openai/gpt-4o",
+        origin_message_id=None,
     )
 
 

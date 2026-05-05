@@ -152,6 +152,7 @@ class SubagentManager:
         subagent_id: str | None = None,
         origin_thread_id: int | None = None,
         model_override: str | None = None,
+        origin_message_id: str | None = None,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
         task_id = str(uuid.uuid4())[:8]
@@ -180,6 +181,7 @@ class SubagentManager:
                 status,
                 subagent_id=subagent_id,
                 model_override=model_override,
+                origin_message_id=origin_message_id,
             )
         )
         self._running_tasks[task_id] = bg_task
@@ -234,6 +236,7 @@ class SubagentManager:
         status: SubagentStatus | None = None,
         subagent_id: str | None = None,
         model_override: str | None = None,
+        origin_message_id: str | None = None,
     ) -> None:
         """Execute the subagent task and announce the result."""
         status = status or SubagentStatus(
@@ -253,43 +256,76 @@ class SubagentManager:
 
             # Build subagent tools (no message tool, no spawn tool)
             tools = ToolRegistry()
-            allowed_dir: list[Path] = (
-                (
-                    [self.workspace]
-                    + ([Path(p) for p in self.extra_write] if self.extra_write else [])
-                )
-                if self.restrict_to_workspace
-                else None
-            )
-            extra_read: list[Path] = (
-                (
-                    [BUILTIN_SKILLS_DIR]
-                    + ([Path(p) for p in self.extra_read] if self.extra_read else [])
-                )
-                if allowed_dir
-                else None
-            )
+            allowed_root = self.workspace if (self.restrict_to_workspace or self.exec_config.sandbox) else None
+            extra_read_dirs = [Path(p) for p in self.extra_read]
+            extra_write_dirs = [Path(p) for p in self.extra_write]
+            read_extra = ([BUILTIN_SKILLS_DIR] + extra_read_dirs + extra_write_dirs) if allowed_root else None
+            write_extra = extra_write_dirs if allowed_root else None
+
+            from nanobot.agent.tools.file_state import FileStates
+            file_states = FileStates()
             tools.register(
                 ReadFileTool(
-                    workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read
+                    workspace=self.workspace,
+                    allowed_dir=allowed_root,
+                    extra_allowed_dirs=read_extra,
+                    file_states=file_states,
                 )
             )
-            tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir))
             tools.register(
-                ExecTool(
-                    working_dir=str(self.workspace),
-                    timeout=self.exec_config.timeout,
-                    restrict_to_workspace=self.restrict_to_workspace,
-                    allowed_dirs=allowed_dir,
-                    sandbox=self.exec_config.sandbox,
-                    path_append=self.exec_config.path_append,
-                    allowed_env_keys=self.exec_config.allowed_env_keys,
+                WriteFileTool(
+                    workspace=self.workspace,
+                    allowed_dir=allowed_root,
+                    extra_allowed_dirs=write_extra,
+                    file_states=file_states,
                 )
             )
-            tools.register(GlobTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(GrepTool(workspace=self.workspace, allowed_dir=allowed_dir))
+            tools.register(
+                EditFileTool(
+                    workspace=self.workspace,
+                    allowed_dir=allowed_root,
+                    extra_allowed_dirs=write_extra,
+                    file_states=file_states,
+                )
+            )
+            tools.register(
+                ListDirTool(
+                    workspace=self.workspace,
+                    allowed_dir=allowed_root,
+                    extra_allowed_dirs=read_extra,
+                    file_states=file_states,
+                )
+            )
+            tools.register(
+                GlobTool(
+                    workspace=self.workspace,
+                    allowed_dir=allowed_root,
+                    extra_allowed_dirs=read_extra,
+                    file_states=file_states,
+                )
+            )
+            tools.register(
+                GrepTool(
+                    workspace=self.workspace,
+                    allowed_dir=allowed_root,
+                    extra_allowed_dirs=read_extra,
+                    file_states=file_states,
+                )
+            )
+            if self.exec_config.enable:
+                tools.register(
+                    ExecTool(
+                        working_dir=str(self.workspace),
+                        timeout=self.exec_config.timeout,
+                        restrict_to_workspace=self.restrict_to_workspace,
+                        allowed_dirs=([self.workspace] + extra_write_dirs) if self.restrict_to_workspace else None,
+                        sandbox=self.exec_config.sandbox,
+                        path_append=self.exec_config.path_append,
+                        allowed_env_keys=self.exec_config.allowed_env_keys,
+                        allow_patterns=self.exec_config.allow_patterns,
+                        deny_patterns=self.exec_config.deny_patterns,
+                    )
+                )
             if self.web_config.enable:
                 tools.register(
                     WebSearchTool(
@@ -323,56 +359,37 @@ class SubagentManager:
             )
             result = await self.runner.run(spec)
             final_result = result.final_content
+            has_tool_failures = any(
+                (event.get("status") if isinstance(event, dict) else getattr(event, "status", None)) == "error"
+                for event in (result.tool_events or [])
+            )
 
-            if final_result is None or (
-                "maximum number of tool call iterations" in str(final_result)
-            ):
-                tool_events = getattr(result, "tool_events", [])
-
-                def _field(event, key):
-                    return event.get(key) if isinstance(event, dict) else getattr(event, key, None)
-
-                completed = [e for e in tool_events if _field(e, "status") == "ok"]
-                failed = [e for e in tool_events if _field(e, "status") == "error"]
-                if failed:
-                    lines = []
-                    if completed:
-                        lines.append("Completed steps:")
-                        for e in completed:
-                            lines.append(f"- {_field(e, 'name')}: {_field(e, 'detail')}")
-                    if failed:
-                        if lines:
-                            lines.append("")
-                        lines.append("Failure:")
-                        for e in failed:
-                            lines.append(f"- {_field(e, 'name')}: {_field(e, 'detail')}")
-                    final_result = "\n".join(lines)
-                else:
+            if result.stop_reason == "tool_error" or has_tool_failures:
+                status.tool_events = list(result.tool_events)
+                await self._announce_result(
+                    task_id, label, task,
+                    self._format_partial_progress(result),
+                    origin, "error", origin_message_id,
+                )
+            elif result.stop_reason == "error":
+                await self._announce_result(
+                    task_id, label, task,
+                    result.error or "Error: subagent execution failed.",
+                    origin, "error", origin_message_id,
+                )
+            else:
+                if final_result is None or (
+                    "maximum number of tool call iterations" in str(final_result)
+                ):
                     final_result = "Task completed but no final response was generated."
-
-            status = "error" if ("Failure:" in str(final_result)) else "ok"
-            logger.info("Subagent [{}] completed successfully", task_id)
-            await self._announce_result(task_id, label, task, final_result, origin, status)
-
-            # Record subagent token usage
-            if hasattr(provider, "get_usage"):
-                usage = provider.get_usage()
-                if usage:
-                    self.stats_manager.record_usage(
-                        "system",
-                        f"subagent:{task_id}",
-                        agent_config.model,
-                        usage.get("input_tokens", 0),
-                        usage.get("output_tokens", 0),
-                        usage.get("total_tokens", 0),
-                        f"subagent:{task_id}",
-                    )
+                logger.info("Subagent [{}] completed successfully", task_id)
+                await self._announce_result(task_id, label, task, final_result, origin, "ok", origin_message_id)
 
         except Exception as e:
             status.phase = "error"
             status.error = str(e)
             logger.error("Subagent [{}] failed: {}", task_id, e)
-            await self._announce_result(task_id, label, task, f"Error: {e}", origin, "error")
+            await self._announce_result(task_id, label, task, f"Error: {e}", origin, "error", origin_message_id)
 
     async def _announce_result(
         self,
@@ -382,6 +399,7 @@ class SubagentManager:
         result: str,
         origin: dict[str, str],
         status: str,
+        origin_message_id: str | None = None,
     ) -> None:
         """Announce the subagent result to the main agent via the message bus."""
         status_text = "completed successfully" if status == "ok" else "failed"
@@ -401,27 +419,53 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
         # routed to the correct pending queue (mid-turn injection) instead of
         # being dispatched as a competing independent task.
         override = origin.get("session_key") or f"{origin['channel']}:{origin['chat_id']}"
+        metadata: dict[str, Any] = {
+            "injected_event": "subagent_result",
+            "subagent_task_id": task_id,
+        }
+        if origin_message_id:
+            metadata["origin_message_id"] = origin_message_id
+        if origin.get("thread_id") is not None:
+            metadata["message_thread_id"] = origin["thread_id"]
         msg = InboundMessage(
             channel="system",
             sender_id="subagent",
             chat_id=f"{origin['channel']}:{origin['chat_id']}",
             content=announce_content,
             session_key_override=override,
-            metadata={
-                **(
-                    {"message_thread_id": origin["thread_id"]}
-                    if origin.get("thread_id") is not None
-                    else {}
-                ),
-                "injected_event": "subagent_result",
-                "subagent_task_id": task_id,
-            },
+            metadata=metadata,
         )
 
         await self.bus.publish_inbound(msg)
         logger.debug(
             "Subagent [{}] announced result to {}:{}", task_id, origin["channel"], origin["chat_id"]
         )
+
+    @staticmethod
+    def _format_partial_progress(result) -> str:
+        """Summarize completed and failed tool steps for interrupted subagent runs."""
+        tool_events = getattr(result, "tool_events", []) or []
+
+        def _field(event, key):
+            return event.get(key) if isinstance(event, dict) else getattr(event, key, None)
+
+        completed = [e for e in tool_events if _field(e, "status") == "ok"]
+        failed = [e for e in tool_events if _field(e, "status") == "error"]
+        if not completed and not failed:
+            return getattr(result, "final_content", None) or "Task completed but no final response was generated."
+
+        lines = []
+        if completed:
+            lines.append("Completed steps:")
+            for event in completed:
+                lines.append(f"- {_field(event, 'name')}: {_field(event, 'detail')}")
+        if failed:
+            if lines:
+                lines.append("")
+            lines.append("Failure:")
+            for event in failed:
+                lines.append(f"- {_field(event, 'name')}: {_field(event, 'detail')}")
+        return "\n".join(lines)
 
     def _build_subagent_prompt(self) -> str:
         """Build a focused system prompt for the subagent."""

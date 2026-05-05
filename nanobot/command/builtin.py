@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from contextlib import suppress
 
 from nanobot import __version__
 from nanobot.bus.events import OutboundMessage
@@ -67,10 +68,10 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
     loop = ctx.loop
     session = ctx.session or loop.sessions.get_or_create(ctx.key)
     ctx_est = 0
-    try:
-        ctx_est, _ = loop.memory_consolidator.estimate_session_prompt_tokens(session)
-    except Exception:
-        pass
+    with suppress(Exception):
+        consolidator = getattr(loop, "consolidator", None) or getattr(loop, "memory_consolidator", None)
+        if consolidator is not None:
+            ctx_est, _ = consolidator.estimate_session_prompt_tokens(session)
     if ctx_est <= 0:
         ctx_est = loop._last_usage.get("prompt_tokens", 0)
     model_override = loop._model_overrides.get(ctx.key)
@@ -81,7 +82,8 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
 
     # Fetch web search provider usage (best-effort, never blocks the response)
     search_usage_text: str | None = None
-    try:
+    # Never let usage fetch break /status
+    with suppress(Exception):
         from nanobot.utils.searchusage import fetch_search_usage
 
         web_cfg = getattr(loop, "web_config", None)
@@ -91,14 +93,10 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
             api_key = getattr(search_cfg, "api_key", "") or None
             usage = await fetch_search_usage(provider=provider, api_key=api_key)
             search_usage_text = usage.format()
-    except Exception:
-        pass  # Never let usage fetch break /status
     active_tasks = loop._active_tasks.get(ctx.key, [])
     task_count = sum(1 for t in active_tasks if not t.done())
-    try:
+    with suppress(Exception):
         task_count += loop.subagents.get_running_count_by_session(ctx.key)
-    except Exception:
-        pass
     provider = getattr(loop, "provider", None)
     generation = getattr(provider, "generation", None)
     return OutboundMessage(

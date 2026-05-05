@@ -7,6 +7,7 @@ import random
 import re
 import time
 import unicodedata
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -547,9 +548,12 @@ class TelegramChannel(BaseChannel):
 
         is_progress = msg.metadata.get("_progress", False)
 
-        # Only stop typing indicator for final responses
+        # Only stop typing indicator and remove reaction for final responses
         if not is_progress:
             self._stop_typing(comp_key)
+            if reply_to_message_id := msg.metadata.get("message_id"):
+                with suppress(ValueError):
+                    await self._remove_reaction(msg.chat_id, int(reply_to_message_id))
 
         try:
             chat_id = int(msg.chat_id)
@@ -929,10 +933,8 @@ class TelegramChannel(BaseChannel):
                 except Exception as e:
                     logger.debug("Failed to delete thinking message after stream: {}", e)
             if reply_to_message_id := meta.get("message_id"):
-                try:
+                with suppress(ValueError):
                     await self._remove_reaction(chat_id, int(reply_to_message_id))
-                except ValueError:
-                    pass
             thread_kwargs = {"message_thread_id": thread_id} if thread_id is not None else {}
             raw_text = buf.text
             html = _markdown_to_telegram_html(raw_text)
@@ -2335,10 +2337,8 @@ class TelegramChannel(BaseChannel):
         button_label = query.data or ""
         await query.answer()
         if query.message:
-            try:
+            with suppress(Exception):
                 await query.message.edit_reply_markup(reply_markup=None)
-            except Exception:
-                pass
         logger.debug("Inline button tap from {}: {}", sender_id, button_label)
         self._start_typing(str(chat_id))
         await self._handle_message(

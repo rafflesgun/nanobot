@@ -9,7 +9,7 @@ import json
 import os
 import re
 import time
-from contextlib import AsyncExitStack, nullcontext
+from contextlib import AsyncExitStack, nullcontext, suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -37,6 +37,7 @@ from nanobot.agent.tools.ask import (
     pending_ask_user_id,
 )
 from nanobot.agent.tools.cron import CronTool
+from nanobot.agent.tools.file_state import FileStateStore, bind_file_states, reset_file_states
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
@@ -366,6 +367,9 @@ class AgentLoop:
         except Exception:
             pass
 
+        # One file-read/write tracker per logical session. The tool registry is
+        # shared by this loop, so tools resolve the active state via contextvars.
+        self._file_state_store = FileStateStore()
         self.runner = AgentRunner(provider)
         self._delegate_tool.set_provider(provider)
         self._delegate_tool.set_runner(self.runner)
@@ -485,7 +489,9 @@ class AgentLoop:
         self.tools.register(AskUserTool())
         self.tools.register(
             ReadFileTool(
-                workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read
+                workspace=self.workspace,
+                allowed_dir=allowed_dir,
+                extra_allowed_dirs=extra_read,
             )
         )
         for cls in (WriteFileTool, EditFileTool, ListDirTool):
@@ -514,6 +520,8 @@ class AgentLoop:
                     sandbox=self.exec_config.sandbox,
                     path_append=self.exec_config.path_append,
                     allowed_env_keys=self.exec_config.allowed_env_keys,
+                    allow_patterns=self.exec_config.allow_patterns,
+                    deny_patterns=self.exec_config.deny_patterns,
                 )
             )
         if self.web_config.enable:
@@ -631,6 +639,8 @@ class AgentLoop:
                             model_override=model_override,
                             thread_id=thread_id,
                         )
+                        if hasattr(tool, "set_origin_message_id"):
+                            tool.set_origin_message_id(message_id)
                     elif name in ("session_search", "workflow_run"):
                         tool.set_context(session_key=effective_key)
                     else:
@@ -691,10 +701,8 @@ class AgentLoop:
         tasks = self._active_tasks.pop(key, [])
         cancelled = sum(1 for t in tasks if not t.done() and t.cancel())
         for t in tasks:
-            try:
+            with suppress(asyncio.CancelledError, Exception):
                 await t
-            except (asyncio.CancelledError, Exception):
-                pass
         sub_cancelled = await self.subagents.cancel_by_session(key)
         return cancelled + sub_cancelled
 
@@ -1134,30 +1142,35 @@ class AgentLoop:
 
         for idx, model in enumerate(models_to_try):
             try:
-                result = await self.runner.run(
-                    AgentRunSpec(
-                        initial_messages=initial_messages,
-                        tools=self.tools,
-                        model=model,
-                        max_iterations=self.max_iterations,
-                        max_tool_result_chars=self.max_tool_result_chars,
-                        temperature=temperature_override,
-                        hook=hook,
-                        error_message="Sorry, I encountered an error calling the AI model.",
-                        concurrent_tools=True,
-                        workspace=self.workspace,
-                        session_key=session.key if session else None,
-                        context_window_tokens=self.context_window_tokens,
-                        context_block_limit=self.context_block_limit,
-                        provider_retry_mode=self.provider_retry_mode,
-                        progress_callback=on_progress,
-                        retry_wait_callback=on_retry_wait,
-                        checkpoint_callback=_checkpoint,
-                        max_repeat_lookups=self.max_repeat_lookups,
-                        on_turn_saved=on_turn_saved,
-                        injection_callback=_drain_pending,
+                active_session_key = session.key if session else session_key
+                file_state_token = bind_file_states(self._file_state_store.for_session(active_session_key))
+                try:
+                    result = await self.runner.run(
+                        AgentRunSpec(
+                            initial_messages=initial_messages,
+                            tools=self.tools,
+                            model=model,
+                            max_iterations=self.max_iterations,
+                            max_tool_result_chars=self.max_tool_result_chars,
+                            temperature=temperature_override,
+                            hook=hook,
+                            error_message="Sorry, I encountered an error calling the AI model.",
+                            concurrent_tools=True,
+                            workspace=self.workspace,
+                            session_key=session.key if session else None,
+                            context_window_tokens=self.context_window_tokens,
+                            context_block_limit=self.context_block_limit,
+                            provider_retry_mode=self.provider_retry_mode,
+                            progress_callback=on_progress,
+                            retry_wait_callback=on_retry_wait,
+                            checkpoint_callback=_checkpoint,
+                            max_repeat_lookups=self.max_repeat_lookups,
+                            on_turn_saved=on_turn_saved,
+                            injection_callback=_drain_pending,
+                        )
                     )
-                )
+                finally:
+                    reset_file_states(file_state_token)
                 self._last_usage = result.usage
                 # Merge sub-agent token usage accumulated since last turn
                 if hasattr(self, "_delegate_tool"):
@@ -1345,6 +1358,14 @@ class AgentLoop:
                         )
                     else:
                         logger.warning("No response to publish for {}/{}", msg.channel, msg.chat_id)
+                    if msg.channel == "websocket":
+                        # Signal that the turn is fully complete (all tools executed,
+                        # final text streamed).  This lets WS clients know when to
+                        # definitively stop the loading indicator.
+                        await self.bus.publish_outbound(OutboundMessage(
+                            channel=msg.channel, chat_id=msg.chat_id,
+                            content="", metadata={**msg.metadata, "_turn_end": True},
+                        ))
                 except asyncio.CancelledError:
                     logger.info("Task cancelled for session {}", session_key)
                     # Preserve partial context from the interrupted turn so
@@ -1507,6 +1528,7 @@ class AgentLoop:
                 thread_id=thread_id,
                 session_summary=pending,
                 current_role=current_role,
+                sender_id=msg.sender_id,
             )
 
             async def _on_turn_saved_sys(messages: list[dict]) -> None:
@@ -1563,6 +1585,8 @@ class AgentLoop:
             outbound_metadata: dict[str, Any] = {}
             if channel == "slack" and key.startswith("slack:") and key.count(":") >= 2:
                 outbound_metadata["slack"] = {"thread_ts": key.split(":", 2)[2]}
+            if origin_message_id := msg.metadata.get("origin_message_id"):
+                outbound_metadata["origin_message_id"] = origin_message_id
             return OutboundMessage(
                 channel=channel,
                 chat_id=chat_id,
@@ -1651,6 +1675,7 @@ class AgentLoop:
                 channel=msg.channel,
                 chat_id=self._runtime_chat_id(msg),
                 thread_id=msg.metadata.get("message_thread_id"),
+                sender_id=msg.sender_id,
             )
 
         async def _bus_progress(
@@ -1685,6 +1710,16 @@ class AgentLoop:
                 )
             )
 
+        streamed_content = False
+        stream_callback = on_stream
+
+        async def _tracked_on_stream(delta: str) -> None:
+            nonlocal streamed_content
+            if delta:
+                streamed_content = True
+            if stream_callback is not None:
+                await stream_callback(delta)
+
         # Persist the triggering user message up front so a mid-turn crash
         # doesn't silently lose the prompt on recovery. ``media`` rides along
         # as raw on-disk paths — sanitized image blocks are stripped from
@@ -1703,7 +1738,7 @@ class AgentLoop:
         final_content, _, all_msgs, stop_reason, had_injections = await self._run_agent_loop(
             initial_messages,
             on_progress=on_progress or _bus_progress,
-            on_stream=on_stream,
+            on_stream=_tracked_on_stream if stream_callback is not None else None,
             on_stream_end=on_stream_end,
             on_retry_wait=_on_retry_wait,
             session=session,
@@ -1748,7 +1783,7 @@ class AgentLoop:
             ask_user_options_from_messages(all_msgs) if stop_reason == "ask_user" else [],
             msg.channel,
         )
-        if on_stream is not None and stop_reason == "completed":
+        if streamed_content and stop_reason not in {"ask_user", "error", "tool_error"}:
             meta["_streamed"] = True
             if is_provider_error_message(final_content):
                 meta["_streamed_error"] = True

@@ -46,7 +46,7 @@ class DelegateTool(Tool):
 
     @property
     def description(self) -> str:
-        agents = self._loader.list_all()
+        agents = self._safe_list_all()
         names = ", ".join(f"{a.name} ({a.description})" for a in agents)
         return (
             "Run a specialized sub-agent defined in agents/*.md files. "
@@ -58,7 +58,7 @@ class DelegateTool(Tool):
 
     @property
     def parameters(self) -> dict[str, Any]:
-        agents = self._loader.list_all()
+        agents = self._safe_list_all()
         names = [a.name for a in agents]
 
         # Build per-agent description with tools + model so the model
@@ -89,6 +89,13 @@ class DelegateTool(Tool):
             "properties": props,
             "required": ["agent", "task"],
         }
+
+    def _safe_list_all(self) -> list[AgentConfig]:
+        try:
+            return self._loader.list_all()
+        except (OSError, TypeError, ValueError):
+            logger.debug("delegate agent discovery unavailable", exc_info=True)
+            return []
 
     async def execute(self, agent: str, task: str, **_: Any) -> str:
         overrides = getattr(self, "_overrides", {}).get(agent)

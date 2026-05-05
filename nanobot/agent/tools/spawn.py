@@ -23,6 +23,10 @@ class SpawnTool(Tool):
         self._model_override: ContextVar[str | None] = ContextVar(
             "spawn_model_override", default=None
         )
+        self._origin_message_id: ContextVar[str | None] = ContextVar(
+            "spawn_origin_message_id",
+            default=None,
+        )
 
     def set_context(
         self,
@@ -45,6 +49,10 @@ class SpawnTool(Tool):
         )
         self._origin_thread_id.set(thread_id)
         self._model_override.set(model_override)
+
+    def set_origin_message_id(self, message_id: str | None) -> None:
+        """Set the source message id for downstream deduplication."""
+        self._origin_message_id.set(message_id)
 
     @property
     def name(self) -> str:
@@ -108,6 +116,7 @@ class SpawnTool(Tool):
             "session_key": self._session_key.get(),
             "subagent_id": subagent_id,
             "model_override": self._model_override.get(),
+            "origin_message_id": self._origin_message_id.get(),
         }
         try:
             return await self._manager.spawn(**spawn_kwargs)

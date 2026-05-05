@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 from contextvars import ContextVar
+from pathlib import Path
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
@@ -13,7 +14,12 @@ logger = logging.getLogger(__name__)
 
 
 class SessionSearchTool(Tool):
-    def __init__(self, store: SessionStore) -> None:
+    def __init__(self, store: SessionStore | None = None, workspace: Any | None = None) -> None:
+        if store is None:
+            if workspace is None:
+                raise TypeError("SessionSearchTool requires store or workspace")
+            store = SessionStore(Path(workspace) / "sessions" / "state.db")
+            store.migrate_from_jsonl(Path(workspace) / "sessions")
         self._store = store
         self._session_key: ContextVar[str | None] = ContextVar(
             "session_search_key", default=None
@@ -58,7 +64,13 @@ class SessionSearchTool(Tool):
     def read_only(self) -> bool:
         return True
 
-    async def execute(self, query: str = "", limit: int = 3, **_: Any) -> str:
+    async def execute(
+        self,
+        query: str = "",
+        limit: int = 3,
+        include_current_session: bool = False,
+        **_: Any,
+    ) -> str:
         limit = max(1, min(limit, 5))
 
         # Mode 1: Recent sessions browse (zero LLM cost)
@@ -66,7 +78,7 @@ class SessionSearchTool(Tool):
             return self._recent_sessions(limit)
 
         # Mode 2: Keyword search
-        return self._keyword_search(query.strip(), limit)
+        return self._keyword_search(query.strip(), limit, include_current_session)
 
     def _recent_sessions(self, limit: int) -> str:
         sessions = self._store.list_sessions_rich(limit=limit + 10)
@@ -92,7 +104,12 @@ class SessionSearchTool(Tool):
             "count": len(results),
         }, ensure_ascii=False)
 
-    def _keyword_search(self, query: str, limit: int) -> str:
+    def _keyword_search(
+        self,
+        query: str,
+        limit: int,
+        include_current_session: bool = False,
+    ) -> str:
         raw = self._store.search_messages(query, limit=50)
         if not raw:
             return json.dumps({
@@ -115,7 +132,7 @@ class SessionSearchTool(Tool):
         current_key = self._session_key.get()
         results = []
         for r in deduped:
-            if current_key and r["session_id"] == current_key:
+            if not include_current_session and current_key and r["session_id"] == current_key:
                 continue
             msgs = self._store.get_messages_as_conversation(r["session_id"])
             conversation = "\n".join(
