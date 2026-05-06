@@ -709,7 +709,7 @@ def test_is_allowed_rejects_invalid_legacy_telegram_sender_shapes() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_progress_keeps_message_in_topic() -> None:
+async def test_send_progress_is_suppressed_in_topic_when_trace_is_off() -> None:
     config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"])
     channel = TelegramChannel(config, MessageBus())
     channel._app = _FakeApp(lambda: None)
@@ -723,7 +723,7 @@ async def test_send_progress_keeps_message_in_topic() -> None:
         )
     )
 
-    assert channel._app.bot.sent_messages[0]["message_thread_id"] == 42
+    assert channel._app.bot.sent_messages == []
 
 
 @pytest.mark.asyncio
