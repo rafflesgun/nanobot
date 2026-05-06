@@ -22,7 +22,13 @@ from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import AgentDefaults, ExecToolConfig, WebToolsConfig
+from nanobot.config.schema import (
+    AgentDefaults,
+    AgentsConfig,
+    ExecToolConfig,
+    WebSearchConfig,
+    WebToolsConfig,
+)
 from nanobot.providers.base import LLMProvider
 from nanobot.utils.stats import StatsManager
 
@@ -94,14 +100,8 @@ class SubagentManager:
         extra_write: list[str] | None = None,
         disabled_skills: list[str] | None = None,
         max_iterations: int | None = None,
+        max_repeat_lookups: int | None = None,
     ):
-        from nanobot.config.schema import (
-            AgentsConfig,
-            ExecToolConfig,
-            WebSearchConfig,
-            WebToolsConfig,
-        )
-
         self.provider = provider
         self.workspace = workspace
         self.bus = bus
@@ -112,6 +112,7 @@ class SubagentManager:
         self.fallback_model = fallback_model
         self.fallback_models = fallback_models or []
         self.agents_config = agents_config or AgentsConfig()
+        defaults = self.agents_config.defaults
         self.provider_factory = provider_factory
         if web_config is not None:
             self.web_config = web_config
@@ -129,7 +130,13 @@ class SubagentManager:
         self.max_iterations = (
             max_iterations
             if max_iterations is not None
-            else AgentDefaults().max_tool_iterations
+            else defaults.max_tool_iterations
+        )
+        self.max_concurrent_subagents = defaults.max_concurrent_subagents
+        self.max_repeat_lookups = (
+            max_repeat_lookups
+            if max_repeat_lookups is not None
+            else defaults.max_repeat_lookups
         )
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
@@ -356,6 +363,7 @@ class SubagentManager:
                 error_message="Subagent task failed.",
                 concurrent_tools=False,
                 workspace=self.workspace,
+                max_repeat_lookups=self.max_repeat_lookups,
             )
             result = await self.runner.run(spec)
             final_result = result.final_content

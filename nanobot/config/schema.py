@@ -314,6 +314,7 @@ class AgentDefaults(Base):
     context_block_limit: int | None = None
     temperature: float = 0.1
     max_tool_iterations: int = 200
+    max_concurrent_subagents: int = Field(default=1, ge=1)
     max_tool_result_chars: int = 16_000
     max_repeat_lookups: int = (
         2  # Max times same tool call allowed before blocking (prevents infinite loops)

@@ -1003,12 +1003,10 @@ class Dream:
                 if event["status"] == "ok":
                     changelog.append(f"{event['name']}: {event['detail']}")
 
-        # Advance cursor — always, to avoid re-processing Phase 1
-        new_cursor = batch[-1]["cursor"]
-        self.store.set_last_dream_cursor(new_cursor)
-        self.store.compact_history()
-
+        # Only advance cursor on successful completion to prevent silent loss
         if result and result.stop_reason == "completed":
+            new_cursor = batch[-1]["cursor"]
+            self.store.set_last_dream_cursor(new_cursor)
             logger.info(
                 "Dream done: {} change(s), cursor advanced to {}",
                 len(changelog),
@@ -1017,10 +1015,11 @@ class Dream:
         else:
             reason = result.stop_reason if result else "exception"
             logger.warning(
-                "Dream incomplete ({}): cursor advanced to {}",
+                "Dream incomplete ({}): cursor NOT advanced, will retry next cron cycle",
                 reason,
-                new_cursor,
             )
+
+        self.store.compact_history()
 
         # Git auto-commit (only when there are actual changes)
         if changelog and self.store.git.is_initialized():

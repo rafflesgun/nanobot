@@ -107,6 +107,17 @@ class SpawnTool(Tool):
         **kwargs: Any,
     ) -> str:
         """Spawn a subagent to execute the given task."""
+        running_getter = getattr(self._manager, "get_running_count", None)
+        limit = getattr(self._manager, "max_concurrent_subagents", None)
+        if callable(running_getter) and isinstance(limit, int):
+            running = running_getter()
+            if running >= limit:
+                return (
+                    f"Cannot spawn subagent: concurrency limit reached "
+                    f"({running}/{limit} running). Wait for a running subagent "
+                    f"to complete before spawning a new one."
+                )
+
         spawn_kwargs: dict[str, Any] = {
             "task": task,
             "label": label,
@@ -129,4 +140,5 @@ class SpawnTool(Tool):
                 origin_channel=self._origin_channel.get(),
                 origin_chat_id=self._origin_chat_id.get(),
                 session_key=self._session_key.get(),
+                origin_message_id=self._origin_message_id.get(),
             )

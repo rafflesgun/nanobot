@@ -386,6 +386,7 @@ class AgentLoop:
             restrict_to_workspace=restrict_to_workspace,
             disabled_skills=disabled_skills,
             max_iterations=self.max_iterations,
+            max_repeat_lookups=self.max_repeat_lookups,
         )
         self._unified_session = unified_session
         self._max_messages = max_messages if max_messages > 0 else 120

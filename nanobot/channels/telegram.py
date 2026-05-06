@@ -1106,6 +1106,8 @@ class TelegramChannel(BaseChannel):
             return
 
         user = update.effective_user
+        if not self.is_allowed(self._sender_id(user)):
+            return
         await update.message.reply_text(
             f"👋 Hi {user.first_name}! I'm nanobot.\n\n"
             "Send me a message and I'll respond!\n"
@@ -1113,8 +1115,10 @@ class TelegramChannel(BaseChannel):
         )
 
     async def _on_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /help command, bypassing ACL so all users can access it."""
-        if not update.message:
+        """Handle /help command for allowed users only."""
+        if not update.message or not update.effective_user:
+            return
+        if not self.is_allowed(self._sender_id(update.effective_user)):
             return
         await update.message.reply_text(
             "🐈 nanobot commands:\n"
@@ -1764,6 +1768,9 @@ class TelegramChannel(BaseChannel):
             return
         message = update.message
         user = update.effective_user
+        sender_id = self._sender_id(user)
+        if not self.is_allowed(sender_id):
+            return
         self._remember_thread_context(message)
         text = message.text or ""
         if text.startswith("/"):
@@ -1775,7 +1782,7 @@ class TelegramChannel(BaseChannel):
             text = f"{command} {rest}".strip()
         text = self._normalize_telegram_command(text)
         await self._handle_message(
-            sender_id=self._sender_id(user),
+            sender_id=sender_id,
             chat_id=str(message.chat_id),
             content=text,
             metadata=self._build_message_metadata(message, user),
@@ -1793,6 +1800,8 @@ class TelegramChannel(BaseChannel):
         sender_id = self._sender_id(user)
         is_group = message.chat.type != "private"
 
+        if not self.is_allowed(sender_id):
+            return
         self._remember_thread_context(message)
 
         # Check group_policy for group chats
@@ -2333,6 +2342,8 @@ class TelegramChannel(BaseChannel):
         sender_id = self._sender_id(user)
         if not chat_id:
             logger.warning("Callback query without chat_id")
+            return
+        if not self.is_allowed(sender_id):
             return
         button_label = query.data or ""
         await query.answer()
