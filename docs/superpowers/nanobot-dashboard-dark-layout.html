@@ -1,0 +1,1100 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Nanobot Dashboard Dark Layout Prototype</title>
+  <style>
+    :root {
+      --bg: oklch(15% 0.012 255);
+      --surface: oklch(19% 0.014 255);
+      --surface-2: oklch(23% 0.014 255);
+      --fg: oklch(94% 0.006 255);
+      --muted: oklch(66% 0.012 255);
+      --border: oklch(29% 0.012 255);
+      --accent: oklch(64% 0.18 255);
+      --success: oklch(70% 0.14 145);
+      --warn: oklch(78% 0.14 85);
+      --danger: oklch(68% 0.17 25);
+
+      --font-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
+      --font-body: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+      --font-mono: ui-monospace, 'SF Mono', Menlo, Monaco, Consolas, monospace;
+
+      --radius: 14px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      min-height: 100%;
+      background: var(--bg);
+    }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      font-family: var(--font-body);
+      color: var(--fg);
+      background:
+        radial-gradient(circle at 72% -20%, oklch(35% 0.08 255 / 0.28), transparent 34rem),
+        linear-gradient(180deg, oklch(18% 0.014 255), var(--bg) 26rem);
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+
+    button {
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: 268px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      border-inline-end: 1px solid var(--border);
+      background: oklch(16% 0.012 255 / 0.9);
+      backdrop-filter: blur(18px);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 18px 16px 14px;
+    }
+
+    .brand-mark {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .logo {
+      display: grid;
+      place-items: center;
+      width: 30px;
+      height: 30px;
+      border: 1px solid color-mix(in oklch, var(--accent), var(--border) 58%);
+      border-radius: 9px;
+      background: oklch(21% 0.05 255);
+      color: var(--fg);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-family: var(--font-display);
+      font-size: 15px;
+      line-height: 1.1;
+      letter-spacing: -0.02em;
+    }
+
+    .brand p {
+      margin: 2px 0 0;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.2;
+    }
+
+    .icon-button {
+      display: inline-grid;
+      place-items: center;
+      width: 32px;
+      height: 32px;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: var(--surface);
+      color: var(--muted);
+    }
+
+    .nav-section {
+      padding: 10px;
+    }
+
+    .section-label {
+      margin: 10px 8px 7px;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 650;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .nav-item,
+    .subnav-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      width: 100%;
+      min-height: 34px;
+      padding: 8px 9px;
+      border: 1px solid transparent;
+      border-radius: 9px;
+      background: transparent;
+      color: var(--muted);
+      text-align: start;
+      font-size: 13px;
+      line-height: 1.2;
+    }
+
+    .nav-item + .nav-item,
+    .subnav-item + .subnav-item {
+      margin-block-start: 2px;
+    }
+
+    .nav-item.is-active,
+    .subnav-item.is-active {
+      border-color: var(--border);
+      background: var(--surface);
+      color: var(--fg);
+    }
+
+    .nav-left {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      min-width: 0;
+    }
+
+    .nav-icon {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: var(--border);
+    }
+
+    .is-active .nav-icon {
+      background: var(--accent);
+    }
+
+    .count {
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .sidebar-bottom {
+      margin-block-start: auto;
+      padding: 12px 10px;
+      border-block-start: 1px solid var(--border);
+    }
+
+    .connection-card {
+      padding: 11px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--surface);
+    }
+
+    .connection-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-block-end: 8px;
+    }
+
+    .connection-title {
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 24px;
+      padding: 4px 8px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface-2);
+      color: var(--fg);
+      font-size: 11px;
+      font-weight: 560;
+      white-space: nowrap;
+    }
+
+    .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--muted);
+    }
+
+    .dot.success {
+      background: var(--success);
+    }
+
+    .dot.warn {
+      background: var(--warn);
+    }
+
+    .dot.accent {
+      background: var(--accent);
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .mono {
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .main {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 18px;
+      min-height: 62px;
+      padding: 12px 22px;
+      border-block-end: 1px solid var(--border);
+      background: oklch(16% 0.012 255 / 0.82);
+      backdrop-filter: blur(18px);
+    }
+
+    .mobile-menu {
+      display: none;
+    }
+
+    .crumbs {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .crumbs strong {
+      color: var(--fg);
+      font-weight: 600;
+    }
+
+    .top-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 34px;
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: var(--surface);
+      color: var(--fg);
+      font-size: 12px;
+      font-weight: 560;
+      white-space: nowrap;
+    }
+
+    .button.primary {
+      border-color: color-mix(in oklch, var(--accent), black 10%);
+      background: var(--accent);
+      color: oklch(99% 0.002 255);
+    }
+
+    .content {
+      width: min(100%, 1440px);
+      margin-inline: auto;
+      padding: 22px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
+      gap: 16px;
+      align-items: stretch;
+      margin-block-end: 16px;
+    }
+
+    .hero-panel,
+    .card,
+    .subnav,
+    .table-panel,
+    .log-panel {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: oklch(19% 0.014 255 / 0.88);
+    }
+
+    .hero-panel {
+      min-height: 222px;
+      padding: 22px;
+      overflow: hidden;
+    }
+
+    .hero-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 18px;
+      margin-block-end: 24px;
+    }
+
+    .eyebrow {
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 650;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+    }
+
+    h2 {
+      margin: 6px 0 0;
+      font-family: var(--font-display);
+      font-size: clamp(28px, 4vw, 48px);
+      line-height: 1.02;
+      letter-spacing: -0.04em;
+      max-width: 780px;
+    }
+
+    .hero-copy {
+      max-width: 650px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.65;
+    }
+
+    .hero-metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-block-start: 22px;
+    }
+
+    .metric {
+      min-width: 0;
+      padding: 11px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--surface-2);
+    }
+
+    .metric-value {
+      font-family: var(--font-mono);
+      font-size: 20px;
+      font-weight: 650;
+      letter-spacing: -0.03em;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .metric-label {
+      margin-block-start: 5px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .runtime-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 14px;
+    }
+
+    .runtime-map {
+      flex: 1;
+      min-height: 136px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background:
+        linear-gradient(var(--border) 1px, transparent 1px),
+        linear-gradient(90deg, var(--border) 1px, transparent 1px),
+        oklch(14% 0.012 255);
+      background-size: 28px 28px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .node {
+      position: absolute;
+      display: grid;
+      place-items: center;
+      width: 48px;
+      height: 48px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--surface);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 650;
+    }
+
+    .node.main {
+      inset-block-start: 42px;
+      inset-inline-start: 42%;
+      border-color: color-mix(in oklch, var(--accent), var(--border) 35%);
+      color: var(--accent);
+    }
+
+    .node.a {
+      inset-block-start: 18px;
+      inset-inline-start: 12%;
+    }
+
+    .node.b {
+      inset-block-start: 88px;
+      inset-inline-start: 18%;
+    }
+
+    .node.c {
+      inset-block-start: 62px;
+      inset-inline-end: 14%;
+    }
+
+    .runtime-meta {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .mini-stat {
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 11px;
+      background: var(--surface-2);
+    }
+
+    .mini-stat strong {
+      display: block;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .mini-stat span {
+      display: block;
+      margin-block-start: 4px;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: 228px minmax(0, 1fr);
+      gap: 16px;
+      align-items: start;
+    }
+
+    .subnav {
+      position: sticky;
+      top: 84px;
+      padding: 10px;
+    }
+
+    .subnav-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 8px 8px 12px;
+      border-block-end: 1px solid var(--border);
+      margin-block-end: 8px;
+    }
+
+    .subnav-title strong {
+      font-size: 13px;
+    }
+
+    .subnav-title span {
+      display: block;
+      margin-block-start: 3px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .workgrid {
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .card {
+      padding: 16px;
+    }
+
+    .span-4 {
+      grid-column: span 4;
+    }
+
+    .span-5 {
+      grid-column: span 5;
+    }
+
+    .span-7 {
+      grid-column: span 7;
+    }
+
+    .span-12 {
+      grid-column: span 12;
+    }
+
+    .card-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-block-end: 14px;
+    }
+
+    .card h3,
+    .panel-header h3 {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 650;
+      letter-spacing: -0.01em;
+    }
+
+    .card p {
+      margin: 5px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .model-list,
+    .activity-list,
+    .settings-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .model-row,
+    .activity-row,
+    .setting-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 38px;
+      padding: 9px 10px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface-2);
+      font-size: 12px;
+    }
+
+    .row-title {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 560;
+    }
+
+    .row-sub {
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      white-space: nowrap;
+    }
+
+    .bars {
+      display: grid;
+      gap: 12px;
+      padding-block-start: 2px;
+    }
+
+    .bar-row {
+      display: grid;
+      grid-template-columns: 86px minmax(0, 1fr) 46px;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+    }
+
+    .bar-track {
+      height: 7px;
+      border-radius: 999px;
+      background: oklch(14% 0.012 255);
+      overflow: hidden;
+    }
+
+    .bar-fill {
+      height: 100%;
+      border-radius: inherit;
+      background: var(--fg);
+    }
+
+    .bar-fill.warn {
+      background: var(--warn);
+    }
+
+    .table-panel,
+    .log-panel {
+      overflow: hidden;
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 14px 16px;
+      border-block-end: 1px solid var(--border);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    th,
+    td {
+      padding: 11px 16px;
+      border-block-end: 1px solid var(--border);
+      text-align: start;
+      vertical-align: middle;
+      white-space: nowrap;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 650;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    tr:last-child td {
+      border-block-end: 0;
+    }
+
+    .table-scroll {
+      overflow-x: auto;
+    }
+
+    .log-body {
+      display: grid;
+      gap: 1px;
+      background: var(--border);
+    }
+
+    .log-line {
+      display: grid;
+      grid-template-columns: 76px 82px minmax(0, 1fr);
+      gap: 12px;
+      padding: 10px 16px;
+      background: oklch(17% 0.012 255);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+
+    .log-line span:nth-child(1),
+    .log-line span:nth-child(2) {
+      color: var(--muted);
+    }
+
+    .mobile-tabs {
+      display: none;
+      gap: 6px;
+      overflow-x: auto;
+      padding: 10px 14px;
+      border-block-end: 1px solid var(--border);
+      background: var(--surface);
+    }
+
+    .mobile-tabs .pill {
+      flex: 0 0 auto;
+    }
+
+    .implementation-note {
+      margin-block-start: 16px;
+      padding: 14px 16px;
+      border: 1px dashed color-mix(in oklch, var(--accent), var(--border) 55%);
+      border-radius: var(--radius);
+      background: oklch(20% 0.028 255 / 0.72);
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .implementation-note strong {
+      color: var(--fg);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.001ms !important;
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+      }
+    }
+
+    @media (max-width: 1180px) {
+      .hero {
+        grid-template-columns: 1fr;
+      }
+
+      .workspace {
+        grid-template-columns: 196px minmax(0, 1fr);
+      }
+
+      .span-4,
+      .span-5,
+      .span-7 {
+        grid-column: span 6;
+      }
+    }
+
+    @media (max-width: 920px) {
+      .app {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        display: none;
+      }
+
+      .mobile-menu {
+        display: inline-grid;
+      }
+
+      .mobile-tabs {
+        display: flex;
+      }
+
+      .topbar {
+        grid-template-columns: auto minmax(0, 1fr);
+        padding: 10px 14px;
+      }
+
+      .top-actions .button:not(.primary),
+      .top-actions .pill {
+        display: none;
+      }
+
+      .content {
+        padding: 14px;
+      }
+
+      .workspace {
+        grid-template-columns: 1fr;
+      }
+
+      .subnav {
+        position: static;
+        display: none;
+      }
+
+      .hero-panel {
+        padding: 18px;
+      }
+
+      .hero-metrics {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .span-4,
+      .span-5,
+      .span-7,
+      .span-12 {
+        grid-column: span 12;
+      }
+    }
+
+    @media (max-width: 620px) {
+      .crumbs {
+        font-size: 11px;
+      }
+
+      .topbar {
+        min-height: 56px;
+      }
+
+      .content {
+        padding: 10px;
+      }
+
+      .hero-panel,
+      .card {
+        border-radius: 12px;
+        padding: 14px;
+      }
+
+      .hero-head {
+        flex-direction: column;
+        margin-block-end: 16px;
+      }
+
+      h2 {
+        font-size: 30px;
+      }
+
+      .hero-metrics {
+        grid-template-columns: 1fr;
+      }
+
+      .runtime-meta {
+        grid-template-columns: 1fr;
+      }
+
+      .workgrid {
+        gap: 10px;
+      }
+
+      .bar-row {
+        grid-template-columns: 74px minmax(0, 1fr) 40px;
+      }
+
+      .panel-header {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .log-line {
+        grid-template-columns: 1fr;
+        gap: 2px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" aria-label="Primary navigation">
+      <div class="brand">
+        <div class="brand-mark">
+          <div class="logo">nb</div>
+          <div>
+            <h1>nanobot</h1>
+            <p>local agent console</p>
+          </div>
+        </div>
+        <button class="icon-button" aria-label="Collapse sidebar">⌘</button>
+      </div>
+
+      <nav class="nav-section" aria-label="Main">
+        <div class="section-label">Workspace</div>
+        <button class="nav-item is-active"><span class="nav-left"><span class="nav-icon"></span>Overview</span><span class="count">01</span></button>
+        <button class="nav-item"><span class="nav-left"><span class="nav-icon"></span>Chat</span><span class="count">18</span></button>
+        <button class="nav-item"><span class="nav-left"><span class="nav-icon"></span>Instances</span><span class="count">04</span></button>
+        <button class="nav-item"><span class="nav-left"><span class="nav-icon"></span>Manage</span><span class="count">08</span></button>
+        <button class="nav-item"><span class="nav-left"><span class="nav-icon"></span>Logs</span><span class="count">live</span></button>
+      </nav>
+
+      <nav class="nav-section" aria-label="Pinned sessions">
+        <div class="section-label">Pinned chats</div>
+        <button class="nav-item"><span class="nav-left"><span class="nav-icon"></span>Release checklist</span></button>
+        <button class="nav-item"><span class="nav-left"><span class="nav-icon"></span>Image pipeline</span></button>
+        <button class="nav-item"><span class="nav-left"><span class="nav-icon"></span>Router debug</span></button>
+      </nav>
+
+      <div class="sidebar-bottom">
+        <div class="connection-card">
+          <div class="connection-row">
+            <div class="connection-title">Gateway</div>
+            <span class="pill"><span class="dot success"></span>online</span>
+          </div>
+          <div class="muted mono" style="font-size: 11px; line-height: 1.5;">ws://127.0.0.1:8765<br>model: claude-sonnet-4.5</div>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <button class="icon-button mobile-menu" aria-label="Open navigation">☰</button>
+        <div class="crumbs"><span>nanobot</span><span>/</span><strong>Dashboard</strong><span>/</span><span>Alpha instance</span></div>
+        <div class="top-actions">
+          <span class="pill"><span class="dot success"></span>Sample data</span>
+          <button class="button">Refresh</button>
+          <button class="button primary">New chat</button>
+        </div>
+      </header>
+
+      <div class="mobile-tabs" aria-label="Mobile navigation">
+        <span class="pill"><span class="dot success"></span>Overview</span>
+        <span class="pill">Chat</span>
+        <span class="pill">Instances</span>
+        <span class="pill">Manage</span>
+        <span class="pill">Logs</span>
+      </div>
+
+      <section class="content">
+        <div class="hero">
+          <section class="hero-panel" aria-labelledby="dashboard-title">
+            <div class="hero-head">
+              <div>
+                <div class="eyebrow">Dark dashboard reference</div>
+                <h2 id="dashboard-title">A management-console layout for nanobot.</h2>
+              </div>
+              <span class="pill">For opencode handoff</span>
+            </div>
+            <p class="hero-copy">This is the visual reference opencode should implement inside nanobot-web: persistent sidebar, compact header actions, selected-instance subnavigation, dense operational cards, status tables, and a live log stream. The layout borrows structure from the CLI proxy management center while keeping nanobot visually original.</p>
+            <div class="hero-metrics" aria-label="Runtime summary">
+              <div class="metric"><div class="metric-value">4</div><div class="metric-label">instances</div></div>
+              <div class="metric"><div class="metric-value">18</div><div class="metric-label">active threads</div></div>
+              <div class="metric"><div class="metric-value">312ms</div><div class="metric-label">median response</div></div>
+              <div class="metric"><div class="metric-value">0</div><div class="metric-label">blocked streams</div></div>
+            </div>
+          </section>
+
+          <aside class="hero-panel runtime-panel" aria-label="Runtime topology">
+            <div class="card-head" style="margin: 0;">
+              <div>
+                <h3>Runtime topology</h3>
+                <p>Selected instance: Alpha</p>
+              </div>
+              <span class="pill"><span class="dot success"></span>healthy</span>
+            </div>
+            <div class="runtime-map" aria-hidden="true">
+              <div class="node a">api</div>
+              <div class="node b">fs</div>
+              <div class="node main">nb</div>
+              <div class="node c">llm</div>
+            </div>
+            <div class="runtime-meta">
+              <div class="mini-stat"><strong>24.1MB</strong><span>event buffer</span></div>
+              <div class="mini-stat"><strong>7m 42s</strong><span>current uptime</span></div>
+            </div>
+          </aside>
+        </div>
+
+        <div class="workspace">
+          <aside class="subnav" aria-label="Instance management">
+            <div class="subnav-title">
+              <div><strong>Alpha</strong><span>instance controls</span></div>
+              <span class="dot success"></span>
+            </div>
+            <button class="subnav-item is-active"><span>Summary</span><span class="count">⌘1</span></button>
+            <button class="subnav-item"><span>Model routing</span><span class="count">⌘2</span></button>
+            <button class="subnav-item"><span>Tools</span><span class="count">⌘3</span></button>
+            <button class="subnav-item"><span>Memory</span><span class="count">⌘4</span></button>
+            <button class="subnav-item"><span>Credentials</span><span class="count">⌘5</span></button>
+            <button class="subnav-item"><span>Restart</span><span class="count">safe</span></button>
+          </aside>
+
+          <div class="workgrid">
+            <section class="card span-4">
+              <div class="card-head">
+                <div><h3>Connection state</h3><p>Management controls stay near the top instead of buried in settings.</p></div>
+                <span class="pill"><span class="dot success"></span>ready</span>
+              </div>
+              <div class="settings-list">
+                <div class="setting-row"><span class="row-title">Bootstrap token</span><span class="row-sub">valid</span></div>
+                <div class="setting-row"><span class="row-title">WebSocket channel</span><span class="row-sub">open</span></div>
+                <div class="setting-row"><span class="row-title">Workspace path</span><span class="row-sub">.nanobot</span></div>
+              </div>
+            </section>
+
+            <section class="card span-4">
+              <div class="card-head">
+                <div><h3>Model routing</h3><p>Compact provider status, management-center style.</p></div>
+                <button class="button">Edit</button>
+              </div>
+              <div class="model-list">
+                <div class="model-row"><span class="row-title">Claude Sonnet 4.5</span><span class="pill"><span class="dot success"></span>primary</span></div>
+                <div class="model-row"><span class="row-title">Gemini 2.5 Pro</span><span class="pill">fallback</span></div>
+                <div class="model-row"><span class="row-title">Local tools</span><span class="pill"><span class="dot warn"></span>scoped</span></div>
+              </div>
+            </section>
+
+            <section class="card span-4">
+              <div class="card-head">
+                <div><h3>Capacity</h3><p>Tabular, glanceable usage instead of large decorative cards.</p></div>
+                <span class="muted mono" style="font-size: 11px;">last 1h</span>
+              </div>
+              <div class="bars">
+                <div class="bar-row"><span>Tokens</span><div class="bar-track"><div class="bar-fill" style="width: 64%;"></div></div><span class="mono muted">64%</span></div>
+                <div class="bar-row"><span>Tools</span><div class="bar-track"><div class="bar-fill" style="width: 42%;"></div></div><span class="mono muted">42%</span></div>
+                <div class="bar-row"><span>Memory</span><div class="bar-track"><div class="bar-fill warn" style="width: 78%;"></div></div><span class="mono muted">78%</span></div>
+              </div>
+            </section>
+
+            <section class="table-panel span-7">
+              <div class="panel-header">
+                <div><h3>Instances</h3><p class="muted" style="margin: 4px 0 0; font-size: 12px;">Status, provider, uptime, queue, and instance actions.</p></div>
+                <button class="button">Add instance</button>
+              </div>
+              <div class="table-scroll">
+                <table>
+                  <thead>
+                    <tr><th>Name</th><th>Status</th><th>Provider</th><th>Uptime</th><th>Queue</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr><td>Alpha</td><td><span class="pill"><span class="dot success"></span>online</span></td><td class="mono">claude</td><td class="mono">7m 42s</td><td class="mono">0</td></tr>
+                    <tr><td>Beta</td><td><span class="pill">idle</span></td><td class="mono">gemini</td><td class="mono">2h 10m</td><td class="mono">2</td></tr>
+                    <tr><td>Gamma</td><td><span class="pill"><span class="dot warn"></span>limited</span></td><td class="mono">local</td><td class="mono">41m</td><td class="mono">1</td></tr>
+                    <tr><td>Delta</td><td><span class="pill">sleep</span></td><td class="mono">auto</td><td class="mono">--</td><td class="mono">0</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="card span-5">
+              <div class="card-head">
+                <div><h3>Implementation map</h3><p>How opencode should translate this into nanobot-web.</p></div>
+                <button class="button">Copy spec</button>
+              </div>
+              <div class="activity-list">
+                <div class="activity-row"><span class="row-title">Shell</span><span class="row-sub">sidebar + topbar</span></div>
+                <div class="activity-row"><span class="row-title">Routes</span><span class="row-sub">overview/chat/manage/logs</span></div>
+                <div class="activity-row"><span class="row-title">Data</span><span class="row-sub">replace samples</span></div>
+                <div class="activity-row"><span class="row-title">Theme</span><span class="row-sub">dark tokens</span></div>
+              </div>
+            </section>
+
+            <section class="log-panel span-12">
+              <div class="panel-header">
+                <div><h3>Live logs</h3><p class="muted" style="margin: 4px 0 0; font-size: 12px;">Dense console area on a restrained dark canvas.</p></div>
+                <div class="top-actions"><button class="button">Pause</button><button class="button">Download</button></div>
+              </div>
+              <div class="log-body">
+                <div class="log-line"><span>11:42:08</span><span>INFO</span><span>alpha websocket stream settled after 18 messages</span></div>
+                <div class="log-line"><span>11:41:59</span><span>TOOL</span><span>filesystem scope checked for project workspace</span></div>
+                <div class="log-line"><span>11:41:41</span><span>MODEL</span><span>claude-sonnet-4.5 selected by provider=auto</span></div>
+                <div class="log-line"><span>11:40:22</span><span>WARN</span><span>memory budget approaching compaction threshold</span></div>
+              </div>
+            </section>
+
+            <section class="span-12 implementation-note">
+              <strong>Prompt for opencode:</strong> “Use this artifact as a design reference for nanobot-web. Implement a dark dashboard shell with these tokens, the same sidebar/topbar/subnav structure, responsive collapse behavior, compact status cards, instance table, and log stream. Do not copy sample data; bind the components to the existing nanobot-web state and routes.”
+            </section>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
