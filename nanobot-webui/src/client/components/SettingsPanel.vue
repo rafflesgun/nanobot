@@ -50,16 +50,17 @@ async function saveSettings() {
   if (!instance) return
 
   const sequence = ++saveSequence
+  const loadSnapshot = loadSequence
   error.value = ''
   saving.value = true
   try {
     const updated = await patchInstanceSettings(instance.id, props.token, { model: model.value, provider: provider.value })
-    if (sequence !== saveSequence) return
+    if (sequence !== saveSequence || loadSnapshot !== loadSequence) return
     settings.value = updated
     model.value = updated.agent.model
     provider.value = updated.agent.provider
   } catch (err) {
-    if (sequence !== saveSequence) return
+    if (sequence !== saveSequence || loadSnapshot !== loadSequence) return
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
     if (sequence === saveSequence) saving.value = false
