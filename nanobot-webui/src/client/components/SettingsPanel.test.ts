@@ -52,9 +52,9 @@ describe('SettingsPanel', () => {
 
     resolveReload(settings('reloaded'))
     await vi.waitFor(() => expect((wrapper.get('input[name="model"]').element as HTMLInputElement).value).toBe('reloaded'))
-    resolveSave(settings('saved'))
-
     await vi.waitFor(() => expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeUndefined())
+
+    resolveSave(settings('saved'))
     expect((wrapper.get('input[name="model"]').element as HTMLInputElement).value).toBe('reloaded')
   })
 })

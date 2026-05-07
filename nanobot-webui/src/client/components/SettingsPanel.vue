@@ -24,6 +24,10 @@ async function loadSettings() {
   model.value = ''
   provider.value = ''
   error.value = ''
+  if (saving.value) {
+    saveSequence++
+    saving.value = false
+  }
 
   if (!instance) {
     loading.value = false
