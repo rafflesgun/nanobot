@@ -10,8 +10,9 @@ export type StateTopic = {
   name: string
   selectedIds: string[]
   transcript: {
-    entries: Array<{ id: string; role: string; label: string; text: string }>
+    entries: Array<{ id: number; instanceId: string; chatId: string; role: string; label: string; event: string; text: string; kind?: string; title?: string }>
     debugEvents: unknown[]
+    nextEntryId?: number
   }
 }
 

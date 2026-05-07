@@ -93,6 +93,18 @@ function switchTopic(topicId: string) {
   selectedIds.value = [...selectedTopic.value.selectedIds]
 }
 
+function normalizeTopic(topic: Topic): Topic {
+  const entries = Array.isArray(topic.transcript?.entries) ? topic.transcript.entries : []
+  const debugEvents = Array.isArray(topic.transcript?.debugEvents) ? topic.transcript.debugEvents : []
+  const maxEntryId = entries.reduce((max, entry) => Math.max(max, Number.isFinite(entry.id) ? entry.id : 0), 0)
+  const nextEntryId = Number.isFinite(topic.transcript?.nextEntryId) ? topic.transcript.nextEntryId : maxEntryId + 1
+  return {
+    ...topic,
+    selectedIds: Array.isArray(topic.selectedIds) ? topic.selectedIds : [],
+    transcript: { entries, debugEvents, nextEntryId }
+  }
+}
+
 function persistTopics() {
   void props.saveTopics(props.token, topics.value).catch(() => {})
 }
@@ -114,7 +126,7 @@ onMounted(() => {
   void props.loadTopics(props.token)
     .then((storedTopics) => {
       if (storedTopics.length === 0) return
-      topics.value = storedTopics as Topic[]
+      topics.value = (storedTopics as Topic[]).map(normalizeTopic)
       selectedTopicId.value = topics.value[0].id
       selectedIds.value = [...topics.value[0].selectedIds]
     })

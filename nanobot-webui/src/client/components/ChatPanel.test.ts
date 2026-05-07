@@ -239,4 +239,27 @@ describe('ChatPanel', () => {
       transcript: expect.objectContaining({ entries: [expect.objectContaining({ text: 'persist me' })] })
     })]))
   })
+
+  it('normalizes legacy persisted topics before appending transcript entries', async () => {
+    const socket = new FakeSocket()
+    const saveTopics = vi.fn().mockResolvedValue(undefined)
+    const wrapper = mount(ChatPanel, {
+      props: {
+        token: 'dashboard',
+        createSocket: () => socket,
+        loadTopics: vi.fn().mockResolvedValue([{ id: 'ops', name: 'Ops', selectedIds: ['alpha'], transcript: { entries: [], debugEvents: [] } }]),
+        saveTopics,
+        instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }]
+      }
+    })
+
+    await vi.waitFor(() => expect(wrapper.text()).toContain('Ops'))
+    socket.emit('chat_event', { instanceId: 'alpha', event: 'delta', chatId: 'c1', text: 'legacy topic reply' })
+    await wrapper.vm.$nextTick()
+
+    await vi.waitFor(() => expect(saveTopics).toHaveBeenLastCalledWith('dashboard', [expect.objectContaining({
+      id: 'ops',
+      transcript: expect.objectContaining({ nextEntryId: 2, entries: [expect.objectContaining({ id: 1, text: 'legacy topic reply' })] })
+    })]))
+  })
 })
