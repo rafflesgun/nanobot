@@ -489,12 +489,22 @@ class ApiConfig(Base):
     timeout: float = 120.0
 
 
+class AdminConfig(Base):
+    """Authenticated admin API exposed by the gateway HTTP listener."""
+
+    enabled: bool = False
+    token: str = ""
+    max_log_tail_lines: int = Field(default=1000, ge=1, le=10000)
+    request_timeout_s: float = Field(default=10.0, ge=1.0, le=120.0)
+
+
 class GatewayConfig(Base):
     """Gateway/server configuration."""
 
     host: str = "127.0.0.1"  # Safer default: local-only bind.
     port: int = 18790
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+    admin: AdminConfig = Field(default_factory=AdminConfig)
 
 
 class WebSearchConfig(Base):
