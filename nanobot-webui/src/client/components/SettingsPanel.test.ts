@@ -57,4 +57,49 @@ describe('SettingsPanel', () => {
     resolveSave(settings('saved'))
     expect((wrapper.get('input[name="model"]').element as HTMLInputElement).value).toBe('reloaded')
   })
+
+  it('switches between GUI, JSON, and Markdown settings editors', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({ agent: { model: 'gpt-4', provider: 'openai', resolved_provider: 'openai', has_api_key: true }, requires_restart: false })
+    }))
+
+    const wrapper = mount(SettingsPanel, {
+      props: { token: 'dashboard', instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }] }
+    })
+
+    await vi.waitFor(() => expect((wrapper.get('input[name="model"]').element as HTMLInputElement).value).toBe('gpt-4'))
+    expect(wrapper.text()).toContain('GUI Form')
+    expect(wrapper.find('[data-testid="settings-toolbar"]').exists()).toBe(true)
+
+    await wrapper.get('[data-mode="json"]').trigger('click')
+    expect((wrapper.get('[data-testid="settings-json"]').element as HTMLTextAreaElement).value).toContain('"model": "gpt-4"')
+
+    await wrapper.get('[data-mode="markdown"]').trigger('click')
+    expect(wrapper.get('[data-testid="settings-markdown"]').text()).toContain('Model: `gpt-4`')
+    expect(wrapper.get('[data-testid="settings-markdown"]').text()).toContain('Provider: `openai`')
+
+    await wrapper.get('[data-mode="gui"]').trigger('click')
+    expect(wrapper.find('input[name="model"]').exists()).toBe(true)
+  })
+
+  it('shows invalid JSON errors without saving', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({ agent: { model: 'gpt-4', provider: 'openai', resolved_provider: 'openai', has_api_key: true }, requires_restart: false })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const wrapper = mount(SettingsPanel, {
+      props: { token: 'dashboard', instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }] }
+    })
+
+    await vi.waitFor(() => expect((wrapper.get('input[name="model"]').element as HTMLInputElement).value).toBe('gpt-4'))
+    await wrapper.get('[data-mode="json"]').trigger('click')
+    await wrapper.get('[data-testid="settings-json"]').setValue('{ bad json')
+    await wrapper.get('form').trigger('submit')
+
+    expect(wrapper.text()).toContain('Invalid JSON')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
 })

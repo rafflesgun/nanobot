@@ -9,6 +9,8 @@ const settings = ref<InstanceSettings | null>(null)
 const model = ref('')
 const provider = ref('')
 const error = ref('')
+const mode = ref<'gui' | 'json' | 'markdown'>('gui')
+const jsonDraft = ref('')
 const loading = ref(false)
 const saving = ref(false)
 let loadSequence = 0
@@ -16,6 +18,26 @@ let saveSequence = 0
 
 const enabledInstances = computed(() => props.instances.filter((instance) => instance.enabled))
 const selectedInstance = computed(() => enabledInstances.value.find((instance) => instance.id === selectedInstanceId.value))
+const settingsSnapshot = computed<InstanceSettings | null>(() => settings.value
+  ? { ...settings.value, agent: { ...settings.value.agent, model: model.value, provider: provider.value } }
+  : null)
+const markdownSummary = computed(() => {
+  const snapshot = settingsSnapshot.value
+  if (!snapshot) return 'No settings loaded.'
+  return [
+    `Model: \`${snapshot.agent.model || 'unset'}\``,
+    `Provider: \`${snapshot.agent.provider || 'unset'}\``,
+    `Resolved provider: \`${snapshot.agent.resolved_provider || 'unknown'}\``,
+    `API key: \`${snapshot.agent.has_api_key ? 'configured' : 'missing'}\``
+  ].join('\n')
+})
+
+function selectMode(nextMode: 'gui' | 'json' | 'markdown') {
+  if (nextMode === 'json' && settingsSnapshot.value) {
+    jsonDraft.value = JSON.stringify(settingsSnapshot.value, null, 2)
+  }
+  mode.value = nextMode
+}
 
 async function loadSettings() {
   const instance = selectedInstance.value
@@ -23,6 +45,7 @@ async function loadSettings() {
   settings.value = null
   model.value = ''
   provider.value = ''
+  jsonDraft.value = ''
   error.value = ''
   if (saving.value) {
     saveSequence++
@@ -41,6 +64,7 @@ async function loadSettings() {
     settings.value = loaded
     model.value = loaded.agent.model
     provider.value = loaded.agent.provider
+    jsonDraft.value = JSON.stringify(loaded, null, 2)
   } catch (err) {
     if (sequence !== loadSequence) return
     error.value = err instanceof Error ? err.message : String(err)
@@ -56,13 +80,27 @@ async function saveSettings() {
   const sequence = ++saveSequence
   const loadSnapshot = loadSequence
   error.value = ''
+  let patch = { model: model.value, provider: provider.value }
+  if (mode.value === 'json') {
+    try {
+      const parsed = JSON.parse(jsonDraft.value) as InstanceSettings
+      if (typeof parsed?.agent?.model !== 'string' || typeof parsed?.agent?.provider !== 'string') {
+        throw new Error('missing agent model or provider')
+      }
+      patch = { model: parsed.agent.model, provider: parsed.agent.provider }
+    } catch (err) {
+      error.value = `Invalid JSON${err instanceof Error ? `: ${err.message}` : ''}`
+      return
+    }
+  }
   saving.value = true
   try {
-    const updated = await patchInstanceSettings(instance.id, props.token, { model: model.value, provider: provider.value })
+    const updated = await patchInstanceSettings(instance.id, props.token, patch)
     if (sequence !== saveSequence || loadSnapshot !== loadSequence) return
     settings.value = updated
     model.value = updated.agent.model
     provider.value = updated.agent.provider
+    jsonDraft.value = JSON.stringify(updated, null, 2)
   } catch (err) {
     if (sequence !== saveSequence || loadSnapshot !== loadSequence) return
     error.value = err instanceof Error ? err.message : String(err)
@@ -104,14 +142,24 @@ watch([selectedInstanceId, () => props.token], loadSettings, { immediate: true }
       <p v-if="error" class="error-text" role="alert">{{ error }}</p>
 
       <form class="settings-form" @submit.prevent="saveSettings">
-        <label>
-          <span>Model</span>
-          <input v-model="model" name="model" type="text" autocomplete="off">
-        </label>
-        <label>
-          <span>Provider</span>
-          <input v-model="provider" name="provider" type="text" autocomplete="off">
-        </label>
+        <div class="settings-toolbar" data-testid="settings-toolbar">
+          <button type="button" data-mode="gui" :class="{ active: mode === 'gui' }" @click="selectMode('gui')">GUI Form</button>
+          <button type="button" data-mode="json" :class="{ active: mode === 'json' }" @click="selectMode('json')">JSON</button>
+          <button type="button" data-mode="markdown" :class="{ active: mode === 'markdown' }" @click="selectMode('markdown')">Markdown</button>
+        </div>
+        <p v-if="!settings" class="empty-state">Settings editor is available after loading completes.</p>
+        <template v-else-if="mode === 'gui'">
+          <label>
+            <span>Model</span>
+            <input v-model="model" name="model" type="text" autocomplete="off">
+          </label>
+          <label>
+            <span>Provider</span>
+            <input v-model="provider" name="provider" type="text" autocomplete="off">
+          </label>
+        </template>
+        <textarea v-else-if="mode === 'json'" v-model="jsonDraft" data-testid="settings-json" class="settings-json" spellcheck="false" />
+        <pre v-else data-testid="settings-markdown" class="settings-markdown">{{ markdownSummary }}</pre>
         <button type="submit" :disabled="saving || loading">{{ saving ? 'Saving...' : 'Save settings' }}</button>
       </form>
 
@@ -162,10 +210,46 @@ watch([selectedInstanceId, () => props.token], loadSettings, { immediate: true }
   gap: 0.45rem;
 }
 
+.settings-toolbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-start;
+}
+
+.settings-toolbar button {
+  border-color: rgba(148, 163, 184, 0.28);
+  background: rgba(15, 23, 42, 0.72);
+}
+
+.settings-toolbar button.active {
+  border-color: rgba(56, 189, 248, 0.62);
+  background: rgba(14, 165, 233, 0.18);
+  color: #e0f2fe;
+}
+
 .instance-select span,
 .settings-form span {
   color: #cbd5e1;
   font-weight: 700;
+}
+
+.settings-json,
+.settings-markdown {
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 0.75rem;
+  background: rgba(2, 6, 23, 0.62);
+  color: #dbeafe;
+  font: 0.88rem/1.6 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  margin: 0;
+  min-height: 14rem;
+  padding: 0.85rem;
+  white-space: pre-wrap;
+}
+
+.settings-json {
+  resize: vertical;
 }
 
 button {
