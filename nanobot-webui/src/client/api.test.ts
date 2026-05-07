@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fetchInstanceLogs, fetchInstanceSettings, fetchInstanceStatus, fetchLogTail, fetchStateInstances, fetchStateTopics, fetchWebuiLogs, patchInstanceSettings, saveStateInstances, saveStateTopics } from './api'
+import { deleteSubagent, fetchInstanceLogs, fetchInstanceSettings, fetchInstanceStatus, fetchLogTail, fetchStateInstances, fetchStateTopics, fetchSubagent, fetchSubagents, fetchUsage, fetchWebuiLogs, patchInstanceSettings, saveStateInstances, saveStateTopics, saveSubagent } from './api'
 
 describe('admin API helpers', () => {
   afterEach(() => {
@@ -59,6 +59,62 @@ describe('admin API helpers', () => {
       method: 'PATCH',
       headers: { authorization: 'Bearer dashboard', 'content-type': 'application/json' },
       body: JSON.stringify({ model: 'gpt-4.1-mini', provider: 'openai' })
+    })
+  })
+
+  it('loads usage through the dashboard proxy', async () => {
+    const usage = {
+      totals: { count: 1, input_tokens: 10, output_tokens: 5, total_tokens: 15, cached_tokens: 0 },
+      by_day: [],
+      by_model: [],
+      by_channel: [],
+      by_session: [],
+      pricing: { configured: false, message: 'Pricing is not configured; showing token usage only.' }
+    }
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue(usage) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchUsage('alpha', 'dashboard', 14)).resolves.toEqual(usage)
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/instances/alpha/usage?days=14', { headers: { authorization: 'Bearer dashboard' } })
+  })
+
+  it('loads subagent lists and markdown through the dashboard proxy', async () => {
+    const subagents = [{ name: 'ops-triage', description: 'Triage', model: 'test/model', source: 'workspace', editable: true }]
+    const detail = { ...subagents[0], content: '---\nname: ops-triage\n---\n\nBody' }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: vi.fn().mockResolvedValue({ subagents }) })
+      .mockResolvedValueOnce({ ok: true, json: vi.fn().mockResolvedValue(detail) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchSubagents('alpha', 'dashboard')).resolves.toEqual(subagents)
+    await expect(fetchSubagent('alpha', 'ops-triage', 'dashboard')).resolves.toEqual(detail)
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/instances/alpha/subagents', { headers: { authorization: 'Bearer dashboard' } })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/instances/alpha/subagents/ops-triage', { headers: { authorization: 'Bearer dashboard' } })
+  })
+
+  it('saves and deletes subagents through the dashboard proxy', async () => {
+    const content = '---\nname: ops-triage\n---\n\nBody'
+    const saved = { name: 'ops-triage', description: 'Triage', model: 'test/model', source: 'workspace', editable: true }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: vi.fn().mockResolvedValue({ subagent: saved }) })
+      .mockResolvedValueOnce({ ok: true, json: vi.fn().mockResolvedValue({ deleted: true }) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(saveSubagent('alpha', 'ops-triage', 'dashboard', content)).resolves.toEqual(saved)
+    await expect(deleteSubagent('alpha', 'ops-triage', 'dashboard')).resolves.toEqual({ deleted: true })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/instances/alpha/subagents/ops-triage', {
+      method: 'PUT',
+      headers: { authorization: 'Bearer dashboard', 'content-type': 'application/json' },
+      body: JSON.stringify({ content })
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/instances/alpha/subagents/ops-triage', {
+      method: 'DELETE',
+      headers: { authorization: 'Bearer dashboard' }
     })
   })
 

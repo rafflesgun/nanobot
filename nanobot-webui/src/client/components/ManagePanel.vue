@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import type { PublicInstance } from '../api'
 import LogsPanel from './LogsPanel.vue'
 import SettingsPanel from './SettingsPanel.vue'
+import SubagentsPanel from './SubagentsPanel.vue'
 
 const props = defineProps<{ token: string; instances: PublicInstance[] }>()
 
@@ -10,10 +11,10 @@ type ManageSection = 'settings' | 'subagents' | 'logs' | 'usage' | 'costing' | '
 
 const sections: Array<{ id: ManageSection; label: string; unsupported?: string }> = [
   { id: 'settings', label: 'Settings' },
-  { id: 'subagents', label: 'Subagents', unsupported: 'Subagents API is not available yet' },
+  { id: 'subagents', label: 'Subagents' },
   { id: 'logs', label: 'Logs' },
-  { id: 'usage', label: 'Usage', unsupported: 'Usage API is not available yet' },
-  { id: 'costing', label: 'Costing', unsupported: 'Costing API is not available yet' },
+  { id: 'usage', label: 'Usage' },
+  { id: 'costing', label: 'Costing' },
   { id: 'session', label: 'Session', unsupported: 'Session API is not available yet' },
   { id: 'memory', label: 'Memory', unsupported: 'Memory API is not available yet' },
   { id: 'restart', label: 'Restart', unsupported: 'Restart API is not available yet' }
@@ -62,7 +63,12 @@ watch(enabledInstances, (instances) => {
 
       <div class="manage-content">
         <SettingsPanel v-if="activeSection === 'settings'" :token="token" :instances="selectedInstances" />
+        <SubagentsPanel v-else-if="activeSection === 'subagents'" :token="token" :instances="selectedInstances" />
         <LogsPanel v-else-if="activeSection === 'logs'" :token="token" :instances="selectedInstances" />
+        <article v-else-if="activeSection === 'usage' || activeSection === 'costing'" class="unsupported-panel">
+          <h3>{{ sections.find((section) => section.id === activeSection)?.label }}</h3>
+          <p>Token accounting is available on the Overview dashboard. Pricing is not configured; showing token usage only.</p>
+        </article>
         <article v-else class="unsupported-panel">
           <h3>{{ sections.find((section) => section.id === activeSection)?.label }}</h3>
           <p>{{ activeUnsupported }}</p>

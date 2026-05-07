@@ -4,7 +4,7 @@ import ManagePanel from './ManagePanel.vue'
 
 describe('ManagePanel', () => {
   it('renders target instance selector and management subnav', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({ logs: [] }) }))
+    vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve({ ok: true, json: vi.fn().mockResolvedValue(url.includes('/subagents') ? { subagents: [{ name: 'ops-triage', description: 'Triage incidents', model: 'test/model', source: 'workspace', editable: true }] } : { logs: [] }) })))
     const wrapper = mount(ManagePanel, {
       props: {
         token: 'dashboard',
@@ -26,7 +26,7 @@ describe('ManagePanel', () => {
     expect(wrapper.text()).toContain('Restart')
 
     await wrapper.get('[data-section="subagents"]').trigger('click')
-    expect(wrapper.text()).toContain('Subagents API is not available yet')
+    await vi.waitFor(() => expect(wrapper.text()).toContain('ops-triage'))
 
     await wrapper.get('[data-section="logs"]').trigger('click')
     expect(wrapper.text()).toContain('Inspect read-only log tails')

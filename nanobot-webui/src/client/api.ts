@@ -80,6 +80,40 @@ export type SettingsPatch = {
   provider?: string
 }
 
+export type SubagentSummary = {
+  name: string
+  description: string
+  model: string
+  tools?: string[]
+  max_iterations?: number
+  max_tokens?: number
+  source: 'builtin' | 'workspace'
+  editable: boolean
+}
+
+export type SubagentDetail = SubagentSummary & { content: string }
+
+export type UsageTotals = {
+  count: number
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
+  cached_tokens: number
+}
+
+export type UsageBreakdown = UsageTotals & { key: string }
+
+export type UsageSummary = {
+  range?: { days: number }
+  totals: UsageTotals
+  by_day: UsageBreakdown[]
+  by_model: UsageBreakdown[]
+  by_channel: UsageBreakdown[]
+  by_session: UsageBreakdown[]
+  pricing: { configured: false; message: string }
+  warnings?: Array<{ skipped_lines: number }>
+}
+
 function authHeaders(token: string) {
   return { authorization: `Bearer ${token}` }
 }
@@ -130,6 +164,37 @@ export async function patchInstanceSettings(instanceId: string, token: string, p
     body: JSON.stringify(patch)
   })
   return readJson<InstanceSettings>(res, `failed to update settings for ${instanceId}`)
+}
+
+export async function fetchSubagents(instanceId: string, token: string): Promise<SubagentSummary[]> {
+  const res = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/subagents`, { headers: authHeaders(token) })
+  const payload = await readJson<{ subagents: SubagentSummary[] }>(res, `failed to load subagents for ${instanceId}`)
+  return payload.subagents
+}
+
+export async function fetchSubagent(instanceId: string, name: string, token: string): Promise<SubagentDetail> {
+  const res = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/subagents/${encodeURIComponent(name)}`, { headers: authHeaders(token) })
+  return readJson<SubagentDetail>(res, `failed to load subagent ${name}`)
+}
+
+export async function saveSubagent(instanceId: string, name: string, token: string, content: string): Promise<SubagentSummary> {
+  const res = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/subagents/${encodeURIComponent(name)}`, {
+    method: 'PUT',
+    headers: { ...authHeaders(token), 'content-type': 'application/json' },
+    body: JSON.stringify({ content })
+  })
+  const payload = await readJson<{ subagent: SubagentSummary }>(res, `failed to save subagent ${name}`)
+  return payload.subagent
+}
+
+export async function deleteSubagent(instanceId: string, name: string, token: string): Promise<{ deleted: boolean }> {
+  const res = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/subagents/${encodeURIComponent(name)}`, { method: 'DELETE', headers: authHeaders(token) })
+  return readJson<{ deleted: boolean }>(res, `failed to delete subagent ${name}`)
+}
+
+export async function fetchUsage(instanceId: string, token: string, days = 30): Promise<UsageSummary> {
+  const res = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/usage?days=${encodeURIComponent(String(days))}`, { headers: authHeaders(token) })
+  return readJson<UsageSummary>(res, `failed to load usage for ${instanceId}`)
 }
 
 export async function fetchStateTopics(token: string): Promise<StateTopic[]> {

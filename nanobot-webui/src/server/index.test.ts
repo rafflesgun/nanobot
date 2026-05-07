@@ -164,6 +164,31 @@ describe('createApp', () => {
     await expect(empty.text()).resolves.toBe('')
   })
 
+  it('proxies subagents and usage without exposing admin tokens', async () => {
+    const proxy = vi.fn(async ({ path }) => new Response(JSON.stringify(path.includes('usage')
+      ? { totals: { count: 0, input_tokens: 0, output_tokens: 0, total_tokens: 0, cached_tokens: 0 }, by_day: [], by_model: [], by_channel: [], by_session: [], pricing: { configured: false, message: 'Pricing is not configured; showing token usage only.' } }
+      : { subagents: [{ name: 'ops-triage', description: 'Triage', model: 'test/model', source: 'workspace', editable: true }] }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    const { app } = createApp(
+      {
+        port: 6060,
+        authToken: 'dashboard',
+        instances: [{ id: 'alpha', name: 'alpha', baseUrl: 'http://nanobot-alpha:18790', adminToken: 'secret', websocketToken: 'ws-secret', enabled: true }]
+      },
+      { proxyAdminRequest: proxy }
+    )
+    const base = await listen(app)
+
+    const subagents = await fetch(`${base}/api/instances/alpha/subagents`, { headers: { authorization: 'Bearer dashboard' } })
+    const usage = await fetch(`${base}/api/instances/alpha/usage?days=30`, { headers: { authorization: 'Bearer dashboard' } })
+
+    expect(subagents.status).toBe(200)
+    expect(usage.status).toBe(200)
+    expect(proxy).toHaveBeenCalledWith(expect.objectContaining({ path: '/admin/v1/subagents' }))
+    expect(proxy).toHaveBeenCalledWith(expect.objectContaining({ path: '/admin/v1/usage?days=30' }))
+    expect(JSON.stringify(await subagents.json())).not.toContain('secret')
+    expect(JSON.stringify(await usage.json())).not.toContain('secret')
+  })
+
   it('rejects unsafe admin paths', async () => {
     const proxy = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } }))
     const { app } = createApp(
