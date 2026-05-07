@@ -395,6 +395,194 @@ async def test_admin_settings_patch_rejects_blank_provider(tmp_path):
     assert payload == {"error": "provider is required"}
 
 
+async def test_admin_lists_builtin_and_workspace_subagents(tmp_path):
+    ctx = _context(tmp_path)
+    agents_dir = ctx.config.workspace_path / "agents"
+    agents_dir.mkdir(parents=True)
+    (agents_dir / "release-reviewer.md").write_text(
+        "---\nname: release-reviewer\ndescription: Reviews releases\nmodel: test/model\ntools:\n  - grep\nmax_iterations: 4\nmax_tokens: 2000\n---\n\nReview releases.",
+        encoding="utf-8",
+    )
+
+    raw = await handle_http_request(
+        b"GET /admin/v1/subagents HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer secret\r\n\r\n",
+        ctx,
+    )
+
+    status, payload = _decode_response(raw)
+    assert status == 200
+    names = {item["name"]: item for item in payload["subagents"]}
+    assert names["recall"]["source"] == "builtin"
+    assert names["recall"]["editable"] is False
+    assert names["release-reviewer"] == {
+        "name": "release-reviewer",
+        "description": "Reviews releases",
+        "model": "test/model",
+        "tools": ["grep"],
+        "max_iterations": 4,
+        "max_tokens": 2000,
+        "source": "workspace",
+        "editable": True,
+    }
+
+
+async def test_admin_reads_subagent_markdown_without_paths(tmp_path):
+    ctx = _context(tmp_path)
+    agents_dir = ctx.config.workspace_path / "agents"
+    agents_dir.mkdir(parents=True)
+    content = "---\nname: ops-triage\ndescription: Triage incidents\nmodel: test/model\n---\n\nInspect logs."
+    (agents_dir / "ops-triage.md").write_text(content, encoding="utf-8")
+
+    raw = await handle_http_request(
+        b"GET /admin/v1/subagents/ops-triage HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer secret\r\n\r\n",
+        ctx,
+    )
+
+    status, payload = _decode_response(raw)
+    assert status == 200
+    assert payload["name"] == "ops-triage"
+    assert payload["content"] == content
+    assert payload["source"] == "workspace"
+    assert str(ctx.config.workspace_path) not in json.dumps(payload)
+
+
+async def test_admin_writes_and_deletes_workspace_subagent(tmp_path):
+    ctx = _context(tmp_path)
+    content = "---\nname: ops-triage\ndescription: Triage incidents\nmodel: test/model\ntools:\n  - grep\n---\n\nInspect logs."
+    body = json.dumps({"content": content}).encode("utf-8")
+
+    put_raw = await handle_http_request(
+        b"PUT /admin/v1/subagents/ops-triage HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer secret\r\nContent-Length: "
+        + str(len(body)).encode()
+        + b"\r\n\r\n"
+        + body,
+        ctx,
+    )
+    status, payload = _decode_response(put_raw)
+    assert status == 200
+    assert payload["subagent"]["name"] == "ops-triage"
+    assert (ctx.config.workspace_path / "agents" / "ops-triage.md").read_text(encoding="utf-8") == content
+
+    delete_raw = await handle_http_request(
+        b"DELETE /admin/v1/subagents/ops-triage HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer secret\r\n\r\n",
+        ctx,
+    )
+    status, payload = _decode_response(delete_raw)
+    assert status == 200
+    assert payload == {"deleted": True}
+    assert not (ctx.config.workspace_path / "agents" / "ops-triage.md").exists()
+
+
+async def test_admin_rejects_unsafe_or_readonly_subagent_writes(tmp_path):
+    ctx = _context(tmp_path)
+    valid_body = json.dumps({"content": "---\nname: recall\ndescription: nope\n---\n\nBody"}).encode("utf-8")
+
+    unsafe_raw = await handle_http_request(
+        b"PUT /admin/v1/subagents/..%2Fevil HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer secret\r\nContent-Length: "
+        + str(len(valid_body)).encode()
+        + b"\r\n\r\n"
+        + valid_body,
+        ctx,
+    )
+    status, payload = _decode_response(unsafe_raw)
+    assert status == 400
+    assert payload == {"error": "invalid subagent name"}
+
+    builtin_delete_raw = await handle_http_request(
+        b"DELETE /admin/v1/subagents/recall HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer secret\r\n\r\n",
+        ctx,
+    )
+    status, payload = _decode_response(builtin_delete_raw)
+    assert status == 403
+    assert payload == {"error": "read-only subagent"}
+
+
+async def test_admin_rejects_invalid_subagent_markdown(tmp_path):
+    ctx = _context(tmp_path)
+    body = json.dumps({"content": "---\nname: other\ntools: grep\n---\n\n"}).encode("utf-8")
+
+    raw = await handle_http_request(
+        b"PUT /admin/v1/subagents/ops-triage HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer secret\r\nContent-Length: "
+        + str(len(body)).encode()
+        + b"\r\n\r\n"
+        + body,
+        ctx,
+    )
+
+    status, payload = _decode_response(raw)
+    assert status == 400
+    assert payload["error"] == "subagent name mismatch"
+
+
+async def test_admin_usage_returns_zero_payload_without_usage_file(tmp_path):
+    ctx = _context(tmp_path)
+
+    raw = await handle_http_request(
+        b"GET /admin/v1/usage HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer secret\r\n\r\n",
+        ctx,
+    )
+
+    status, payload = _decode_response(raw)
+    assert status == 200
+    assert payload["totals"] == {"count": 0, "input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cached_tokens": 0}
+    assert payload["by_day"] == []
+    assert payload["by_model"] == []
+    assert payload["pricing"] == {"configured": False, "message": "Pricing is not configured; showing token usage only."}
+
+
+async def test_admin_usage_aggregates_by_day_model_channel_and_session(tmp_path):
+    ctx = _context(tmp_path)
+    stats_dir = ctx.config.workspace_path / "stats"
+    stats_dir.mkdir(parents=True)
+    (stats_dir / "usage.jsonl").write_text(
+        "\n".join([
+            json.dumps({"timestamp": "2026-05-06T10:00:00", "channel": "websocket", "chat_id": "a", "model": "m1", "input_tokens": 10, "output_tokens": 5, "total_tokens": 15, "cached_tokens": 3, "session_key": "websocket:a"}),
+            json.dumps({"timestamp": "2026-05-06T11:00:00", "channel": "telegram", "chat_id": "b", "model": "m2", "input_tokens": 20, "output_tokens": 7, "total_tokens": 27, "session_key": "telegram:b"}),
+            "not-json",
+        ]),
+        encoding="utf-8",
+    )
+
+    raw = await handle_http_request(
+        b"GET /admin/v1/usage?days=not-a-number HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer secret\r\n\r\n",
+        ctx,
+    )
+
+    status, payload = _decode_response(raw)
+    assert status == 200
+    assert payload["range"] == {"days": 30}
+    assert payload["totals"] == {"count": 2, "input_tokens": 30, "output_tokens": 12, "total_tokens": 42, "cached_tokens": 3}
+    assert payload["by_day"] == [{"key": "2026-05-06", "count": 2, "input_tokens": 30, "output_tokens": 12, "total_tokens": 42, "cached_tokens": 3}]
+    assert {row["key"] for row in payload["by_model"]} == {"m1", "m2"}
+    assert {row["key"] for row in payload["by_channel"]} == {"websocket", "telegram"}
+    assert {row["key"] for row in payload["by_session"]} == {"websocket:a", "telegram:b"}
+    assert payload["warnings"] == [{"skipped_lines": 1}]
+
+
+async def test_admin_usage_filters_by_channel_model_and_session(tmp_path):
+    ctx = _context(tmp_path)
+    stats_dir = ctx.config.workspace_path / "stats"
+    stats_dir.mkdir(parents=True)
+    (stats_dir / "usage.jsonl").write_text(
+        "\n".join([
+            json.dumps({"timestamp": "2026-05-06T10:00:00", "channel": "websocket", "chat_id": "a", "model": "m1", "input_tokens": 10, "output_tokens": 5, "total_tokens": 15, "session_key": "websocket:a"}),
+            json.dumps({"timestamp": "2026-05-07T10:00:00", "channel": "telegram", "chat_id": "b", "model": "m2", "input_tokens": 20, "output_tokens": 7, "total_tokens": 27, "session_key": "telegram:b"}),
+        ]),
+        encoding="utf-8",
+    )
+
+    raw = await handle_http_request(
+        b"GET /admin/v1/usage?days=999&channel=websocket&model=m1&session_key=websocket%3Aa HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer secret\r\n\r\n",
+        ctx,
+    )
+
+    status, payload = _decode_response(raw)
+    assert status == 200
+    assert payload["range"] == {"days": 366}
+    assert payload["totals"]["total_tokens"] == 15
+    assert payload["by_channel"] == [{"key": "websocket", "count": 1, "input_tokens": 10, "output_tokens": 5, "total_tokens": 15, "cached_tokens": 0}]
+
+
 async def test_admin_logs_list_and_tail_are_bounded(tmp_path):
     ctx = _context(tmp_path)
     log_dir = ctx.config.workspace_path / "logs"
