@@ -2,6 +2,76 @@ import { describe, expect, it } from 'vitest'
 import { loadConfig, publicInstance, websocketUrlForInstance } from './config'
 
 describe('loadConfig', () => {
+  it('loads dashboard auth and instances from a mounted config file', () => {
+    const config = loadConfig({
+      PORT: '6061',
+      WEBUI_CONFIG_JSON: JSON.stringify({
+        authToken: 'file-dashboard',
+        instances: [
+          {
+            id: 'alpha',
+            name: 'Alpha Bot',
+            adminBaseUrl: 'http://nanobot-alpha:18790/',
+            adminToken: 'alpha-admin-token',
+            websocketUrl: 'ws://nanobot-alpha:9876/chat',
+            websocketToken: 'alpha-ws-token',
+            enabled: false
+          }
+        ]
+      })
+    })
+
+    expect(config.port).toBe(6061)
+    expect(config.authToken).toBe('file-dashboard')
+    expect(config.instances).toEqual([
+      {
+        id: 'alpha',
+        name: 'Alpha Bot',
+        baseUrl: 'http://nanobot-alpha:18790',
+        adminToken: 'alpha-admin-token',
+        websocketUrl: 'ws://nanobot-alpha:9876/chat',
+        websocketToken: 'alpha-ws-token',
+        enabled: false
+      }
+    ])
+  })
+
+  it('lets AUTH_TOKEN override auth token from config file', () => {
+    const config = loadConfig({
+      AUTH_TOKEN: 'env-dashboard',
+      WEBUI_CONFIG_JSON: JSON.stringify({
+        authToken: 'file-dashboard',
+        instances: [
+          {
+            id: 'alpha',
+            adminBaseUrl: 'http://nanobot-alpha:18790',
+            adminToken: 'alpha-admin-token',
+            websocketUrl: 'ws://nanobot-alpha:8765/',
+            websocketToken: 'alpha-ws-token'
+          }
+        ]
+      })
+    })
+
+    expect(config.authToken).toBe('env-dashboard')
+  })
+
+  it('rejects config file instances without websocket url', () => {
+    expect(() => loadConfig({
+      WEBUI_CONFIG_JSON: JSON.stringify({
+        authToken: 'file-dashboard',
+        instances: [
+          {
+            id: 'alpha',
+            adminBaseUrl: 'http://nanobot-alpha:18790',
+            adminToken: 'alpha-admin-token',
+            websocketToken: 'alpha-ws-token'
+          }
+        ]
+      })
+    })).toThrow(/websocketUrl is required for instance: alpha/)
+  })
+
   it('parses static instances and keeps tokens server-side', () => {
     const config = loadConfig({
       PORT: '6060',

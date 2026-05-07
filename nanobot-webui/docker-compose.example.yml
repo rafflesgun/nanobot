@@ -4,13 +4,10 @@ services:
     ports:
       - "6060:6060"
     volumes:
-      - nanobot-webui-data:/data
+      - ./webui.config.json:/data/config.json:ro
     environment:
       - PORT=6060
-      - AUTH_TOKEN=change-me
-      - NANOBOT_INSTANCES=alpha=http://nanobot-alpha:18790,beta=http://nanobot-beta:18790
-      - NANOBOT_INSTANCE_TOKENS=alpha=alpha-token,beta=beta-token
-      - NANOBOT_INSTANCE_WEBSOCKET_TOKENS=alpha=alpha-ws-token,beta=beta-ws-token
+      - WEBUI_CONFIG=/data/config.json
 
   nanobot-alpha:
     image: nanobot-ai:local
@@ -23,6 +20,3 @@ services:
     expose:
       - "18790"
       - "8765"
-
-volumes:
-  nanobot-webui-data:

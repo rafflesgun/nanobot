@@ -1,0 +1,23 @@
+{
+  "authToken": "change-me",
+  "instances": [
+    {
+      "id": "alpha",
+      "name": "Alpha",
+      "adminBaseUrl": "http://nanobot-alpha:18790",
+      "adminToken": "alpha-admin-token",
+      "websocketUrl": "ws://nanobot-alpha:8765/",
+      "websocketToken": "alpha-ws-token",
+      "enabled": true
+    },
+    {
+      "id": "beta",
+      "name": "Beta",
+      "adminBaseUrl": "http://nanobot-beta:18790",
+      "adminToken": "beta-admin-token",
+      "websocketUrl": "ws://nanobot-beta:8765/",
+      "websocketToken": "beta-ws-token",
+      "enabled": true
+    }
+  ]
+}
