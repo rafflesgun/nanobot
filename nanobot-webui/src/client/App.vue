@@ -4,15 +4,15 @@ import { fetchInstances, type PublicInstance } from './api'
 import InstanceList from './components/InstanceList.vue'
 import OverviewPanel from './components/OverviewPanel.vue'
 import ChatPanel from './components/ChatPanel.vue'
-import LogsPanel from './components/LogsPanel.vue'
-import SettingsPanel from './components/SettingsPanel.vue'
+import InstancesPanel from './components/InstancesPanel.vue'
+import ManagePanel from './components/ManagePanel.vue'
 
 const token = ref('')
 const instances = ref<PublicInstance[]>([])
 const error = ref('')
 const authenticated = ref(false)
 const loading = ref(false)
-const activeTab = ref<'overview' | 'chat' | 'logs' | 'settings'>('overview')
+const activeTab = ref<'overview' | 'chat' | 'instances' | 'manage'>('overview')
 
 async function login() {
   error.value = ''
@@ -61,10 +61,10 @@ function logout() {
           <p>Manage live nanobot surfaces from one command deck.</p>
         </div>
         <nav class="dashboard-tabs" aria-label="Dashboard sections">
-          <button type="button" :class="{ active: activeTab === 'overview' }" @click="activeTab = 'overview'">Overview</button>
-          <button type="button" :class="{ active: activeTab === 'chat' }" @click="activeTab = 'chat'">Group Chat</button>
-          <button type="button" :class="{ active: activeTab === 'logs' }" @click="activeTab = 'logs'">Logs</button>
-          <button type="button" :class="{ active: activeTab === 'settings' }" @click="activeTab = 'settings'">Settings</button>
+          <button data-nav="overview" type="button" :class="{ active: activeTab === 'overview' }" @click="activeTab = 'overview'">Overview</button>
+          <button data-nav="chat" type="button" :class="{ active: activeTab === 'chat' }" @click="activeTab = 'chat'">Chat Topics</button>
+          <button data-nav="instances" type="button" :class="{ active: activeTab === 'instances' }" @click="activeTab = 'instances'">Instances</button>
+          <button data-nav="manage" type="button" :class="{ active: activeTab === 'manage' }" @click="activeTab = 'manage'">Manage</button>
         </nav>
       </aside>
       <section class="dashboard-main">
@@ -76,8 +76,8 @@ function logout() {
           <p v-if="error" class="error" role="alert">{{ error }}</p>
           <OverviewPanel v-if="activeTab === 'overview'" :token="token" :instances="instances" />
           <ChatPanel v-else-if="activeTab === 'chat'" :token="token" :instances="instances" />
-          <LogsPanel v-else-if="activeTab === 'logs'" :token="token" :instances="instances" />
-          <SettingsPanel v-else :token="token" :instances="instances" />
+          <InstancesPanel v-else-if="activeTab === 'instances'" :instances="instances" />
+          <ManagePanel v-else :token="token" :instances="instances" />
         </section>
       </section>
     </section>

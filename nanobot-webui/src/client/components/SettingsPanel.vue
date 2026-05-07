@@ -136,7 +136,7 @@ watch([selectedInstanceId, () => props.token], loadSettings, { immediate: true }
 
 .panel-heading p,
 .empty-state {
-  color: #69778c;
+  color: #93a4bd;
   line-height: 1.5;
   margin: 0.25rem 0 0;
 }
@@ -151,9 +151,9 @@ watch([selectedInstanceId, () => props.token], loadSettings, { immediate: true }
 .instance-select,
 .settings-form,
 .settings-meta {
-  border: 1px solid #dce4ef;
+  border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: 0.85rem;
-  background: #fbfdff;
+  background: rgba(8, 13, 28, 0.72);
   padding: 1rem;
 }
 
@@ -164,7 +164,7 @@ watch([selectedInstanceId, () => props.token], loadSettings, { immediate: true }
 
 .instance-select span,
 .settings-form span {
-  color: #44546a;
+  color: #cbd5e1;
   font-weight: 700;
 }
 
@@ -185,7 +185,7 @@ button {
 }
 
 dt {
-  color: #69778c;
+  color: #93a4bd;
 }
 
 dd {
@@ -194,16 +194,16 @@ dd {
 }
 
 .error-text {
-  color: #9a3412;
+  color: #fdba74;
   line-height: 1.5;
   margin: 0;
 }
 
 .restart-warning {
-  border: 1px solid #fed7aa;
+  border: 1px solid rgba(251, 146, 60, 0.45);
   border-radius: 0.75rem;
-  background: #fff7ed;
-  color: #9a3412;
+  background: rgba(67, 20, 7, 0.38);
+  color: #fdba74;
   font-weight: 800;
   margin: 0;
   padding: 0.8rem 0.95rem;

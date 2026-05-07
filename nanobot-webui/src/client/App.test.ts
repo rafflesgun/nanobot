@@ -74,7 +74,7 @@ describe('App', () => {
     expect(wrapper.text()).not.toContain('http://nanobot-alpha:18790')
   })
 
-  it('shows dashboard tabs after login', async () => {
+  it('shows the approved primary navigation after login', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -88,9 +88,42 @@ describe('App', () => {
     await wrapper.get('form').trigger('submit')
 
     await vi.waitFor(() => expect(wrapper.text()).toContain('Overview'))
-    expect(wrapper.text()).toContain('Group Chat')
-    expect(wrapper.text()).toContain('Logs')
-    expect(wrapper.text()).toContain('Settings')
+    expect(wrapper.text()).toContain('Chat Topics')
+    expect(wrapper.text()).toContain('Instances')
+    expect(wrapper.text()).toContain('Manage')
+    expect(wrapper.find('[data-nav="logs"]').exists()).toBe(false)
+    expect(wrapper.find('[data-nav="settings"]').exists()).toBe(false)
+  })
+
+  it('opens instances and manage sections from the primary navigation', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url === '/api/instances') {
+          return Promise.resolve({
+            ok: true,
+            json: vi.fn().mockResolvedValue({ instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }] })
+          })
+        }
+        return Promise.resolve({
+          ok: true,
+          json: vi.fn().mockResolvedValue({ agent: { model: 'gpt', provider: 'openai', resolved_provider: 'openai', has_api_key: true }, requires_restart: false })
+        })
+      })
+    )
+
+    const wrapper = mount(App)
+    await wrapper.get('input').setValue('secret-token')
+    await wrapper.get('form').trigger('submit')
+    await vi.waitFor(() => expect(wrapper.text()).toContain('Overview'))
+
+    await wrapper.get('[data-nav="instances"]').trigger('click')
+    expect(wrapper.text()).toContain('Local CRUD shell')
+
+    await wrapper.get('[data-nav="manage"]').trigger('click')
+    expect(wrapper.text()).toContain('Target instance')
+    expect(wrapper.text()).toContain('Subagents')
   })
 
   it('renders the dark dashboard shell without full instance details after login', async () => {

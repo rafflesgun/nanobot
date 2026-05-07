@@ -129,7 +129,7 @@ watch([selectedInstanceId, () => props.token], loadLogs, { immediate: true })
 
 .panel-heading p,
 .empty-state {
-  color: #69778c;
+  color: #93a4bd;
   line-height: 1.5;
   margin: 0.25rem 0 0;
 }
@@ -145,15 +145,15 @@ watch([selectedInstanceId, () => props.token], loadLogs, { immediate: true })
 }
 
 .instance-select span {
-  color: #44546a;
+  color: #cbd5e1;
   font-weight: 700;
 }
 
 .log-list,
 .log-tail {
-  border: 1px solid #dce4ef;
+  border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: 0.85rem;
-  background: #fbfdff;
+  background: rgba(8, 13, 28, 0.72);
   padding: 1rem;
 }
 
@@ -166,7 +166,7 @@ watch([selectedInstanceId, () => props.token], loadLogs, { immediate: true })
 
 .log-button.is-selected {
   border-color: #2563eb;
-  color: #1d4ed8;
+  color: #93c5fd;
 }
 
 .log-tail {
@@ -177,7 +177,7 @@ watch([selectedInstanceId, () => props.token], loadLogs, { immediate: true })
 }
 
 .error-text {
-  color: #9a3412;
+  color: #fdba74;
   line-height: 1.5;
   margin: 0;
 }

@@ -69,17 +69,17 @@ watch([() => props.token, () => props.instances], loadStatuses, { deep: true, im
 <style scoped>
 .overview-panel { min-height: 24rem; }
 .panel-heading { display: flex; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
-.panel-heading p { color: #69778c; margin: 0.25rem 0 0; }
+.panel-heading p { color: #93a4bd; margin: 0.25rem 0 0; }
 .compact { min-height: 2.2rem; padding: 0 0.8rem; }
 .status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.85rem; }
-.status-card { border: 1px solid #dce4ef; border-radius: 0.85rem; background: #fbfdff; padding: 1rem; }
-.status-card.is-degraded { border-color: #fed7aa; background: #fff7ed; }
+.status-card { border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 0.85rem; background: rgba(8, 13, 28, 0.72); padding: 1rem; }
+.status-card.is-degraded { border-color: rgba(251, 146, 60, 0.45); background: rgba(67, 20, 7, 0.38); }
 .status-title { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
-.status-title span { border-radius: 999px; background: #dcfce7; color: #166534; font-size: 0.75rem; font-weight: 800; padding: 0.2rem 0.55rem; text-transform: uppercase; }
-.is-degraded .status-title span { background: #ffedd5; color: #9a3412; }
+.status-title span { border-radius: 999px; background: rgba(34, 197, 94, 0.16); color: #86efac; font-size: 0.75rem; font-weight: 800; padding: 0.2rem 0.55rem; text-transform: uppercase; }
+.is-degraded .status-title span { background: rgba(251, 146, 60, 0.16); color: #fdba74; }
 dl { display: grid; gap: 0.5rem; margin: 1rem 0 0; }
 dl div { display: flex; justify-content: space-between; gap: 1rem; }
-dt { color: #69778c; }
+dt { color: #93a4bd; }
 dd { margin: 0; text-align: right; }
-.error-text { color: #9a3412; line-height: 1.5; }
+.error-text { color: #fdba74; line-height: 1.5; }
 </style>
