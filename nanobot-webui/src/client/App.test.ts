@@ -41,9 +41,10 @@ describe('App', () => {
     expect(wrapper.text()).not.toContain('Chat')
 
     await wrapper.get('form').trigger('submit')
-    await vi.waitFor(() => expect(wrapper.text()).toContain('Instances'))
+    await vi.waitFor(() => expect(wrapper.text()).toContain('Overview'))
     expect(wrapper.text()).toContain('Chat')
-    await vi.waitFor(() => expect(wrapper.text()).toContain('http://nanobot-alpha:18790'))
+    expect(wrapper.text()).toContain('alpha')
+    expect(wrapper.text()).not.toContain('http://nanobot-alpha:18790')
 
     expect(wrapper.text()).not.toContain('failed to load instances: 503')
     expect(setItem).not.toHaveBeenCalledWith('nanobot-webui-token', 'secret-token')
@@ -63,7 +64,8 @@ describe('App', () => {
     const wrapper = mount(App)
     await wrapper.get('input').setValue('secret-token')
     await wrapper.get('form').trigger('submit')
-    await vi.waitFor(() => expect(wrapper.text()).toContain('http://nanobot-alpha:18790'))
+    await vi.waitFor(() => expect(wrapper.text()).toContain('alpha'))
+    expect(wrapper.text()).not.toContain('http://nanobot-alpha:18790')
 
     await wrapper.get('[data-testid="logout-button"]').trigger('click')
 
@@ -89,5 +91,25 @@ describe('App', () => {
     expect(wrapper.text()).toContain('Group Chat')
     expect(wrapper.text()).toContain('Logs')
     expect(wrapper.text()).toContain('Settings')
+  })
+
+  it('renders the dark dashboard shell without full instance details after login', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://nanobot-alpha:18790', enabled: true }] })
+      })
+    )
+
+    const wrapper = mount(App)
+    await wrapper.get('input').setValue('secret-token')
+    await wrapper.get('form').trigger('submit')
+
+    await vi.waitFor(() => expect(wrapper.find('[data-testid="dashboard-shell"]').exists()).toBe(true))
+    expect(wrapper.find('[data-testid="sidebar-nav"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="instance-status-bar"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Alpha')
+    expect(wrapper.text()).not.toContain('http://nanobot-alpha:18790')
   })
 })

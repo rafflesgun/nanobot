@@ -53,37 +53,41 @@ function logout() {
       </form>
     </section>
 
-    <template v-else>
-      <header class="dashboard-header">
-        <div>
+    <section v-else data-testid="dashboard-shell" class="dashboard-shell">
+      <aside data-testid="sidebar-nav" class="sidebar-nav">
+        <div class="brand-block">
           <p class="eyebrow">Admin Console</p>
           <h1>Nanobot Web UI</h1>
-          <p>Monitor configured instances and open websocket chat sessions.</p>
+          <p>Manage live nanobot surfaces from one command deck.</p>
         </div>
-        <button class="secondary" data-testid="logout-button" type="button" @click="logout">Log out</button>
-      </header>
-      <p v-if="error" class="error" role="alert">{{ error }}</p>
-      <nav class="dashboard-tabs" aria-label="Dashboard sections">
-        <button type="button" :class="{ active: activeTab === 'overview' }" @click="activeTab = 'overview'">Overview</button>
-        <button type="button" :class="{ active: activeTab === 'chat' }" @click="activeTab = 'chat'">Group Chat</button>
-        <button type="button" :class="{ active: activeTab === 'logs' }" @click="activeTab = 'logs'">Logs</button>
-        <button type="button" :class="{ active: activeTab === 'settings' }" @click="activeTab = 'settings'">Settings</button>
-      </nav>
-      <div class="grid">
-        <InstanceList :instances="instances" />
-        <OverviewPanel v-if="activeTab === 'overview'" :token="token" :instances="instances" />
-        <ChatPanel v-else-if="activeTab === 'chat'" :token="token" :instances="instances" />
-        <LogsPanel v-else-if="activeTab === 'logs'" :token="token" :instances="instances" />
-        <SettingsPanel v-else :token="token" :instances="instances" />
-      </div>
-    </template>
+        <nav class="dashboard-tabs" aria-label="Dashboard sections">
+          <button type="button" :class="{ active: activeTab === 'overview' }" @click="activeTab = 'overview'">Overview</button>
+          <button type="button" :class="{ active: activeTab === 'chat' }" @click="activeTab = 'chat'">Group Chat</button>
+          <button type="button" :class="{ active: activeTab === 'logs' }" @click="activeTab = 'logs'">Logs</button>
+          <button type="button" :class="{ active: activeTab === 'settings' }" @click="activeTab = 'settings'">Settings</button>
+        </nav>
+      </aside>
+      <section class="dashboard-main">
+        <header class="top-bar">
+          <InstanceList data-testid="instance-status-bar" :instances="instances" />
+          <button class="secondary" data-testid="logout-button" type="button" @click="logout">Log out</button>
+        </header>
+        <section class="content-stage">
+          <p v-if="error" class="error" role="alert">{{ error }}</p>
+          <OverviewPanel v-if="activeTab === 'overview'" :token="token" :instances="instances" />
+          <ChatPanel v-else-if="activeTab === 'chat'" :token="token" :instances="instances" />
+          <LogsPanel v-else-if="activeTab === 'logs'" :token="token" :instances="instances" />
+          <SettingsPanel v-else :token="token" :instances="instances" />
+        </section>
+      </section>
+    </section>
   </main>
 </template>
 
 <style>
 :root {
-  color: #172033;
-  background: #f3f6fb;
+  color: #dbe7ff;
+  background: #050814;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-synthesis: none;
@@ -99,8 +103,9 @@ body {
   min-width: 320px;
   min-height: 100vh;
   background:
-    radial-gradient(circle at top left, rgba(43, 102, 214, 0.12), transparent 32rem),
-    linear-gradient(180deg, #f8fbff 0%, #eef3fa 100%);
+    radial-gradient(circle at top left, rgba(59, 130, 246, 0.18), transparent 34rem),
+    radial-gradient(circle at 80% 0%, rgba(14, 165, 233, 0.11), transparent 30rem),
+    #050814;
 }
 
 button,
@@ -110,9 +115,9 @@ select {
 }
 
 button {
-  border: 0;
+  border: 1px solid rgba(96, 165, 250, 0.45);
   border-radius: 0.65rem;
-  background: #2458d3;
+  background: linear-gradient(135deg, #2563eb, #0891b2);
   color: #fff;
   cursor: pointer;
   font-weight: 700;
@@ -125,23 +130,22 @@ button {
 }
 
 button:hover:not(:disabled) {
-  background: #1d49b4;
-  box-shadow: 0 10px 24px rgba(36, 88, 211, 0.2);
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.24);
   transform: translateY(-1px);
 }
 
 button:disabled {
-  cursor: wait;
+  cursor: not-allowed;
   opacity: 0.72;
 }
 
 input,
 select {
   width: 100%;
-  border: 1px solid #c9d4e5;
+  border: 1px solid rgba(148, 163, 184, 0.28);
   border-radius: 0.65rem;
-  background: #fff;
-  color: #172033;
+  background: rgba(15, 23, 42, 0.82);
+  color: #e2e8f0;
   min-height: 2.75rem;
   padding: 0 0.85rem;
 }
@@ -149,14 +153,12 @@ select {
 input:focus,
 select:focus {
   border-color: #2458d3;
-  box-shadow: 0 0 0 3px rgba(36, 88, 211, 0.14);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.22);
   outline: none;
 }
 
 .app-shell {
-  width: min(1180px, calc(100vw - 2rem));
-  margin: 0 auto;
-  padding: 2rem 0;
+  min-height: 100vh;
 }
 
 .app-shell.is-login {
@@ -170,12 +172,18 @@ select:focus {
 }
 
 .login-card,
-.panel,
-.dashboard-header {
+.panel {
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 1rem;
+  background: rgba(15, 23, 42, 0.78);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28);
+}
+
+.login-card {
   border: 1px solid rgba(148, 163, 184, 0.34);
   border-radius: 1rem;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 20px 50px rgba(32, 45, 72, 0.1);
+  background: rgba(15, 23, 42, 0.9);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.34);
 }
 
 .login-card {
@@ -185,23 +193,23 @@ select:focus {
 }
 
 .login-card h1,
-.dashboard-header h1 {
+.brand-block h1 {
   margin: 0;
-  color: #101827;
+  color: #f8fbff;
   font-size: clamp(1.7rem, 3vw, 2.25rem);
   letter-spacing: -0.04em;
 }
 
 .login-copy,
-.dashboard-header p {
+.brand-block p {
   margin: 0;
-  color: #5b677a;
+  color: #93a4bd;
   line-height: 1.55;
 }
 
 .eyebrow {
   margin: 0;
-  color: #2458d3;
+  color: #60a5fa;
   font-size: 0.75rem;
   font-weight: 800;
   letter-spacing: 0.12em;
@@ -209,48 +217,85 @@ select:focus {
 }
 
 label {
-  color: #2d394d;
+  color: #cbd5e1;
   font-size: 0.9rem;
   font-weight: 700;
 }
 
-.dashboard-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+.dashboard-shell {
+  display: grid;
+  grid-template-columns: 17rem minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.sidebar-nav {
+  border-right: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(8, 13, 28, 0.92);
+  display: grid;
   gap: 1.5rem;
-  margin-bottom: 1rem;
-  padding: 1.35rem 1.5rem;
+  grid-template-rows: auto 1fr;
+  padding: 1rem;
+}
+
+.brand-block {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.5rem 0.35rem 1rem;
+}
+
+.dashboard-main {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-width: 0;
+}
+
+.top-bar {
+  align-items: center;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 0.85rem 1rem;
+}
+
+.content-stage {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+  padding: 1rem;
 }
 
 .dashboard-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin: 0 0 1rem;
+  align-content: start;
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
 }
 
 .dashboard-tabs button {
-  border: 1px solid #c9d4e5;
-  background: rgba(255, 255, 255, 0.86);
-  color: #24324a;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #94a3b8;
+  justify-content: start;
+  text-align: left;
 }
 
 .dashboard-tabs button.active {
-  border-color: #2458d3;
-  background: #2458d3;
-  color: #fff;
+  border-color: rgba(96, 165, 250, 0.32);
+  background: rgba(37, 99, 235, 0.18);
+  color: #dbeafe;
 }
 
 .secondary {
-  border: 1px solid #c9d4e5;
-  background: #fff;
-  color: #24324a;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(15, 23, 42, 0.72);
+  color: #dbe7ff;
 }
 
 .secondary:hover:not(:disabled) {
-  background: #f8fafc;
-  box-shadow: 0 8px 20px rgba(32, 45, 72, 0.08);
+  background: rgba(30, 41, 59, 0.9);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22);
 }
 
 .error {
@@ -262,12 +307,6 @@ label {
   padding: 0.8rem 0.95rem;
 }
 
-.grid {
-  display: grid;
-  grid-template-columns: minmax(320px, 0.85fr) minmax(420px, 1.15fr);
-  gap: 1rem;
-}
-
 .panel {
   min-width: 0;
   padding: 1.25rem;
@@ -275,24 +314,24 @@ label {
 
 .panel h2 {
   margin: 0 0 1rem;
-  color: #101827;
+  color: #f8fbff;
   font-size: 1rem;
   letter-spacing: -0.01em;
 }
 
-@media (max-width: 800px) {
-  .app-shell {
-    width: min(100vw - 1rem, 1180px);
-    padding: 0.5rem 0;
+@media (max-width: 820px) {
+  .dashboard-shell {
+    grid-template-columns: 1fr;
   }
 
-  .dashboard-header {
+  .sidebar-nav {
+    border-right: 0;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+  }
+
+  .top-bar {
     align-items: stretch;
     flex-direction: column;
-  }
-
-  .grid {
-    grid-template-columns: 1fr;
   }
 }
 </style>
