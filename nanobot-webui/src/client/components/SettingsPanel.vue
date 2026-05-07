@@ -12,6 +12,7 @@ const error = ref('')
 const loading = ref(false)
 const saving = ref(false)
 let loadSequence = 0
+let saveSequence = 0
 
 const enabledInstances = computed(() => props.instances.filter((instance) => instance.enabled))
 const selectedInstance = computed(() => enabledInstances.value.find((instance) => instance.id === selectedInstanceId.value))
@@ -48,20 +49,20 @@ async function saveSettings() {
   const instance = selectedInstance.value
   if (!instance) return
 
-  const sequence = ++loadSequence
+  const sequence = ++saveSequence
   error.value = ''
   saving.value = true
   try {
     const updated = await patchInstanceSettings(instance.id, props.token, { model: model.value, provider: provider.value })
-    if (sequence !== loadSequence) return
+    if (sequence !== saveSequence) return
     settings.value = updated
     model.value = updated.agent.model
     provider.value = updated.agent.provider
   } catch (err) {
-    if (sequence !== loadSequence) return
+    if (sequence !== saveSequence) return
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
-    if (sequence === loadSequence) saving.value = false
+    if (sequence === saveSequence) saving.value = false
   }
 }
 
