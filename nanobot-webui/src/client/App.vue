@@ -59,7 +59,7 @@ function logout() {
       <p v-if="error" class="error" role="alert">{{ error }}</p>
       <div class="grid">
         <InstanceList :instances="instances" />
-        <ChatPanel :instances="instances" />
+        <ChatPanel :instances="instances" :token="token" />
       </div>
     </template>
   </main>
