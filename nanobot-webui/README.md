@@ -16,7 +16,7 @@ Set `WEBUI_CONFIG` to the mounted path:
 
 ```text
 PORT=6060
-WEBUI_CONFIG=/data/config.json
+WEBUI_CONFIG=/config/webui.config.json
 ```
 
 Example `config.json`:
@@ -45,11 +45,13 @@ Example `config.json`:
 | `instances[].name` | Display name; defaults to `id` when omitted |
 | `instances[].adminBaseUrl` | Nanobot gateway/admin API base URL, including host and port |
 | `instances[].adminToken` | Nanobot `gateway.admin.token` for admin API calls |
-| `instances[].websocketUrl` | Nanobot WebSocket URL, including host, port, and path |
+| `instances[].websocketUrl` | Base nanobot WebSocket endpoint, including host, port, and optional path |
 | `instances[].websocketToken` | Nanobot `channels.websocket.token` for chat connections |
 | `instances[].enabled` | Whether the webui should allow proxy/chat access; defaults to `true` |
 
 Only `PORT` and `WEBUI_CONFIG` are read from environment variables. Instance URLs and tokens must come from the config file.
+
+`websocketUrl` is the base nanobot WebSocket endpoint. The webui appends `client_id=nanobot-webui` and the configured `websocketToken` server-side. Do not include secrets in browser URLs.
 
 ## Docker Compose
 
@@ -59,7 +61,9 @@ Copy `webui.config.example.json` to `webui.config.json`, edit tokens and URLs, t
 docker compose -f docker-compose.example.yml up --build
 ```
 
-The compose example mounts `./webui.config.json` read-only at `/data/config.json`.
+The compose example mounts `./webui.config.json` read-only at `/config/webui.config.json` and points `WEBUI_CONFIG` at that path.
+
+Mount `/data` as a persistent volume. Current releases reserve it for dashboard-owned state; upcoming topic/history/instance CRUD storage will rely on it.
 
 ## Development
 

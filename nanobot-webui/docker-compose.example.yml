@@ -4,10 +4,11 @@ services:
     ports:
       - "6060:6060"
     volumes:
-      - ./webui.config.json:/data/config.json:ro
+      - ./webui.config.json:/config/webui.config.json:ro
+      - nanobot-webui-data:/data
     environment:
       - PORT=6060
-      - WEBUI_CONFIG=/data/config.json
+      - WEBUI_CONFIG=/config/webui.config.json
 
   nanobot-alpha:
     image: nanobot-ai:local
@@ -20,3 +21,6 @@ services:
     expose:
       - "18790"
       - "8765"
+
+volumes:
+  nanobot-webui-data:
