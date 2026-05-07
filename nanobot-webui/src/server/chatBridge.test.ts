@@ -57,7 +57,7 @@ class FakeWebSocket extends EventEmitter {
   static CLOSING = 2 as const
   static CLOSED = 3 as const
   static instances: FakeWebSocket[] = []
-  readyState: number = FakeWebSocket.OPEN
+  readyState: number = FakeWebSocket.CONNECTING
   sent: string[] = []
 
   constructor(readonly url: string) {
@@ -67,6 +67,15 @@ class FakeWebSocket extends EventEmitter {
 
   send(payload: string) {
     this.sent.push(payload)
+  }
+
+  open() {
+    this.readyState = FakeWebSocket.OPEN
+    this.emit('open')
+  }
+
+  fail() {
+    this.emit('error')
   }
 
   close() {
@@ -240,7 +249,8 @@ describe('registerChatBridge', () => {
     stale.emit('close')
 
     await new Promise((resolve) => setTimeout(resolve, 25))
-    expect(events).toEqual([])
+    expect(events).not.toContainEqual({ instanceId: 'alpha', event: 'delta', chatId: 'old', text: 'stale' })
+    expect(events).not.toContainEqual({ instanceId: 'alpha', event: 'chat.disconnected', chatId: '' })
   })
 
   it('connects multiple enabled upstream websockets for group chat', async () => {
@@ -270,6 +280,57 @@ describe('registerChatBridge', () => {
     ])
   })
 
+  it('emits connection lifecycle events for upstream websockets', async () => {
+    FakeWebSocket.instances = []
+    const base = await listen()
+    registerChatBridge(
+      server!,
+      {
+        port: 6060,
+        authToken: 'dashboard',
+        instances: [{ id: 'alpha', name: 'alpha', baseUrl: 'http://nanobot-alpha:18790', adminToken: 'admin-secret', websocketToken: 'ws-secret', enabled: true }]
+      },
+      { WebSocketImpl: FakeWebSocket }
+    )
+    const socket = connectChat(base, 'dashboard')
+    await waitForEvent<void>(socket, 'connect')
+
+    const events: unknown[] = []
+    socket.on('chat_event', (event) => events.push(event))
+    socket.emit('connect_group', { instanceIds: ['alpha'] })
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    FakeWebSocket.instances[0].open()
+    FakeWebSocket.instances[0].close()
+
+    await vi.waitFor(() => expect(events).toContainEqual({ instanceId: 'alpha', event: 'chat.connected', chatId: '' }))
+    expect(events).toContainEqual({ instanceId: 'alpha', event: 'chat.connecting', chatId: '' })
+    expect(events).toContainEqual({ instanceId: 'alpha', event: 'chat.disconnected', chatId: '' })
+  })
+
+  it('emits connection failed when upstream websocket errors', async () => {
+    FakeWebSocket.instances = []
+    const base = await listen()
+    registerChatBridge(
+      server!,
+      {
+        port: 6060,
+        authToken: 'dashboard',
+        instances: [{ id: 'alpha', name: 'alpha', baseUrl: 'http://nanobot-alpha:18790', adminToken: 'admin-secret', websocketToken: 'ws-secret', enabled: true }]
+      },
+      { WebSocketImpl: FakeWebSocket }
+    )
+    const socket = connectChat(base, 'dashboard')
+    await waitForEvent<void>(socket, 'connect')
+
+    const events: unknown[] = []
+    socket.on('chat_event', (event) => events.push(event))
+    socket.emit('connect_group', { instanceIds: ['alpha'] })
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    FakeWebSocket.instances[0].fail()
+
+    await vi.waitFor(() => expect(events).toContainEqual({ instanceId: 'alpha', event: 'chat.connection_failed', chatId: '' }))
+  })
+
   it('broadcasts group messages only to connected open upstreams', async () => {
     FakeWebSocket.instances = []
     const base = await listen()
@@ -290,6 +351,7 @@ describe('registerChatBridge', () => {
 
     socket.emit('connect_group', { instanceIds: ['alpha', 'beta'] })
     await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+    for (const upstream of FakeWebSocket.instances) upstream.open()
     socket.emit('send_group_message', { text: 'hello group' })
 
     await vi.waitFor(() => {

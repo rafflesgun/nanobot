@@ -20,7 +20,7 @@ type ChatBridgeOptions = {
 type WebSocketLike = {
   close(): void
   on(event: 'message', listener: (data: WebSocket.RawData) => void): unknown
-  on(event: 'close' | 'error', listener: () => void): unknown
+  on(event: 'open' | 'close' | 'error', listener: () => void): unknown
   readyState: number
   send(payload: string): void
 }
@@ -92,6 +92,11 @@ export function registerChatBridge(server: http.Server, config: WebuiConfig, opt
         return
       }
       upstreams.set(instanceId, upstream)
+      socket.emit('chat_event', { instanceId, event: 'chat.connecting', chatId: '' })
+      upstream.on('open', () => {
+        if (currentGeneration !== generation || upstreams.get(instanceId) !== upstream) return
+        socket.emit('chat_event', { instanceId, event: 'chat.connected', chatId: '' })
+      })
       upstream.on('message', (data) => {
         if (currentGeneration !== generation || upstreams.get(instanceId) !== upstream) return
         socket.emit('chat_event', normalizeNanobotEvent(instanceId, data.toString()))
