@@ -8,6 +8,8 @@ const selectedInstanceId = ref('')
 const selectedLogName = ref('')
 const logs = ref<LogInfo[]>([])
 const tail = ref<LogTail | null>(null)
+const filter = ref('')
+const viewMode = ref<'formatted' | 'raw'>('formatted')
 const error = ref('')
 const loadingLogs = ref(false)
 const loadingTail = ref(false)
@@ -16,6 +18,11 @@ let tailSequence = 0
 
 const enabledInstances = computed(() => props.instances.filter((instance) => instance.enabled))
 const selectedInstance = computed(() => enabledInstances.value.find((instance) => instance.id === selectedInstanceId.value))
+const filteredLogs = computed(() => {
+  const needle = filter.value.trim().toLowerCase()
+  if (!needle) return logs.value
+  return logs.value.filter((log) => log.name.toLowerCase().includes(needle))
+})
 
 async function loadLogs() {
   const instance = selectedInstance.value
@@ -94,11 +101,22 @@ watch([selectedInstanceId, () => props.token], loadLogs, { immediate: true })
         </select>
       </label>
 
+      <div class="logs-toolbar" data-testid="logs-toolbar">
+        <label>
+          <span>Filter</span>
+          <input v-model="filter" data-testid="logs-filter" type="search" placeholder="Filter logs">
+        </label>
+        <div class="view-toggle" aria-label="Log view mode">
+          <button type="button" data-view="formatted" :class="{ active: viewMode === 'formatted' }" @click="viewMode = 'formatted'">Formatted</button>
+          <button type="button" data-view="raw" :class="{ active: viewMode === 'raw' }" @click="viewMode = 'raw'">Raw</button>
+        </div>
+      </div>
+
       <div class="log-list" aria-label="Available logs">
         <p v-if="loadingLogs" class="empty-state">Loading logs...</p>
-        <p v-else-if="logs.length === 0" class="empty-state">No logs available.</p>
+        <p v-else-if="filteredLogs.length === 0" class="empty-state">No logs available.</p>
         <button
-          v-for="log in logs"
+          v-for="log in filteredLogs"
           :key="log.name"
           class="secondary log-button"
           :class="{ 'is-selected': log.name === selectedLogName }"
@@ -112,7 +130,13 @@ watch([selectedInstanceId, () => props.token], loadLogs, { immediate: true })
 
       <p v-if="error" class="error-text">{{ error }}</p>
 
-      <pre v-if="tail" class="log-tail">{{ tail.lines.join('\n') }}</pre>
+      <pre v-if="tail && viewMode === 'raw'" class="log-tail" data-testid="raw-log-tail">{{ tail.lines.join('\n') }}</pre>
+      <ol v-else-if="tail" class="log-tail formatted-log-tail">
+        <li v-for="(line, index) in tail.lines" :key="`${tail.name}-${index}`" data-testid="formatted-log-line">
+          <span class="line-number">{{ index + 1 }}</span>
+          <span class="line-text">{{ line }}</span>
+        </li>
+      </ol>
       <div v-else class="log-tail empty-state">{{ loadingTail ? 'Loading log tail...' : 'Select a log to view its tail.' }}</div>
     </div>
   </section>
@@ -139,12 +163,47 @@ watch([selectedInstanceId, () => props.token], loadLogs, { immediate: true })
   gap: 1rem;
 }
 
-.instance-select {
+.instance-select,
+.logs-toolbar label {
   display: grid;
   gap: 0.45rem;
 }
 
-.instance-select span {
+.logs-toolbar {
+  align-items: end;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 0.85rem;
+  background: rgba(8, 13, 28, 0.72);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: space-between;
+  padding: 1rem;
+}
+
+.logs-toolbar label {
+  flex: 1 1 16rem;
+}
+
+.view-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.view-toggle button {
+  border-color: rgba(148, 163, 184, 0.28);
+  background: rgba(15, 23, 42, 0.72);
+}
+
+.view-toggle button.active {
+  border-color: rgba(56, 189, 248, 0.62);
+  background: rgba(14, 165, 233, 0.18);
+  color: #e0f2fe;
+}
+
+.instance-select span,
+.logs-toolbar span {
   color: #cbd5e1;
   font-weight: 700;
 }
@@ -174,6 +233,29 @@ watch([selectedInstanceId, () => props.token], loadLogs, { immediate: true })
   min-height: 12rem;
   overflow: auto;
   white-space: pre-wrap;
+}
+
+.formatted-log-tail {
+  display: grid;
+  gap: 0.35rem;
+  list-style: none;
+}
+
+.formatted-log-tail li {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: 3rem minmax(0, 1fr);
+}
+
+.line-number {
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.line-text {
+  color: #dbeafe;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 .error-text {

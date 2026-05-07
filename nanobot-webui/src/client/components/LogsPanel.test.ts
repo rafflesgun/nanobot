@@ -34,4 +34,43 @@ describe('LogsPanel', () => {
 
     await vi.waitFor(() => expect((wrapper.vm as unknown as { loadingLogs: boolean }).loadingLogs).toBe(false))
   })
+
+  it('filters available logs from the toolbar', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({ logs: [{ name: 'nanobot.log' }, { name: 'debug.log' }] })
+    }))
+
+    const wrapper = mount(LogsPanel, {
+      props: { token: 'dashboard', instances: [{ id: 'alpha', name: 'alpha', baseUrl: 'http://alpha', enabled: true }] }
+    })
+
+    await vi.waitFor(() => expect(wrapper.text()).toContain('debug.log'))
+    expect(wrapper.find('[data-testid="logs-toolbar"]').exists()).toBe(true)
+
+    await wrapper.get('[data-testid="logs-filter"]').setValue('nano')
+
+    expect(wrapper.find('button[data-log="nanobot.log"]').exists()).toBe(true)
+    expect(wrapper.find('button[data-log="debug.log"]').exists()).toBe(false)
+  })
+
+  it('switches selected log between formatted and raw views', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: vi.fn().mockResolvedValue({ logs: [{ name: 'nanobot.log' }] }) })
+      .mockResolvedValueOnce({ ok: true, json: vi.fn().mockResolvedValue({ name: 'nanobot.log', lines: ['INFO booted', 'ERROR failed'] }) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const wrapper = mount(LogsPanel, {
+      props: { token: 'dashboard', instances: [{ id: 'alpha', name: 'alpha', baseUrl: 'http://alpha', enabled: true }] }
+    })
+
+    await vi.waitFor(() => expect(wrapper.text()).toContain('nanobot.log'))
+    await wrapper.get('button[data-log="nanobot.log"]').trigger('click')
+    await vi.waitFor(() => expect(wrapper.findAll('[data-testid="formatted-log-line"]')).toHaveLength(2))
+
+    await wrapper.get('[data-view="raw"]').trigger('click')
+
+    expect(wrapper.get('[data-testid="raw-log-tail"]').text()).toContain('INFO booted\nERROR failed')
+  })
 })
