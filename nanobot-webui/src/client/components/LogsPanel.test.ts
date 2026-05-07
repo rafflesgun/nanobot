@@ -73,4 +73,22 @@ describe('LogsPanel', () => {
 
     expect(wrapper.get('[data-testid="raw-log-tail"]').text()).toContain('INFO booted\nERROR failed')
   })
+
+  it('loads webui runtime logs as a selectable source', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: vi.fn().mockResolvedValue({ logs: [] }) })
+      .mockResolvedValueOnce({ ok: true, json: vi.fn().mockResolvedValue({ logs: [{ at: '2026-05-07T00:00:00.000Z', level: 'info', method: 'GET', path: '/api/instances', status: 200 }] }) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const wrapper = mount(LogsPanel, {
+      props: { token: 'dashboard', instances: [{ id: 'alpha', name: 'alpha', baseUrl: 'http://alpha', enabled: true }] }
+    })
+
+    await vi.waitFor(() => expect(wrapper.text()).toContain('WebUI Runtime'))
+    await wrapper.get('[data-source="webui-runtime"]').trigger('click')
+
+    await vi.waitFor(() => expect(wrapper.text()).toContain('/api/instances'))
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/webui/logs', { headers: { authorization: 'Bearer dashboard' } })
+  })
 })

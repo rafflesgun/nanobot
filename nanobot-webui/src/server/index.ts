@@ -10,12 +10,14 @@ import type { WebuiConfig } from './config.js'
 import { loadConfig, publicInstance } from './config.js'
 import { createStateStore, publicStateInstance, type StateStore } from './stateStore.js'
 import { proxyAdminRequest as defaultProxyAdminRequest } from './upstream.js'
+import { createWebuiLogger, type WebuiLogger } from './webuiLogger.js'
 
 type ProxyAdminRequest = typeof defaultProxyAdminRequest
 type CreateAppDeps = {
   proxyAdminRequest?: ProxyAdminRequest
   stateStore?: StateStore
   staticRoot?: string
+  webuiLogger?: WebuiLogger
 }
 
 function findInstance(config: WebuiConfig, id: string) {
@@ -61,6 +63,20 @@ export function createApp(config: WebuiConfig, deps: CreateAppDeps = {}) {
   const router = new Router()
   const proxyAdminRequest = deps.proxyAdminRequest ?? defaultProxyAdminRequest
   const stateStore = deps.stateStore ?? createStateStore(config.dataDir ?? '/data')
+  const webuiLogger = deps.webuiLogger ?? createWebuiLogger()
+
+  app.use(async (ctx, next) => {
+    const started = Date.now()
+    try {
+      await next()
+      if (ctx.path.startsWith('/api')) {
+        webuiLogger.info({ method: ctx.method, path: ctx.path, status: ctx.status, message: `${Date.now() - started}ms` })
+      }
+    } catch (err) {
+      webuiLogger.error({ method: ctx.method, path: ctx.path, status: ctx.status || 500, message: err instanceof Error ? err.message : String(err) })
+      throw err
+    }
+  })
 
   app.use(async (ctx, next) => {
     if (ctx.path === '/health') return next()
@@ -79,6 +95,10 @@ export function createApp(config: WebuiConfig, deps: CreateAppDeps = {}) {
 
   router.get('/api/instances', (ctx) => {
     ctx.body = { instances: config.instances.map(publicInstance) }
+  })
+
+  router.get('/api/webui/logs', (ctx) => {
+    ctx.body = { logs: webuiLogger.list() }
   })
 
   router.get('/api/state/topics', async (ctx) => {

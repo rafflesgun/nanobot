@@ -32,6 +32,14 @@ export type InstanceStatus = {
 
 export type LogInfo = { name: string }
 export type LogTail = { name: string; lines: string[] }
+export type WebuiLogEntry = {
+  at: string
+  level: string
+  method?: string
+  path?: string
+  status?: number
+  message?: string
+}
 
 export type InstanceSettings = {
   agent: {
@@ -78,6 +86,12 @@ export async function fetchLogTail(instanceId: string, name: string, token: stri
   const encodedName = encodeURIComponent(name)
   const res = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/logs/${encodedName}?tail=200`, { headers: authHeaders(token) })
   return readJson<LogTail>(res, `failed to load ${name} for ${instanceId}`)
+}
+
+export async function fetchWebuiLogs(token: string): Promise<WebuiLogEntry[]> {
+  const res = await fetch('/api/webui/logs', { headers: authHeaders(token) })
+  const payload = await readJson<{ logs: WebuiLogEntry[] }>(res, 'failed to load webui logs')
+  return payload.logs
 }
 
 export async function fetchInstanceSettings(instanceId: string, token: string): Promise<InstanceSettings> {

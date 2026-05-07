@@ -74,6 +74,27 @@ describe('createApp', () => {
     await expect(unauthorized.json()).resolves.toEqual({ error: 'Unauthorized' })
   })
 
+  it('serves authenticated webui logs and records requests', async () => {
+    const { app } = createApp({
+      port: 6060,
+      authToken: 'dashboard',
+      instances: []
+    })
+    const base = await listen(app)
+
+    const unauthorized = await fetch(`${base}/api/webui/logs`)
+    const instances = await fetch(`${base}/api/instances`, { headers: { authorization: 'Bearer dashboard' } })
+    const logs = await fetch(`${base}/api/webui/logs`, { headers: { authorization: 'Bearer dashboard' } })
+
+    expect(unauthorized.status).toBe(401)
+    expect(instances.status).toBe(200)
+    expect(logs.status).toBe(200)
+    const payload = await logs.json()
+    expect(payload.logs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ method: 'GET', path: '/api/instances', status: 200 })
+    ]))
+  })
+
   it('redacts instance tokens', async () => {
     const { app } = createApp({
       port: 6060,

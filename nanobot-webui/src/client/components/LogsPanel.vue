@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { fetchInstanceLogs, fetchLogTail, type LogInfo, type LogTail, type PublicInstance } from '../api'
+import { fetchInstanceLogs, fetchLogTail, fetchWebuiLogs, type LogInfo, type LogTail, type PublicInstance } from '../api'
 
 const props = defineProps<{ token: string; instances: PublicInstance[] }>()
 
@@ -13,8 +13,10 @@ const viewMode = ref<'formatted' | 'raw'>('formatted')
 const error = ref('')
 const loadingLogs = ref(false)
 const loadingTail = ref(false)
+const loadingWebuiLogs = ref(false)
 let logsSequence = 0
 let tailSequence = 0
+let webuiLogsSequence = 0
 
 const enabledInstances = computed(() => props.instances.filter((instance) => instance.enabled))
 const selectedInstance = computed(() => enabledInstances.value.find((instance) => instance.id === selectedInstanceId.value))
@@ -72,6 +74,28 @@ async function loadTail(name: string) {
   }
 }
 
+async function loadWebuiLogs() {
+  const sequence = ++webuiLogsSequence
+  tailSequence++
+  selectedLogName.value = 'webui-runtime'
+  tail.value = null
+  error.value = ''
+  loadingWebuiLogs.value = true
+  try {
+    const loaded = await fetchWebuiLogs(props.token)
+    if (sequence !== webuiLogsSequence) return
+    tail.value = {
+      name: 'WebUI Runtime',
+      lines: loaded.map((entry) => [entry.at, entry.level.toUpperCase(), entry.method, entry.path, entry.status, entry.message].filter((part) => part !== undefined && part !== '').join(' '))
+    }
+  } catch (err) {
+    if (sequence !== webuiLogsSequence) return
+    error.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    if (sequence === webuiLogsSequence) loadingWebuiLogs.value = false
+  }
+}
+
 watch(enabledInstances, (instances) => {
   if (instances.some((instance) => instance.id === selectedInstanceId.value)) return
   selectedInstanceId.value = instances[0]?.id ?? ''
@@ -114,7 +138,16 @@ watch([selectedInstanceId, () => props.token], loadLogs, { immediate: true })
 
       <div class="log-list" aria-label="Available logs">
         <p v-if="loadingLogs" class="empty-state">Loading logs...</p>
-        <p v-else-if="filteredLogs.length === 0" class="empty-state">No logs available.</p>
+        <button
+          class="secondary log-button"
+          :class="{ 'is-selected': selectedLogName === 'webui-runtime' }"
+          type="button"
+          data-source="webui-runtime"
+          @click="loadWebuiLogs"
+        >
+          WebUI Runtime
+        </button>
+        <p v-if="!loadingLogs && filteredLogs.length === 0" class="empty-state">No instance logs available.</p>
         <button
           v-for="log in filteredLogs"
           :key="log.name"
@@ -137,7 +170,7 @@ watch([selectedInstanceId, () => props.token], loadLogs, { immediate: true })
           <span class="line-text">{{ line }}</span>
         </li>
       </ol>
-      <div v-else class="log-tail empty-state">{{ loadingTail ? 'Loading log tail...' : 'Select a log to view its tail.' }}</div>
+      <div v-else class="log-tail empty-state">{{ loadingTail || loadingWebuiLogs ? 'Loading log tail...' : 'Select a log to view its tail.' }}</div>
     </div>
   </section>
 </template>

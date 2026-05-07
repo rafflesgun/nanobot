@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fetchInstanceLogs, fetchInstanceSettings, fetchInstanceStatus, fetchLogTail, fetchStateInstances, fetchStateTopics, patchInstanceSettings, saveStateInstances, saveStateTopics } from './api'
+import { fetchInstanceLogs, fetchInstanceSettings, fetchInstanceStatus, fetchLogTail, fetchStateInstances, fetchStateTopics, fetchWebuiLogs, patchInstanceSettings, saveStateInstances, saveStateTopics } from './api'
 
 describe('admin API helpers', () => {
   afterEach(() => {
@@ -30,6 +30,16 @@ describe('admin API helpers', () => {
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/instances/alpha/logs', { headers: { authorization: 'Bearer dashboard' } })
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/instances/alpha/logs/nanobot.log?tail=200', { headers: { authorization: 'Bearer dashboard' } })
+  })
+
+  it('loads webui runtime logs', async () => {
+    const logs = [{ at: '2026-05-07T00:00:00.000Z', level: 'info', method: 'GET', path: '/api/instances', status: 200 }]
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({ logs }) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchWebuiLogs('dashboard')).resolves.toEqual(logs)
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/webui/logs', { headers: { authorization: 'Bearer dashboard' } })
   })
 
   it('loads and patches settings through the dashboard proxy', async () => {
