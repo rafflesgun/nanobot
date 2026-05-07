@@ -95,12 +95,13 @@ export function publicInstance(instance: NanobotInstance) {
 }
 
 export function websocketUrlForInstance(instance: NanobotInstance): string {
-  if (instance.websocketUrl) return instance.websocketUrl
-  const url = new URL(instance.baseUrl)
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-  url.port = '8765'
-  url.pathname = '/'
-  url.search = ''
+  const url = instance.websocketUrl ? new URL(instance.websocketUrl) : new URL(instance.baseUrl)
+  if (!instance.websocketUrl) {
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+    url.port = '8765'
+    url.pathname = '/'
+    url.search = ''
+  }
   url.searchParams.set('client_id', 'nanobot-webui')
   url.searchParams.set('token', instance.websocketToken)
   return url.toString()

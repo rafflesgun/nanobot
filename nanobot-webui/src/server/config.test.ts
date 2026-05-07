@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { loadConfig, publicInstance, websocketUrlForInstance } from './config'
+import { loadConfig, publicInstance, websocketUrlForInstance, type NanobotInstance } from './config'
 
 describe('loadConfig', () => {
   it('loads dashboard auth and instances from a mounted config file', () => {
@@ -86,27 +86,34 @@ describe('loadConfig', () => {
   })
 })
 
-it('derives websocket url from configured instance websocket token only', () => {
-  expect(websocketUrlForInstance({
+describe('websocketUrlForInstance', () => {
+  const baseInstance: NanobotInstance = {
     id: 'alpha',
-    name: 'alpha',
+    name: 'Alpha',
     baseUrl: 'http://nanobot-alpha:18790',
     adminToken: 'admin-secret',
     websocketToken: 'ws-secret',
     enabled: true
-  })).toBe('ws://nanobot-alpha:8765/?client_id=nanobot-webui&token=ws-secret')
-})
+  }
 
-it('returns explicit websocket url overrides as-is', () => {
-  expect(websocketUrlForInstance({
-    id: 'alpha',
-    name: 'alpha',
-    baseUrl: 'http://nanobot-alpha:18790',
-    adminToken: 'admin-secret',
-    websocketToken: 'ws-secret',
-    websocketUrl: 'ws://custom.example/chat?token=custom',
-    enabled: true
-  })).toBe('ws://custom.example/chat?token=custom')
+  it('derives websocket url from configured instance websocket token only', () => {
+    expect(websocketUrlForInstance(baseInstance)).toBe('ws://nanobot-alpha:8765/?client_id=nanobot-webui&token=ws-secret')
+  })
+
+  it('adds token and client id to an explicit websocket url', () => {
+    expect(websocketUrlForInstance({ ...baseInstance, websocketUrl: 'ws://nanobot-alpha:8765/' })).toBe(
+      'ws://nanobot-alpha:8765/?client_id=nanobot-webui&token=ws-secret'
+    )
+  })
+
+  it('preserves non-sensitive query params and overrides token/client_id', () => {
+    expect(
+      websocketUrlForInstance({
+        ...baseInstance,
+        websocketUrl: 'ws://nanobot-alpha:8765/ws?room=ops&token=wrong&client_id=browser'
+      })
+    ).toBe('ws://nanobot-alpha:8765/ws?room=ops&token=ws-secret&client_id=nanobot-webui')
+  })
 })
 
 it('redacts websocket token and websocket url from public instances', () => {
