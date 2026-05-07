@@ -5,12 +5,35 @@ export type PublicInstance = {
   enabled: boolean
 }
 
+export type ChatMapping = {
+  chatId: string
+  status: 'pending' | 'attached' | 'error'
+  lastError?: string
+}
+
+export type ComposerMedia = {
+  data_url: string
+  name?: string
+}
+
 export type StateTopic = {
   id: string
   name: string
   selectedIds: string[]
+  chatMappings?: Record<string, ChatMapping>
   transcript: {
-    entries: Array<{ id: number; instanceId: string; chatId: string; role: string; label: string; event: string; text: string; kind?: string; title?: string }>
+    entries: Array<{
+      id: number
+      instanceId: string
+      chatId: string
+      role: string
+      label: string
+      event: string
+      text: string
+      kind?: string
+      title?: string
+      attachments?: ComposerMedia[]
+    }>
     debugEvents: unknown[]
     nextEntryId?: number
   }

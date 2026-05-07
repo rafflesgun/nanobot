@@ -38,6 +38,18 @@ describe('chatTranscript', () => {
     ])
   })
 
+  it('stores outbound attachment metadata with user messages', () => {
+    const state = createTranscriptState()
+
+    appendOutboundMessage(state, 'see attachment', [{ name: 'notes.txt', data_url: 'data:text/plain;base64,bm90ZXM=' }])
+
+    expect(state.entries[0]).toMatchObject({
+      role: 'user',
+      text: 'see attachment',
+      attachments: [{ name: 'notes.txt', data_url: 'data:text/plain;base64,bm90ZXM=' }]
+    })
+  })
+
   it('classifies tool events as distinct transcript entries', () => {
     const state = createTranscriptState()
 

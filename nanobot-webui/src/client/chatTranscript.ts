@@ -3,6 +3,11 @@ import type { ChatEvent } from './socket'
 export type TranscriptRole = 'assistant' | 'system' | 'user'
 export type TranscriptKind = 'message' | 'tool' | 'reasoning'
 
+export type ComposerMedia = {
+  data_url: string
+  name?: string
+}
+
 export type TranscriptEntry = {
   id: number
   instanceId: string
@@ -13,6 +18,7 @@ export type TranscriptEntry = {
   event: string
   text: string
   title?: string
+  attachments?: ComposerMedia[]
 }
 
 export type TranscriptState = {
@@ -27,7 +33,7 @@ export function createTranscriptState(): TranscriptState {
   return { entries: [], debugEvents: [], nextEntryId: 1 }
 }
 
-export function appendOutboundMessage(state: TranscriptState, text: string) {
+export function appendOutboundMessage(state: TranscriptState, text: string, attachments: ComposerMedia[] = []) {
   state.entries.push({
     id: state.nextEntryId++,
     instanceId: 'local',
@@ -35,7 +41,8 @@ export function appendOutboundMessage(state: TranscriptState, text: string) {
     label: 'You',
     role: 'user',
     event: 'outbound',
-    text
+    text,
+    ...(attachments.length > 0 ? { attachments: [...attachments] } : {})
   })
 }
 

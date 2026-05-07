@@ -33,7 +33,7 @@ describe('stateStore', () => {
         name: 'Ops',
         selectedIds: ['alpha'],
         transcript: {
-          entries: [{ id: 'm1', role: 'assistant', label: 'alpha', text: 'hello' }],
+          entries: [{ id: 1, role: 'assistant', label: 'alpha', text: 'hello', instanceId: 'alpha', chatId: 'c1', event: 'delta' }],
           debugEvents: [{ instanceId: 'alpha', event: 'delta', chatId: 'c1', text: 'hello' }]
         }
       }
@@ -44,6 +44,38 @@ describe('stateStore', () => {
     await expect(store.read()).resolves.toMatchObject({ topics })
     const raw = JSON.parse(await readFile(path.join(dataDir, 'webui-state.json'), 'utf-8'))
     expect(raw.topics).toEqual(topics)
+  })
+
+  it('persists topic chat mappings and transcript attachment metadata', async () => {
+    const dataDir = await tempDataDir()
+    const store = createStateStore(dataDir)
+    const topics: StateTopic[] = [
+      {
+        id: 'ops',
+        name: 'Ops',
+        selectedIds: ['alpha'],
+        chatMappings: { alpha: { chatId: 'chat-alpha', status: 'attached' } },
+        transcript: {
+          entries: [
+            {
+              id: 1,
+              role: 'user',
+              label: 'You',
+              text: 'see file',
+              instanceId: 'local',
+              chatId: '',
+              event: 'outbound',
+              attachments: [{ name: 'notes.txt', data_url: 'data:text/plain;base64,bm90ZXM=' }]
+            }
+          ],
+          debugEvents: []
+        }
+      }
+    ]
+
+    await store.writeTopics(topics)
+
+    await expect(store.read()).resolves.toEqual({ topics, instances: [] })
   })
 
   it('persists instances while redacting secrets from public instance data', async () => {
