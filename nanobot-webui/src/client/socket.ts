@@ -6,6 +6,9 @@ export type ChatEvent = {
   chatId: string
   text?: string
   detail?: string
+  reasoning?: string
+  tool?: string
+  tool_call?: string
 }
 
 export type ChatSocket = {

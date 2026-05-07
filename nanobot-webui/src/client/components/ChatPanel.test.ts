@@ -53,6 +53,49 @@ describe('ChatPanel', () => {
     expect(wrapper.text()).toContain('streamed reply')
   })
 
+  it('renders markdown code blocks without injecting html', async () => {
+    const socket = new FakeSocket()
+    const wrapper = mount(ChatPanel, {
+      props: {
+        token: 'dashboard',
+        createSocket: () => socket,
+        instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }]
+      }
+    })
+
+    socket.emit('chat_event', {
+      instanceId: 'alpha',
+      event: 'delta',
+      chatId: 'c1',
+      text: '# Plan\n\n```ts\nconst tag = `<script>`\n```'
+    })
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.get('.markdown-heading').text()).toBe('Plan')
+    expect(wrapper.get('code[data-language="ts"]').text()).toBe('const tag = `<script>`')
+    expect(wrapper.find('script').exists()).toBe(false)
+  })
+
+  it('renders tool and reasoning events as distinct transcript blocks', async () => {
+    const socket = new FakeSocket()
+    const wrapper = mount(ChatPanel, {
+      props: {
+        token: 'dashboard',
+        createSocket: () => socket,
+        instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }]
+      }
+    })
+
+    socket.emit('chat_event', { instanceId: 'alpha', event: 'tool_call.created', chatId: 'c1', tool: 'shell', detail: 'npm test' })
+    socket.emit('chat_event', { instanceId: 'alpha', event: 'reasoning.delta', chatId: 'c1', reasoning: 'checking output' })
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.get('.transcript-entry.is-tool').text()).toContain('Tool: shell')
+    expect(wrapper.get('.transcript-entry.is-tool').text()).toContain('npm test')
+    expect(wrapper.get('.transcript-entry.is-reasoning').text()).toContain('Reasoning')
+    expect(wrapper.get('.transcript-entry.is-reasoning').text()).toContain('checking output')
+  })
+
   it('merges delta chunks and hides terminal events from the visible transcript', async () => {
     const socket = new FakeSocket()
     const wrapper = mount(ChatPanel, {

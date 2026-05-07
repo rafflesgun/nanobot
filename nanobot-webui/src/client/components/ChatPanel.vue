@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import type { PublicInstance } from '../api'
 import { appendOutboundMessage, applyChatEvent, createTranscriptState, type TranscriptState } from '../chatTranscript'
+import { parseMarkdownTranscript, type InlineToken, type MarkdownBlock } from '../markdownTranscript'
 import { createChatSocket, type ChatEvent, type ChatSocket } from '../socket'
 
 type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'error' | 'disconnected'
@@ -84,6 +85,18 @@ function switchTopic(topicId: string) {
   selectedIds.value = [...selectedTopic.value.selectedIds]
 }
 
+function markdownBlocks(text: string) {
+  return parseMarkdownTranscript(text)
+}
+
+function blockKey(entryId: number, block: MarkdownBlock, index: number) {
+  return `${entryId}-${block.type}-${index}`
+}
+
+function inlineKey(token: InlineToken, index: number) {
+  return `${token.type}-${index}-${token.text}`
+}
+
 onMounted(() => {
   socket.on('chat_event', handleChatEvent)
 })
@@ -135,12 +148,41 @@ onUnmounted(() => {
 
       <div class="transcript" aria-live="polite">
         <div v-if="transcript.length === 0" class="empty-state">Transcript events will appear here.</div>
-        <article v-for="entry in transcript" :key="entry.id" class="transcript-entry">
+        <article
+          v-for="entry in transcript"
+          :key="entry.id"
+          class="transcript-entry"
+          :class="[`is-${entry.kind ?? 'message'}`, `is-${entry.role}`]"
+        >
           <header>
-            <strong>{{ entry.label }}</strong>
+            <strong>{{ entry.title ?? entry.label }}</strong>
             <span>{{ entry.role }}</span>
           </header>
-          <p>{{ entry.text }}</p>
+          <div class="markdown-body">
+            <template v-for="(block, blockIndex) in markdownBlocks(entry.text)" :key="blockKey(entry.id, block, blockIndex)">
+              <component :is="`h${block.level}`" v-if="block.type === 'heading'" class="markdown-heading">
+                <template v-for="(token, tokenIndex) in block.content" :key="inlineKey(token, tokenIndex)">
+                  <code v-if="token.type === 'inlineCode'">{{ token.text }}</code>
+                  <span v-else>{{ token.text }}</span>
+                </template>
+              </component>
+              <p v-else-if="block.type === 'paragraph'">
+                <template v-for="(token, tokenIndex) in block.content" :key="inlineKey(token, tokenIndex)">
+                  <code v-if="token.type === 'inlineCode'">{{ token.text }}</code>
+                  <span v-else>{{ token.text }}</span>
+                </template>
+              </p>
+              <ul v-else-if="block.type === 'list'">
+                <li v-for="(item, itemIndex) in block.items" :key="itemIndex">
+                  <template v-for="(token, tokenIndex) in item" :key="inlineKey(token, tokenIndex)">
+                    <code v-if="token.type === 'inlineCode'">{{ token.text }}</code>
+                    <span v-else>{{ token.text }}</span>
+                  </template>
+                </li>
+              </ul>
+              <pre v-else class="markdown-code"><code :data-language="block.language">{{ block.code }}</code></pre>
+            </template>
+          </div>
         </article>
         <details class="debug-events">
           <summary>Debug events ({{ debugEvents.length }})</summary>
@@ -273,9 +315,75 @@ onUnmounted(() => {
   font-size: 0.85rem;
 }
 
-.transcript-entry p {
+.markdown-body {
+  color: #d7e2f1;
+  line-height: 1.55;
+  margin-top: 0.65rem;
+}
+
+.markdown-body p,
+.markdown-body ul,
+.markdown-heading,
+.markdown-code {
   margin: 0.5rem 0 0;
+}
+
+.markdown-body p:first-child,
+.markdown-body ul:first-child,
+.markdown-heading:first-child,
+.markdown-code:first-child {
+  margin-top: 0;
+}
+
+.markdown-body p {
   white-space: pre-wrap;
+}
+
+.markdown-heading {
+  color: #f8fafc;
+  font-size: 1rem;
+  line-height: 1.3;
+}
+
+.markdown-body ul {
+  padding-left: 1.25rem;
+}
+
+.markdown-body code {
+  border: 1px solid rgba(125, 211, 252, 0.18);
+  border-radius: 0.35rem;
+  background: rgba(2, 6, 23, 0.72);
+  color: #bae6fd;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.9em;
+  padding: 0.08rem 0.28rem;
+}
+
+.markdown-code {
+  border: 1px solid rgba(96, 165, 250, 0.22);
+  border-radius: 0.7rem;
+  background: rgba(2, 6, 23, 0.88);
+  overflow: auto;
+  padding: 0.75rem;
+}
+
+.markdown-code code {
+  border: 0;
+  background: transparent;
+  color: #dbeafe;
+  display: block;
+  padding: 0;
+  white-space: pre;
+}
+
+.transcript-entry.is-tool {
+  border-color: rgba(251, 191, 36, 0.36);
+  background: rgba(69, 46, 8, 0.34);
+}
+
+.transcript-entry.is-reasoning {
+  border-color: rgba(167, 139, 250, 0.36);
+  background: rgba(46, 16, 101, 0.24);
 }
 
 .composer {
