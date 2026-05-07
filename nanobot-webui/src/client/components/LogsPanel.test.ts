@@ -20,4 +20,18 @@ describe('LogsPanel', () => {
     await wrapper.get('button[data-log="nanobot.log"]').trigger('click')
     await vi.waitFor(() => expect(wrapper.text()).toContain('line two'))
   })
+
+  it('clears log loading state when no instance is selected', async () => {
+    const fetchMock = vi.fn().mockReturnValue(new Promise(() => {}))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const wrapper = mount(LogsPanel, {
+      props: { token: 'dashboard', instances: [{ id: 'alpha', name: 'alpha', baseUrl: 'http://alpha', enabled: true }] }
+    })
+
+    await vi.waitFor(() => expect(wrapper.text()).toContain('Loading logs...'))
+    await wrapper.setProps({ instances: [{ id: 'alpha', name: 'alpha', baseUrl: 'http://alpha', enabled: false }] })
+
+    await vi.waitFor(() => expect((wrapper.vm as unknown as { loadingLogs: boolean }).loadingLogs).toBe(false))
+  })
 })

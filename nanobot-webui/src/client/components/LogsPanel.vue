@@ -26,7 +26,10 @@ async function loadLogs() {
   logs.value = []
   error.value = ''
 
-  if (!instance) return
+  if (!instance) {
+    loadingLogs.value = false
+    return
+  }
 
   loadingLogs.value = true
   try {
