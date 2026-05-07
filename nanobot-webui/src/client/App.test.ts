@@ -71,4 +71,23 @@ describe('App', () => {
     expect(wrapper.text()).not.toContain('Instances')
     expect(wrapper.text()).not.toContain('http://nanobot-alpha:18790')
   })
+
+  it('shows dashboard tabs after login', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ instances: [{ id: 'alpha', name: 'alpha', baseUrl: 'http://alpha', enabled: true }] })
+      })
+    )
+
+    const wrapper = mount(App)
+    await wrapper.get('input').setValue('secret-token')
+    await wrapper.get('form').trigger('submit')
+
+    await vi.waitFor(() => expect(wrapper.text()).toContain('Overview'))
+    expect(wrapper.text()).toContain('Group Chat')
+    expect(wrapper.text()).toContain('Logs')
+    expect(wrapper.text()).toContain('Settings')
+  })
 })

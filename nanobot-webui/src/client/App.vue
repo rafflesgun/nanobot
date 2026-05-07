@@ -2,13 +2,17 @@
 import { ref } from 'vue'
 import { fetchInstances, type PublicInstance } from './api'
 import InstanceList from './components/InstanceList.vue'
+import OverviewPanel from './components/OverviewPanel.vue'
 import ChatPanel from './components/ChatPanel.vue'
+import LogsPanel from './components/LogsPanel.vue'
+import SettingsPanel from './components/SettingsPanel.vue'
 
 const token = ref('')
 const instances = ref<PublicInstance[]>([])
 const error = ref('')
 const authenticated = ref(false)
 const loading = ref(false)
+const activeTab = ref<'overview' | 'chat' | 'logs' | 'settings'>('overview')
 
 async function login() {
   error.value = ''
@@ -16,6 +20,7 @@ async function login() {
   try {
     instances.value = await fetchInstances(token.value)
     authenticated.value = true
+    activeTab.value = 'overview'
   } catch (err) {
     authenticated.value = false
     instances.value = []
@@ -30,6 +35,7 @@ function logout() {
   instances.value = []
   error.value = ''
   authenticated.value = false
+  activeTab.value = 'overview'
 }
 </script>
 
@@ -57,9 +63,18 @@ function logout() {
         <button class="secondary" data-testid="logout-button" type="button" @click="logout">Log out</button>
       </header>
       <p v-if="error" class="error" role="alert">{{ error }}</p>
+      <nav class="dashboard-tabs" aria-label="Dashboard sections">
+        <button type="button" :class="{ active: activeTab === 'overview' }" @click="activeTab = 'overview'">Overview</button>
+        <button type="button" :class="{ active: activeTab === 'chat' }" @click="activeTab = 'chat'">Group Chat</button>
+        <button type="button" :class="{ active: activeTab === 'logs' }" @click="activeTab = 'logs'">Logs</button>
+        <button type="button" :class="{ active: activeTab === 'settings' }" @click="activeTab = 'settings'">Settings</button>
+      </nav>
       <div class="grid">
         <InstanceList :instances="instances" />
-        <ChatPanel :instances="instances" :token="token" />
+        <OverviewPanel v-if="activeTab === 'overview'" :token="token" :instances="instances" />
+        <ChatPanel v-else-if="activeTab === 'chat'" :token="token" :instances="instances" />
+        <LogsPanel v-else-if="activeTab === 'logs'" :token="token" :instances="instances" />
+        <SettingsPanel v-else :token="token" :instances="instances" />
       </div>
     </template>
   </main>
@@ -206,6 +221,25 @@ label {
   gap: 1.5rem;
   margin-bottom: 1rem;
   padding: 1.35rem 1.5rem;
+}
+
+.dashboard-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0 0 1rem;
+}
+
+.dashboard-tabs button {
+  border: 1px solid #c9d4e5;
+  background: rgba(255, 255, 255, 0.86);
+  color: #24324a;
+}
+
+.dashboard-tabs button.active {
+  border-color: #2458d3;
+  background: #2458d3;
+  color: #fff;
 }
 
 .secondary {
