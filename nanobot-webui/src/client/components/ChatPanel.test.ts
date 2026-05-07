@@ -52,4 +52,39 @@ describe('ChatPanel', () => {
     expect(wrapper.text()).toContain('alpha')
     expect(wrapper.text()).toContain('streamed reply')
   })
+
+  it('renders per-instance connection status events', async () => {
+    const socket = new FakeSocket()
+    const wrapper = mount(ChatPanel, {
+      props: {
+        token: 'dashboard',
+        createSocket: () => socket,
+        instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }]
+      }
+    })
+
+    socket.emit('chat_event', { instanceId: 'alpha', event: 'chat.connecting', chatId: '' })
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain('Alpha')
+    expect(wrapper.text()).toContain('connecting')
+
+    socket.emit('chat_event', { instanceId: 'alpha', event: 'chat.connected', chatId: '' })
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain('connected')
+  })
+
+  it('disables group connect until an enabled instance is selected', async () => {
+    const socket = new FakeSocket()
+    const wrapper = mount(ChatPanel, {
+      props: {
+        token: 'dashboard',
+        createSocket: () => socket,
+        instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }]
+      }
+    })
+
+    expect(wrapper.get('[data-testid="connect-group"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('input[value="alpha"]').setValue(true)
+    expect(wrapper.get('[data-testid="connect-group"]').attributes('disabled')).toBeUndefined()
+  })
 })
