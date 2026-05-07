@@ -148,4 +148,52 @@ describe('ChatPanel', () => {
     await wrapper.get('input[value="alpha"]').setValue(true)
     expect(wrapper.get('[data-testid="connect-group"]').attributes('disabled')).toBeUndefined()
   })
+
+  it('loads persisted topics and saves topic changes', async () => {
+    const socket = new FakeSocket()
+    const loadTopics = vi.fn().mockResolvedValue([{ id: 'ops', name: 'Ops', selectedIds: ['alpha'], transcript: { entries: [], debugEvents: [] } }])
+    const saveTopics = vi.fn().mockResolvedValue(undefined)
+    const wrapper = mount(ChatPanel, {
+      props: {
+        token: 'dashboard',
+        createSocket: () => socket,
+        loadTopics,
+        saveTopics,
+        instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }]
+      }
+    })
+
+    await vi.waitFor(() => expect(wrapper.text()).toContain('Ops'))
+    await wrapper.get('[data-testid="new-topic-name"]').setValue('Support')
+    await wrapper.get('[data-testid="create-topic"]').trigger('click')
+
+    expect(loadTopics).toHaveBeenCalledWith('dashboard')
+    await vi.waitFor(() => expect(saveTopics).toHaveBeenCalled())
+    expect(saveTopics).toHaveBeenLastCalledWith('dashboard', expect.arrayContaining([expect.objectContaining({ id: 'ops', name: 'Ops' }), expect.objectContaining({ name: 'Support' })]))
+  })
+
+  it('saves selected instances and transcript updates to persisted topics', async () => {
+    const socket = new FakeSocket()
+    const saveTopics = vi.fn().mockResolvedValue(undefined)
+    const wrapper = mount(ChatPanel, {
+      props: {
+        token: 'dashboard',
+        createSocket: () => socket,
+        loadTopics: vi.fn().mockResolvedValue([]),
+        saveTopics,
+        instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }]
+      }
+    })
+
+    await wrapper.get('input[value="alpha"]').setValue(true)
+    await wrapper.get('[data-testid="connect-group"]').trigger('click')
+    socket.emit('chat_event', { instanceId: 'alpha', event: 'delta', chatId: 'c1', text: 'persist me' })
+    await wrapper.vm.$nextTick()
+
+    await vi.waitFor(() => expect(saveTopics).toHaveBeenCalledWith('dashboard', [expect.objectContaining({
+      id: 'default',
+      selectedIds: ['alpha'],
+      transcript: expect.objectContaining({ entries: [expect.objectContaining({ text: 'persist me' })] })
+    })]))
+  })
 })

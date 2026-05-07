@@ -49,7 +49,7 @@ Example `config.json`:
 | `instances[].websocketToken` | Nanobot `channels.websocket.token` for chat connections |
 | `instances[].enabled` | Whether the webui should allow proxy/chat access; defaults to `true` |
 
-Only `PORT` and `WEBUI_CONFIG` are read from environment variables. Instance URLs and tokens must come from the config file.
+Only `PORT`, `WEBUI_CONFIG`, and optional `WEBUI_DATA_DIR` are read from environment variables. Instance URLs and tokens must come from the config file or authenticated dashboard state APIs.
 
 `websocketUrl` is the base nanobot WebSocket endpoint. The webui appends `client_id=nanobot-webui` and the configured `websocketToken` server-side. Do not include secrets in browser URLs.
 
@@ -63,7 +63,7 @@ docker compose -f docker-compose.example.yml up --build
 
 The compose example mounts `./webui.config.json` read-only at `/config/webui.config.json` and points `WEBUI_CONFIG` at that path.
 
-Mount `/data` as a persistent volume. Current releases reserve it for dashboard-owned state; upcoming topic/history/instance CRUD storage will rely on it.
+Mount `/data` as a persistent volume. The dashboard writes chat topics, chat history, and local instance CRUD drafts to `/data/webui-state.json` by default. Set `WEBUI_DATA_DIR` to override that directory in tests or non-container deployments.
 
 ## Development
 
@@ -80,3 +80,4 @@ npm run dev:server
 - Dashboard auth, nanobot admin tokens, and nanobot WebSocket tokens live in the mounted config file and stay server-side.
 - Nanobot admin tokens are injected by the webui backend for admin API calls and are not returned by `/api/instances`.
 - Nanobot WebSocket tokens are injected by the webui backend for chat connections and are not returned by `/api/instances`.
+- Instance draft tokens submitted to `/api/state/instances` are stored server-side and are redacted from `/api/state/instances` list responses.

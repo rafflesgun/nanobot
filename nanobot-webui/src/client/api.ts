@@ -5,6 +5,21 @@ export type PublicInstance = {
   enabled: boolean
 }
 
+export type StateTopic = {
+  id: string
+  name: string
+  selectedIds: string[]
+  transcript: {
+    entries: Array<{ id: string; role: string; label: string; text: string }>
+    debugEvents: unknown[]
+  }
+}
+
+export type StateInstance = PublicInstance & {
+  adminToken?: string
+  websocketToken?: string
+}
+
 export type InstanceStatus = {
   status: string
   model?: string
@@ -77,4 +92,36 @@ export async function patchInstanceSettings(instanceId: string, token: string, p
     body: JSON.stringify(patch)
   })
   return readJson<InstanceSettings>(res, `failed to update settings for ${instanceId}`)
+}
+
+export async function fetchStateTopics(token: string): Promise<StateTopic[]> {
+  const res = await fetch('/api/state/topics', { headers: authHeaders(token) })
+  const payload = await readJson<{ topics: StateTopic[] }>(res, 'failed to load topics')
+  return payload.topics
+}
+
+export async function saveStateTopics(token: string, topics: StateTopic[]): Promise<StateTopic[]> {
+  const res = await fetch('/api/state/topics', {
+    method: 'PUT',
+    headers: { ...authHeaders(token), 'content-type': 'application/json' },
+    body: JSON.stringify({ topics })
+  })
+  const payload = await readJson<{ topics: StateTopic[] }>(res, 'failed to save topics')
+  return payload.topics
+}
+
+export async function fetchStateInstances(token: string): Promise<PublicInstance[]> {
+  const res = await fetch('/api/state/instances', { headers: authHeaders(token) })
+  const payload = await readJson<{ instances: PublicInstance[] }>(res, 'failed to load instance drafts')
+  return payload.instances
+}
+
+export async function saveStateInstances(token: string, instances: StateInstance[]): Promise<PublicInstance[]> {
+  const res = await fetch('/api/state/instances', {
+    method: 'PUT',
+    headers: { ...authHeaders(token), 'content-type': 'application/json' },
+    body: JSON.stringify({ instances })
+  })
+  const payload = await readJson<{ instances: PublicInstance[] }>(res, 'failed to save instance drafts')
+  return payload.instances
 }

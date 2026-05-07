@@ -126,6 +126,35 @@ describe('App', () => {
     expect(wrapper.text()).toContain('Subagents')
   })
 
+  it('passes the dashboard token to the persisted instances panel', async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/instances') {
+        return Promise.resolve({
+          ok: true,
+          json: vi.fn().mockResolvedValue({ instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }] })
+        })
+      }
+      if (url === '/api/state/instances') {
+        return Promise.resolve({
+          ok: true,
+          json: vi.fn().mockResolvedValue({ instances: [{ id: 'beta', name: 'Beta', baseUrl: 'http://beta', enabled: true }] })
+        })
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const wrapper = mount(App)
+    await wrapper.get('input').setValue('secret-token')
+    await wrapper.get('form').trigger('submit')
+    await vi.waitFor(() => expect(wrapper.text()).toContain('Overview'))
+    await wrapper.get('[data-nav="instances"]').trigger('click')
+
+    await vi.waitFor(() => expect(wrapper.text()).toContain('Beta'))
+    expect(fetchMock).toHaveBeenCalledWith('/api/state/instances', { headers: { authorization: 'Bearer secret-token' } })
+  })
+
   it('renders the dark dashboard shell without full instance details after login', async () => {
     vi.stubGlobal(
       'fetch',

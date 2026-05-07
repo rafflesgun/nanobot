@@ -1,0 +1,61 @@
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
+import { createStateStore, publicStateInstance, type StateInstance, type StateTopic } from './stateStore'
+
+let tempDirs: string[] = []
+
+afterEach(async () => {
+  await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true })))
+  tempDirs = []
+})
+
+async function tempDataDir() {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'nanobot-webui-state-'))
+  tempDirs.push(dir)
+  return dir
+}
+
+describe('stateStore', () => {
+  it('returns empty defaults when the state file does not exist', async () => {
+    const store = createStateStore(await tempDataDir())
+
+    await expect(store.read()).resolves.toEqual({ topics: [], instances: [] })
+  })
+
+  it('persists topics to a json file under the data directory', async () => {
+    const dataDir = await tempDataDir()
+    const store = createStateStore(dataDir)
+    const topics: StateTopic[] = [
+      {
+        id: 'ops',
+        name: 'Ops',
+        selectedIds: ['alpha'],
+        transcript: {
+          entries: [{ id: 'm1', role: 'assistant', label: 'alpha', text: 'hello' }],
+          debugEvents: [{ instanceId: 'alpha', event: 'delta', chatId: 'c1', text: 'hello' }]
+        }
+      }
+    ]
+
+    await store.writeTopics(topics)
+
+    await expect(store.read()).resolves.toMatchObject({ topics })
+    const raw = JSON.parse(await readFile(path.join(dataDir, 'webui-state.json'), 'utf-8'))
+    expect(raw.topics).toEqual(topics)
+  })
+
+  it('persists instances while redacting secrets from public instance data', async () => {
+    const store = createStateStore(await tempDataDir())
+    const instances: StateInstance[] = [
+      { id: 'beta', name: 'Beta', baseUrl: 'http://beta', adminToken: 'admin-secret', websocketToken: 'ws-secret', enabled: true }
+    ]
+
+    await store.writeInstances(instances)
+
+    await expect(store.read()).resolves.toMatchObject({ instances })
+    expect(publicStateInstance(instances[0])).toEqual({ id: 'beta', name: 'Beta', baseUrl: 'http://beta', enabled: true })
+    expect(JSON.stringify(publicStateInstance(instances[0]))).not.toContain('secret')
+  })
+})

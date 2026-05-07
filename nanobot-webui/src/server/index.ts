@@ -8,11 +8,13 @@ import { isDashboardAuthorized } from './auth.js'
 import { registerChatBridge } from './chatBridge.js'
 import type { WebuiConfig } from './config.js'
 import { loadConfig, publicInstance } from './config.js'
+import { createStateStore, publicStateInstance, type StateStore } from './stateStore.js'
 import { proxyAdminRequest as defaultProxyAdminRequest } from './upstream.js'
 
 type ProxyAdminRequest = typeof defaultProxyAdminRequest
 type CreateAppDeps = {
   proxyAdminRequest?: ProxyAdminRequest
+  stateStore?: StateStore
   staticRoot?: string
 }
 
@@ -58,6 +60,7 @@ export function createApp(config: WebuiConfig, deps: CreateAppDeps = {}) {
   const app = new Koa()
   const router = new Router()
   const proxyAdminRequest = deps.proxyAdminRequest ?? defaultProxyAdminRequest
+  const stateStore = deps.stateStore ?? createStateStore(config.dataDir ?? '/data')
 
   app.use(async (ctx, next) => {
     if (ctx.path === '/health') return next()
@@ -76,6 +79,29 @@ export function createApp(config: WebuiConfig, deps: CreateAppDeps = {}) {
 
   router.get('/api/instances', (ctx) => {
     ctx.body = { instances: config.instances.map(publicInstance) }
+  })
+
+  router.get('/api/state/topics', async (ctx) => {
+    ctx.body = { topics: (await stateStore.read()).topics }
+  })
+
+  router.put('/api/state/topics', async (ctx) => {
+    const payload = JSON.parse(await readRequestBody(ctx.req)) as { topics?: unknown }
+    const topics = Array.isArray(payload.topics) ? payload.topics : []
+    await stateStore.writeTopics(topics)
+    ctx.body = { topics }
+  })
+
+  router.get('/api/state/instances', async (ctx) => {
+    const state = await stateStore.read()
+    ctx.body = { instances: state.instances.map(publicStateInstance) }
+  })
+
+  router.put('/api/state/instances', async (ctx) => {
+    const payload = JSON.parse(await readRequestBody(ctx.req)) as { instances?: unknown }
+    const instances = Array.isArray(payload.instances) ? payload.instances : []
+    await stateStore.writeInstances(instances)
+    ctx.body = { instances: instances.map(publicStateInstance) }
   })
 
   router.all(/^\/api\/instances\/([^/]+)\/(.*)$/, async (ctx) => {

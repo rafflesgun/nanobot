@@ -1,5 +1,5 @@
 import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import InstancesPanel from './InstancesPanel.vue'
 
 describe('InstancesPanel', () => {
@@ -31,5 +31,25 @@ describe('InstancesPanel', () => {
 
     await wrapper.get('[data-testid="delete-beta"]').trigger('click')
     expect(wrapper.text()).not.toContain('Beta Prime')
+  })
+
+  it('loads persisted instance drafts and saves CRUD changes', async () => {
+    const loadInstances = vi.fn().mockResolvedValue([{ id: 'beta', name: 'Beta', baseUrl: 'http://beta', enabled: true }])
+    const saveInstances = vi.fn().mockResolvedValue(undefined)
+    const wrapper = mount(InstancesPanel, {
+      props: {
+        token: 'dashboard',
+        loadInstances,
+        saveInstances,
+        instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }]
+      }
+    })
+
+    await vi.waitFor(() => expect(wrapper.text()).toContain('Beta'))
+    await wrapper.get('[data-testid="toggle-beta"]').trigger('click')
+
+    expect(loadInstances).toHaveBeenCalledWith('dashboard')
+    await vi.waitFor(() => expect(saveInstances).toHaveBeenCalled())
+    expect(saveInstances).toHaveBeenLastCalledWith('dashboard', [expect.objectContaining({ id: 'beta', enabled: false })])
   })
 })

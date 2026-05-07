@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import type { PublicInstance } from '../api'
+import { fetchStateTopics, saveStateTopics, type PublicInstance } from '../api'
 import { appendOutboundMessage, applyChatEvent, createTranscriptState, type TranscriptState } from '../chatTranscript'
 import { createChatSocket, type ChatEvent, type ChatSocket } from '../socket'
 
@@ -17,8 +17,12 @@ const props = withDefaults(defineProps<{
   token: string
   instances: PublicInstance[]
   createSocket?: (token: string) => ChatSocket
+  loadTopics?: typeof fetchStateTopics
+  saveTopics?: typeof saveStateTopics
 }>(), {
-  createSocket: createChatSocket
+  createSocket: createChatSocket,
+  loadTopics: () => fetchStateTopics,
+  saveTopics: () => saveStateTopics
 })
 
 const selectedIds = ref<string[]>([])
@@ -54,6 +58,7 @@ function connectGroup() {
   selectedTopic.value.selectedIds = [...selectedIds.value]
   for (const instanceId of selectedIds.value) statuses.value[instanceId] = 'connecting'
   socket.emit('connect_group', { instanceIds: [...selectedIds.value] })
+  persistTopics()
 }
 
 function sendMessage() {
@@ -62,12 +67,14 @@ function sendMessage() {
 
   socket.emit('send_group_message', { text })
   appendOutboundMessage(selectedTopic.value.transcript, text)
+  persistTopics()
   message.value = ''
 }
 
 function handleChatEvent(event: ChatEvent) {
   updateStatus(event)
   applyChatEvent(selectedTopic.value.transcript, event, instanceLabel(event.instanceId))
+  persistTopics()
 }
 
 function createTopic() {
@@ -77,6 +84,7 @@ function createTopic() {
   topics.value.push({ id, name, selectedIds: [], transcript: createTranscriptState() })
   newTopicName.value = ''
   switchTopic(id)
+  persistTopics()
 }
 
 function switchTopic(topicId: string) {
@@ -84,8 +92,20 @@ function switchTopic(topicId: string) {
   selectedIds.value = [...selectedTopic.value.selectedIds]
 }
 
+function persistTopics() {
+  void props.saveTopics(props.token, topics.value).catch(() => {})
+}
+
 onMounted(() => {
   socket.on('chat_event', handleChatEvent)
+  void props.loadTopics(props.token)
+    .then((storedTopics) => {
+      if (storedTopics.length === 0) return
+      topics.value = storedTopics as Topic[]
+      selectedTopicId.value = topics.value[0].id
+      selectedIds.value = [...topics.value[0].selectedIds]
+    })
+    .catch(() => {})
 })
 
 onUnmounted(() => {

@@ -23,6 +23,7 @@ describe('loadConfig', () => {
 
     expect(config.port).toBe(6061)
     expect(config.authToken).toBe('file-dashboard')
+    expect(config.dataDir).toBe('/data')
     expect(config.instances).toEqual([
       {
         id: 'alpha',

@@ -1,10 +1,19 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import type { PublicInstance } from '../api'
+import { onMounted, ref } from 'vue'
+import { fetchStateInstances, saveStateInstances, type PublicInstance, type StateInstance } from '../api'
 
-const props = defineProps<{ instances: PublicInstance[] }>()
+const props = withDefaults(defineProps<{
+  token?: string
+  instances: PublicInstance[]
+  loadInstances?: typeof fetchStateInstances
+  saveInstances?: typeof saveStateInstances
+}>(), {
+  token: '',
+  loadInstances: () => fetchStateInstances,
+  saveInstances: () => saveStateInstances
+})
 
-type LocalInstance = PublicInstance & { persisted?: boolean }
+type LocalInstance = StateInstance & { persisted?: boolean }
 
 const localInstances = ref<LocalInstance[]>(props.instances.map((instance) => ({ ...instance, persisted: true })))
 const editingId = ref('')
@@ -34,9 +43,12 @@ function saveInstance() {
   if (existing) {
     existing.name = name.value.trim()
     existing.baseUrl = baseUrl.value.trim()
+    if (adminToken.value) existing.adminToken = adminToken.value
+    if (websocketToken.value) existing.websocketToken = websocketToken.value
   } else {
-    localInstances.value.push({ id: nextId, name: name.value.trim(), baseUrl: baseUrl.value.trim(), enabled: true, persisted: false })
+    localInstances.value.push({ id: nextId, name: name.value.trim(), baseUrl: baseUrl.value.trim(), adminToken: adminToken.value, websocketToken: websocketToken.value, enabled: true, persisted: false })
   }
+  persistInstances()
   resetForm()
 }
 
@@ -51,11 +63,26 @@ function editInstance(instance: LocalInstance) {
 
 function toggleInstance(instance: LocalInstance) {
   instance.enabled = !instance.enabled
+  persistInstances()
 }
 
 function deleteInstance(instanceId: string) {
   localInstances.value = localInstances.value.filter((instance) => instance.id !== instanceId)
+  persistInstances()
 }
+
+function persistInstances() {
+  if (!props.token) return
+  void props.saveInstances(props.token, localInstances.value)
+}
+
+onMounted(() => {
+  if (!props.token) return
+  void props.loadInstances(props.token).then((instances) => {
+    if (!Array.isArray(instances)) return
+    localInstances.value = instances.map((instance) => ({ ...instance, persisted: true }))
+  }).catch(() => {})
+})
 </script>
 
 <template>
@@ -102,7 +129,7 @@ function deleteInstance(instanceId: string) {
             <em>{{ instance.enabled ? 'enabled' : 'disabled' }}</em>
           </header>
           <p>{{ instance.baseUrl }}</p>
-          <small>{{ instance.persisted ? 'from bootstrap config' : 'local draft' }}</small>
+          <small>{{ instance.persisted ? 'from dashboard state' : 'local draft' }}</small>
           <div class="instance-actions">
             <button class="secondary" type="button" :data-testid="`edit-${instance.id}`" @click="editInstance(instance)">Edit</button>
             <button class="secondary" type="button" :data-testid="`toggle-${instance.id}`" @click="toggleInstance(instance)">{{ instance.enabled ? 'Disable' : 'Enable' }}</button>

@@ -13,6 +13,7 @@ export type NanobotInstance = {
 export type WebuiConfig = {
   port: number
   authToken: string
+  dataDir?: string
   instances: NanobotInstance[]
 }
 
@@ -81,6 +82,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): WebuiConfig {
   return {
     port: Number(env.PORT || 6060),
     authToken,
+    dataDir: typeof env.WEBUI_DATA_DIR === 'string' && env.WEBUI_DATA_DIR.trim() ? env.WEBUI_DATA_DIR.trim() : '/data',
     instances: loadConfigFileInstances(file)
   }
 }

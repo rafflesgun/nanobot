@@ -76,7 +76,7 @@ function logout() {
           <p v-if="error" class="error" role="alert">{{ error }}</p>
           <OverviewPanel v-if="activeTab === 'overview'" :token="token" :instances="instances" />
           <ChatPanel v-else-if="activeTab === 'chat'" :token="token" :instances="instances" />
-          <InstancesPanel v-else-if="activeTab === 'instances'" :instances="instances" />
+          <InstancesPanel v-else-if="activeTab === 'instances'" :token="token" :instances="instances" />
           <ManagePanel v-else :token="token" :instances="instances" />
         </section>
       </section>

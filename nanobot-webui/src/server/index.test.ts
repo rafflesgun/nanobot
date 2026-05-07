@@ -180,4 +180,59 @@ describe('createApp', () => {
     await expect(res.json()).resolves.toEqual({ error: 'instance disabled' })
     expect(proxy).not.toHaveBeenCalled()
   })
+
+  it('stores and returns persisted chat topics through authenticated state endpoints', async () => {
+    const stateStore = {
+      read: vi.fn().mockResolvedValueOnce({ topics: [], instances: [] }).mockResolvedValueOnce({
+        topics: [{ id: 'ops', name: 'Ops', selectedIds: ['alpha'], transcript: { entries: [], debugEvents: [] } }],
+        instances: []
+      }),
+      writeTopics: vi.fn().mockResolvedValue(undefined),
+      writeInstances: vi.fn().mockResolvedValue(undefined)
+    }
+    const { app } = createApp({ port: 6060, authToken: 'dashboard', dataDir: '/tmp/ignored', instances: [] }, { stateStore })
+    const base = await listen(app)
+
+    const unauthorized = await fetch(`${base}/api/state/topics`)
+    const empty = await fetch(`${base}/api/state/topics`, { headers: { authorization: 'Bearer dashboard' } })
+    const save = await fetch(`${base}/api/state/topics`, {
+      method: 'PUT',
+      headers: { authorization: 'Bearer dashboard', 'content-type': 'application/json' },
+      body: JSON.stringify({ topics: [{ id: 'ops', name: 'Ops', selectedIds: ['alpha'], transcript: { entries: [], debugEvents: [] } }] })
+    })
+
+    expect(unauthorized.status).toBe(401)
+    await expect(empty.json()).resolves.toEqual({ topics: [] })
+    expect(save.status).toBe(200)
+    await expect(save.json()).resolves.toEqual({ topics: [{ id: 'ops', name: 'Ops', selectedIds: ['alpha'], transcript: { entries: [], debugEvents: [] } }] })
+    expect(stateStore.writeTopics).toHaveBeenCalledWith([{ id: 'ops', name: 'Ops', selectedIds: ['alpha'], transcript: { entries: [], debugEvents: [] } }])
+  })
+
+  it('stores instances and redacts secrets from authenticated state list responses', async () => {
+    const stateStore = {
+      read: vi.fn().mockResolvedValue({
+        topics: [],
+        instances: [{ id: 'beta', name: 'Beta', baseUrl: 'http://beta', adminToken: 'admin-secret', websocketToken: 'ws-secret', enabled: true }]
+      }),
+      writeTopics: vi.fn().mockResolvedValue(undefined),
+      writeInstances: vi.fn().mockResolvedValue(undefined)
+    }
+    const { app } = createApp({ port: 6060, authToken: 'dashboard', dataDir: '/tmp/ignored', instances: [] }, { stateStore })
+    const base = await listen(app)
+
+    const list = await fetch(`${base}/api/state/instances`, { headers: { authorization: 'Bearer dashboard' } })
+    const save = await fetch(`${base}/api/state/instances`, {
+      method: 'PUT',
+      headers: { authorization: 'Bearer dashboard', 'content-type': 'application/json' },
+      body: JSON.stringify({ instances: [{ id: 'gamma', name: 'Gamma', baseUrl: 'http://gamma', adminToken: 'gamma-admin', websocketToken: 'gamma-ws', enabled: false }] })
+    })
+
+    expect(list.status).toBe(200)
+    const listPayload = await list.json()
+    expect(listPayload).toEqual({ instances: [{ id: 'beta', name: 'Beta', baseUrl: 'http://beta', enabled: true }] })
+    expect(JSON.stringify(listPayload)).not.toContain('secret')
+    expect(save.status).toBe(200)
+    await expect(save.json()).resolves.toEqual({ instances: [{ id: 'gamma', name: 'Gamma', baseUrl: 'http://gamma', enabled: false }] })
+    expect(stateStore.writeInstances).toHaveBeenCalledWith([{ id: 'gamma', name: 'Gamma', baseUrl: 'http://gamma', adminToken: 'gamma-admin', websocketToken: 'gamma-ws', enabled: false }])
+  })
 })

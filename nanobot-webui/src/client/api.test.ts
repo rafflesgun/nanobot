@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fetchInstanceLogs, fetchInstanceSettings, fetchInstanceStatus, fetchLogTail, patchInstanceSettings } from './api'
+import { fetchInstanceLogs, fetchInstanceSettings, fetchInstanceStatus, fetchLogTail, fetchStateInstances, fetchStateTopics, patchInstanceSettings, saveStateInstances, saveStateTopics } from './api'
 
 describe('admin API helpers', () => {
   afterEach(() => {
@@ -56,5 +56,43 @@ describe('admin API helpers', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503, json: vi.fn() }))
 
     await expect(fetchInstanceStatus('alpha', 'dashboard')).rejects.toThrow('failed to load status for alpha: 503')
+  })
+
+  it('loads and saves dashboard topics state', async () => {
+    const topics = [{ id: 'ops', name: 'Ops', selectedIds: ['alpha'], transcript: { entries: [], debugEvents: [] } }]
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: vi.fn().mockResolvedValue({ topics }) })
+      .mockResolvedValueOnce({ ok: true, json: vi.fn().mockResolvedValue({ topics }) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchStateTopics('dashboard')).resolves.toEqual(topics)
+    await expect(saveStateTopics('dashboard', topics)).resolves.toEqual(topics)
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/state/topics', { headers: { authorization: 'Bearer dashboard' } })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/state/topics', {
+      method: 'PUT',
+      headers: { authorization: 'Bearer dashboard', 'content-type': 'application/json' },
+      body: JSON.stringify({ topics })
+    })
+  })
+
+  it('loads and saves dashboard instance drafts state', async () => {
+    const instances = [{ id: 'beta', name: 'Beta', baseUrl: 'http://beta', adminToken: 'admin-secret', websocketToken: 'ws-secret', enabled: true }]
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: vi.fn().mockResolvedValue({ instances: [{ id: 'beta', name: 'Beta', baseUrl: 'http://beta', enabled: true }] }) })
+      .mockResolvedValueOnce({ ok: true, json: vi.fn().mockResolvedValue({ instances: [{ id: 'beta', name: 'Beta', baseUrl: 'http://beta', enabled: true }] }) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchStateInstances('dashboard')).resolves.toEqual([{ id: 'beta', name: 'Beta', baseUrl: 'http://beta', enabled: true }])
+    await expect(saveStateInstances('dashboard', instances)).resolves.toEqual([{ id: 'beta', name: 'Beta', baseUrl: 'http://beta', enabled: true }])
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/state/instances', { headers: { authorization: 'Bearer dashboard' } })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/state/instances', {
+      method: 'PUT',
+      headers: { authorization: 'Bearer dashboard', 'content-type': 'application/json' },
+      body: JSON.stringify({ instances })
+    })
   })
 })
