@@ -44,6 +44,7 @@ describe('admin API helpers', () => {
     await expect(fetchInstanceSettings('alpha', 'dashboard')).resolves.toEqual(settings)
     await expect(patchInstanceSettings('alpha', 'dashboard', { model: 'gpt-4.1-mini', provider: 'openai' })).resolves.toEqual(updated)
 
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/instances/alpha/settings', { headers: { authorization: 'Bearer dashboard' } })
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/instances/alpha/settings', {
       method: 'PATCH',
       headers: { authorization: 'Bearer dashboard', 'content-type': 'application/json' },
