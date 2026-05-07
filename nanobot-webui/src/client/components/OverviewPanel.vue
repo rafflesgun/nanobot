@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { fetchInstanceStatus, type InstanceStatus, type PublicInstance } from '../api'
 
 const props = defineProps<{ token: string; instances: PublicInstance[] }>()
@@ -11,6 +11,7 @@ type StatusEntry = {
 }
 
 const entries = ref<StatusEntry[]>([])
+let loadSequence = 0
 
 function formatUptime(value?: number) {
   if (typeof value !== 'number') return 'unknown uptime'
@@ -19,6 +20,7 @@ function formatUptime(value?: number) {
 }
 
 async function loadStatuses() {
+  const sequence = ++loadSequence
   const loaded = await Promise.all(
     props.instances.map(async (instance): Promise<StatusEntry> => {
       if (!instance.enabled) return { instance, error: 'disabled' }
@@ -29,11 +31,11 @@ async function loadStatuses() {
       }
     })
   )
+  if (sequence !== loadSequence) return
   entries.value = loaded
 }
 
-onMounted(loadStatuses)
-watch(() => [props.token, props.instances], loadStatuses, { deep: true })
+watch([() => props.token, () => props.instances], loadStatuses, { deep: true, immediate: true })
 </script>
 
 <template>
