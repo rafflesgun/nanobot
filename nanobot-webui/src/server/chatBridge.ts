@@ -66,23 +66,15 @@ export function registerChatBridge(server: http.Server, config: WebuiConfig, opt
   })
 
   namespace.on('connection', (socket) => {
-    let upstream: WebSocketLike | undefined
+    const upstreams = new Map<string, WebSocketLike>()
     let generation = 0
 
-    socket.on('connect_instance', (payload: unknown) => {
-      const currentGeneration = ++generation
-      upstream?.close()
-      upstream = undefined
+    function closeUpstreams() {
+      for (const upstream of upstreams.values()) upstream.close()
+      upstreams.clear()
+    }
 
-      if (!payload || typeof payload !== 'object') {
-        socket.emit('chat_event', invalidConnectPayload())
-        return
-      }
-      const { instanceId } = payload as { instanceId?: unknown }
-      if (typeof instanceId !== 'string' || !instanceId) {
-        socket.emit('chat_event', invalidConnectPayload(typeof instanceId === 'string' ? instanceId : ''))
-        return
-      }
+    function connectUpstream(instanceId: string, currentGeneration: number) {
       const instance = config.instances.find((item) => item.id === instanceId)
       if (!instance) {
         socket.emit('chat_event', { instanceId, event: 'error', chatId: '', detail: 'unknown instance' })
@@ -92,34 +84,76 @@ export function registerChatBridge(server: http.Server, config: WebuiConfig, opt
         socket.emit('chat_event', { instanceId, event: 'error', chatId: '', detail: 'instance disabled' })
         return
       }
+      let upstream: WebSocketLike
       try {
         upstream = new WebSocketImpl(websocketUrlForInstance(instance))
       } catch {
         socket.emit('chat_event', { instanceId, event: 'error', chatId: '', detail: 'chat.connection_failed' })
         return
       }
+      upstreams.set(instanceId, upstream)
       upstream.on('message', (data) => {
-        if (currentGeneration !== generation) return
+        if (currentGeneration !== generation || upstreams.get(instanceId) !== upstream) return
         socket.emit('chat_event', normalizeNanobotEvent(instanceId, data.toString()))
       })
       upstream.on('close', () => {
-        if (currentGeneration !== generation) return
+        if (currentGeneration !== generation || upstreams.get(instanceId) !== upstream) return
         socket.emit('chat_event', { instanceId, event: 'chat.disconnected', chatId: '' })
       })
       upstream.on('error', () => {
-        if (currentGeneration !== generation) return
+        if (currentGeneration !== generation || upstreams.get(instanceId) !== upstream) return
         socket.emit('chat_event', { instanceId, event: 'chat.connection_failed', chatId: '' })
       })
+    }
+
+    function sendToOpenUpstreams(payload: unknown) {
+      const message = JSON.stringify(payload)
+      for (const upstream of upstreams.values()) {
+        if (upstream.readyState === WebSocket.OPEN) upstream.send(message)
+      }
+    }
+
+    socket.on('connect_instance', (payload: unknown) => {
+      const currentGeneration = ++generation
+      closeUpstreams()
+      if (!payload || typeof payload !== 'object') {
+        socket.emit('chat_event', invalidConnectPayload())
+        return
+      }
+      const { instanceId } = payload as { instanceId?: unknown }
+      if (typeof instanceId !== 'string' || !instanceId) {
+        socket.emit('chat_event', invalidConnectPayload(typeof instanceId === 'string' ? instanceId : ''))
+        return
+      }
+      connectUpstream(instanceId, currentGeneration)
+    })
+
+    socket.on('connect_group', (payload: unknown) => {
+      const currentGeneration = ++generation
+      closeUpstreams()
+      if (!payload || typeof payload !== 'object') {
+        socket.emit('chat_event', invalidConnectPayload())
+        return
+      }
+      const { instanceIds } = payload as { instanceIds?: unknown }
+      if (!Array.isArray(instanceIds) || instanceIds.some((instanceId) => typeof instanceId !== 'string' || !instanceId)) {
+        socket.emit('chat_event', invalidConnectPayload())
+        return
+      }
+      for (const instanceId of new Set(instanceIds)) connectUpstream(instanceId, currentGeneration)
     })
 
     socket.on('send_message', (payload) => {
-      if (upstream?.readyState === WebSocket.OPEN) upstream.send(JSON.stringify(payload))
+      sendToOpenUpstreams(payload)
+    })
+
+    socket.on('send_group_message', (payload) => {
+      sendToOpenUpstreams(payload)
     })
 
     socket.on('disconnect', () => {
       generation++
-      upstream?.close()
-      upstream = undefined
+      closeUpstreams()
     })
   })
 
