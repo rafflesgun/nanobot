@@ -1,6 +1,7 @@
 import type { ChatEvent } from './socket'
 
 export type TranscriptRole = 'assistant' | 'system' | 'user'
+export type TranscriptKind = 'message' | 'tool' | 'reasoning'
 
 export type TranscriptEntry = {
   id: number
@@ -8,8 +9,10 @@ export type TranscriptEntry = {
   chatId: string
   label: string
   role: TranscriptRole
+  kind?: TranscriptKind
   event: string
   text: string
+  title?: string
 }
 
 export type TranscriptState = {
@@ -40,6 +43,22 @@ export function applyChatEvent(state: TranscriptState, event: ChatEvent, label: 
   state.debugEvents.push(event)
   if (HIDDEN_EVENTS.has(event.event)) return
 
+  const kind = classifyEvent(event)
+  if (kind !== 'message') {
+    state.entries.push({
+      id: state.nextEntryId++,
+      instanceId: event.instanceId,
+      chatId: event.chatId,
+      label,
+      role: kind === 'tool' ? 'system' : 'assistant',
+      kind,
+      event: event.event,
+      text: textFromEvent(event),
+      title: kind === 'tool' ? toolTitle(event) : 'Reasoning'
+    })
+    return
+  }
+
   if (event.event === 'delta') {
     const existing = state.entries.find(
       (entry) => entry.role === 'assistant' && entry.instanceId === event.instanceId && entry.chatId === event.chatId
@@ -67,6 +86,21 @@ export function applyChatEvent(state: TranscriptState, event: ChatEvent, label: 
     label,
     role: event.event === 'error' || event.detail ? 'system' : 'assistant',
     event: event.event,
-    text: event.text ?? event.detail ?? ''
+    text: textFromEvent(event)
   })
+}
+
+function classifyEvent(event: ChatEvent): TranscriptKind {
+  const name = event.event.toLowerCase()
+  if (event.tool || event.tool_call || name.includes('tool')) return 'tool'
+  if (event.reasoning || name.includes('reasoning')) return 'reasoning'
+  return 'message'
+}
+
+function textFromEvent(event: ChatEvent) {
+  return event.text ?? event.detail ?? event.reasoning ?? event.tool_call ?? ''
+}
+
+function toolTitle(event: ChatEvent) {
+  return event.tool ? `Tool: ${event.tool}` : 'Tool call'
 }

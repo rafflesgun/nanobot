@@ -37,4 +37,48 @@ describe('chatTranscript', () => {
       { id: 2, instanceId: 'local', chatId: '', label: 'You', role: 'user', event: 'outbound', text: 'hello bots' }
     ])
   })
+
+  it('classifies tool events as distinct transcript entries', () => {
+    const state = createTranscriptState()
+
+    applyChatEvent(
+      state,
+      { instanceId: 'alpha', event: 'tool_call.delta', chatId: 'c1', tool: 'search', detail: 'looking up docs' },
+      'Alpha'
+    )
+
+    expect(state.entries).toEqual([
+      {
+        id: 1,
+        instanceId: 'alpha',
+        chatId: 'c1',
+        label: 'Alpha',
+        role: 'system',
+        event: 'tool_call.delta',
+        kind: 'tool',
+        text: 'looking up docs',
+        title: 'Tool: search'
+      }
+    ])
+  })
+
+  it('classifies reasoning events as distinct transcript entries', () => {
+    const state = createTranscriptState()
+
+    applyChatEvent(state, { instanceId: 'alpha', event: 'reasoning.delta', chatId: 'c1', reasoning: 'checking facts' }, 'Alpha')
+
+    expect(state.entries).toEqual([
+      {
+        id: 1,
+        instanceId: 'alpha',
+        chatId: 'c1',
+        label: 'Alpha',
+        role: 'assistant',
+        event: 'reasoning.delta',
+        kind: 'reasoning',
+        text: 'checking facts',
+        title: 'Reasoning'
+      }
+    ])
+  })
 })
