@@ -53,6 +53,67 @@ describe('ChatPanel', () => {
     expect(wrapper.text()).toContain('streamed reply')
   })
 
+  it('merges delta chunks and hides terminal events from the visible transcript', async () => {
+    const socket = new FakeSocket()
+    const wrapper = mount(ChatPanel, {
+      props: {
+        token: 'dashboard',
+        createSocket: () => socket,
+        instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }]
+      }
+    })
+
+    socket.emit('chat_event', { instanceId: 'alpha', event: 'delta', chatId: 'c1', text: 'hello ' })
+    socket.emit('chat_event', { instanceId: 'alpha', event: 'delta', chatId: 'c1', text: 'world' })
+    socket.emit('chat_event', { instanceId: 'alpha', event: 'stream_end', chatId: 'c1' })
+    socket.emit('chat_event', { instanceId: 'alpha', event: 'turn_end', chatId: 'c1' })
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.findAll('.transcript-entry')).toHaveLength(1)
+    expect(wrapper.text()).toContain('hello world')
+    const visibleTranscript = wrapper.findAll('.transcript-entry').map((entry) => entry.text()).join(' ')
+    expect(visibleTranscript).not.toContain('stream_end')
+    expect(visibleTranscript).not.toContain('turn_end')
+  })
+
+  it('keeps raw protocol events in a debug drawer', async () => {
+    const socket = new FakeSocket()
+    const wrapper = mount(ChatPanel, {
+      props: {
+        token: 'dashboard',
+        createSocket: () => socket,
+        instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }]
+      }
+    })
+
+    socket.emit('chat_event', { instanceId: 'alpha', event: 'stream_end', chatId: 'c1' })
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.get('summary').text()).toContain('Debug events')
+    expect(wrapper.get('details').text()).toContain('stream_end')
+  })
+
+  it('creates and switches local chat topics', async () => {
+    const socket = new FakeSocket()
+    const wrapper = mount(ChatPanel, {
+      props: {
+        token: 'dashboard',
+        createSocket: () => socket,
+        instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }]
+      }
+    })
+
+    await wrapper.get('[data-testid="new-topic-name"]').setValue('Ops')
+    await wrapper.get('[data-testid="create-topic"]').trigger('click')
+    expect(wrapper.text()).toContain('Ops')
+    socket.emit('chat_event', { instanceId: 'alpha', event: 'delta', chatId: 'ops', text: 'ops reply' })
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain('ops reply')
+
+    await wrapper.get('[data-topic-id="default"]').trigger('click')
+    expect(wrapper.text()).not.toContain('ops reply')
+  })
+
   it('renders per-instance connection status events', async () => {
     const socket = new FakeSocket()
     const wrapper = mount(ChatPanel, {

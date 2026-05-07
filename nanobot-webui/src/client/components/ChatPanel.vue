@@ -1,17 +1,17 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import type { PublicInstance } from '../api'
+import { appendOutboundMessage, applyChatEvent, createTranscriptState, type TranscriptState } from '../chatTranscript'
 import { createChatSocket, type ChatEvent, type ChatSocket } from '../socket'
 
-type TranscriptEntry = {
-  id: number
-  instanceId: string
-  label: string
-  event: string
-  text: string
-}
-
 type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'error' | 'disconnected'
+
+type Topic = {
+  id: string
+  name: string
+  selectedIds: string[]
+  transcript: TranscriptState
+}
 
 const props = withDefaults(defineProps<{
   token: string
@@ -23,19 +23,19 @@ const props = withDefaults(defineProps<{
 
 const selectedIds = ref<string[]>([])
 const message = ref('')
-const transcript = ref<TranscriptEntry[]>([])
 const statuses = ref<Record<string, ConnectionStatus>>({})
+const newTopicName = ref('')
+const topics = ref<Topic[]>([{ id: 'default', name: 'General', selectedIds: [], transcript: createTranscriptState() }])
+const selectedTopicId = ref('default')
 const socket = props.createSocket(props.token)
-let nextEntryId = 1
 
 const enabledInstances = computed(() => props.instances.filter((instance) => instance.enabled))
+const selectedTopic = computed(() => topics.value.find((topic) => topic.id === selectedTopicId.value) ?? topics.value[0])
+const transcript = computed(() => selectedTopic.value.transcript.entries)
+const debugEvents = computed(() => selectedTopic.value.transcript.debugEvents)
 
 function instanceLabel(instanceId: string) {
   return props.instances.find((instance) => instance.id === instanceId)?.name ?? instanceId
-}
-
-function appendEntry(entry: Omit<TranscriptEntry, 'id'>) {
-  transcript.value.push({ id: nextEntryId++, ...entry })
 }
 
 function statusFor(instanceId: string): ConnectionStatus {
@@ -51,6 +51,7 @@ function updateStatus(event: ChatEvent) {
 
 function connectGroup() {
   if (selectedIds.value.length === 0) return
+  selectedTopic.value.selectedIds = [...selectedIds.value]
   for (const instanceId of selectedIds.value) statuses.value[instanceId] = 'connecting'
   socket.emit('connect_group', { instanceIds: [...selectedIds.value] })
 }
@@ -60,18 +61,27 @@ function sendMessage() {
   if (!text) return
 
   socket.emit('send_group_message', { text })
-  appendEntry({ instanceId: 'local', label: 'You', event: 'outbound', text })
+  appendOutboundMessage(selectedTopic.value.transcript, text)
   message.value = ''
 }
 
 function handleChatEvent(event: ChatEvent) {
   updateStatus(event)
-  appendEntry({
-    instanceId: event.instanceId,
-    label: instanceLabel(event.instanceId),
-    event: event.event,
-    text: event.text ?? event.detail ?? ''
-  })
+  applyChatEvent(selectedTopic.value.transcript, event, instanceLabel(event.instanceId))
+}
+
+function createTopic() {
+  const name = newTopicName.value.trim()
+  if (!name) return
+  const id = `${Date.now()}-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
+  topics.value.push({ id, name, selectedIds: [], transcript: createTranscriptState() })
+  newTopicName.value = ''
+  switchTopic(id)
+}
+
+function switchTopic(topicId: string) {
+  selectedTopicId.value = topicId
+  selectedIds.value = [...selectedTopic.value.selectedIds]
 }
 
 onMounted(() => {
@@ -92,7 +102,25 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <div class="chat-grid">
+    <div class="chat-shell">
+      <aside class="topic-sidebar">
+        <div class="topic-create">
+          <input data-testid="new-topic-name" v-model="newTopicName" type="text" placeholder="New topic name">
+          <button data-testid="create-topic" type="button" :disabled="!newTopicName.trim()" @click="createTopic">Create</button>
+        </div>
+        <button
+          v-for="topic in topics"
+          :key="topic.id"
+          type="button"
+          class="topic-button"
+          :class="{ active: topic.id === selectedTopicId }"
+          :data-topic-id="topic.id"
+          @click="switchTopic(topic.id)"
+        >
+          {{ topic.name }}
+        </button>
+      </aside>
+
       <div class="instance-picker">
         <p>Select enabled upstreams for this group chat.</p>
         <label v-for="instance in enabledInstances" :key="instance.id" class="instance-option">
@@ -110,10 +138,14 @@ onUnmounted(() => {
         <article v-for="entry in transcript" :key="entry.id" class="transcript-entry">
           <header>
             <strong>{{ entry.label }}</strong>
-            <span>{{ entry.event }}</span>
+            <span>{{ entry.role }}</span>
           </header>
           <p>{{ entry.text }}</p>
         </article>
+        <details class="debug-events">
+          <summary>Debug events ({{ debugEvents.length }})</summary>
+          <pre>{{ JSON.stringify(debugEvents, null, 2) }}</pre>
+        </details>
       </div>
 
       <form class="composer" @submit.prevent="sendMessage">
@@ -136,23 +168,46 @@ onUnmounted(() => {
   margin: 0.25rem 0 0;
 }
 
-.chat-grid {
+.chat-shell {
   display: grid;
+  grid-template-columns: minmax(12rem, 0.45fr) minmax(16rem, 0.65fr) minmax(22rem, 1.4fr);
   gap: 1rem;
 }
 
+.topic-sidebar,
 .instance-picker,
 .transcript,
 .composer {
-  border: 1px solid #dce4ef;
+  border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: 0.85rem;
-  background: #fbfdff;
+  background: rgba(8, 13, 28, 0.72);
   padding: 1rem;
 }
 
+.topic-sidebar,
 .instance-picker {
   display: grid;
   gap: 0.75rem;
+  align-content: start;
+}
+
+.topic-create {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.topic-button {
+  background: transparent;
+  border-color: rgba(148, 163, 184, 0.18);
+  color: #cbd5e1;
+  justify-self: stretch;
+  text-align: left;
+}
+
+.topic-button.active {
+  background: rgba(37, 99, 235, 0.2);
+  border-color: rgba(96, 165, 250, 0.42);
+  color: #dbeafe;
 }
 
 .instance-option {
@@ -168,9 +223,9 @@ onUnmounted(() => {
 }
 
 .connection-status {
-  border: 1px solid #c9d5e4;
+  border: 1px solid rgba(148, 163, 184, 0.3);
   border-radius: 999px;
-  color: #526175;
+  color: #94a3b8;
   font-size: 0.75rem;
   font-style: normal;
   grid-row: 1 / span 2;
@@ -179,18 +234,18 @@ onUnmounted(() => {
 
 .connection-status.is-connected {
   border-color: #86efac;
-  color: #15803d;
+  color: #86efac;
 }
 
 .connection-status.is-connecting {
   border-color: #93c5fd;
-  color: #1d4ed8;
+  color: #93c5fd;
 }
 
 .connection-status.is-error,
 .connection-status.is-disconnected {
   border-color: #fecaca;
-  color: #b91c1c;
+  color: #fecaca;
 }
 
 .transcript {
@@ -200,9 +255,9 @@ onUnmounted(() => {
 }
 
 .transcript-entry {
-  border: 1px solid #dce4ef;
+  border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: 0.75rem;
-  background: #fff;
+  background: rgba(15, 23, 42, 0.82);
   padding: 0.85rem;
 }
 
@@ -229,8 +284,10 @@ onUnmounted(() => {
 }
 
 textarea {
-  border: 1px solid #c9d5e4;
+  border: 1px solid rgba(148, 163, 184, 0.28);
   border-radius: 0.75rem;
+  background: rgba(15, 23, 42, 0.82);
+  color: #e2e8f0;
   font: inherit;
   min-height: 6rem;
   padding: 0.75rem;
@@ -243,5 +300,22 @@ button {
 
 .empty-state {
   color: #69778c;
+}
+
+.debug-events {
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
+  color: #94a3b8;
+  padding-top: 0.75rem;
+}
+
+.debug-events pre {
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 1100px) {
+  .chat-shell {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
