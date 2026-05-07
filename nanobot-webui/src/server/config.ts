@@ -31,20 +31,6 @@ type ConfigFile = {
   instances?: unknown
 }
 
-function parsePairs(value: string | undefined, label: string): Map<string, string> {
-  const map = new Map<string, string>()
-  if (!value?.trim()) return map
-  for (const part of value.split(',')) {
-    const [rawKey, ...rest] = part.split('=')
-    const key = rawKey?.trim()
-    const pairValue = rest.join('=').trim()
-    if (!key || !pairValue) throw new Error(`invalid ${label} entry: ${part}`)
-    if (map.has(key)) throw new Error(`duplicate instance id: ${key}`)
-    map.set(key, pairValue)
-  }
-  return map
-}
-
 function requiredString(value: unknown, label: string): string {
   if (typeof value !== 'string' || !value.trim()) throw new Error(`${label} is required`)
   return value.trim()
@@ -89,35 +75,13 @@ function loadConfigFileInstances(file: ConfigFile): NanobotInstance[] {
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): WebuiConfig {
   const file = readConfigFile(env)
-  const fileAuthToken = typeof file?.authToken === 'string' ? file.authToken.trim() : ''
-  const authToken = env.AUTH_TOKEN?.trim() || fileAuthToken
-  if (!authToken) throw new Error('AUTH_TOKEN is required')
-
-  if (file) {
-    return {
-      port: Number(env.PORT || 6060),
-      authToken,
-      instances: loadConfigFileInstances(file)
-    }
-  }
-
-  const urls = parsePairs(env.NANOBOT_INSTANCES, 'NANOBOT_INSTANCES')
-  const tokens = parsePairs(env.NANOBOT_INSTANCE_TOKENS, 'NANOBOT_INSTANCE_TOKENS')
-  const websocketTokens = parsePairs(env.NANOBOT_INSTANCE_WEBSOCKET_TOKENS, 'NANOBOT_INSTANCE_WEBSOCKET_TOKENS')
-  const instances: NanobotInstance[] = []
-
-  for (const [id, baseUrl] of urls) {
-    const adminToken = tokens.get(id)
-    if (!adminToken) throw new Error(`missing token for instance: ${id}`)
-    const websocketToken = websocketTokens.get(id)
-    if (!websocketToken) throw new Error(`missing websocket token for instance: ${id}`)
-    instances.push({ id, name: id, baseUrl: baseUrl.replace(/\/$/, ''), adminToken, websocketToken, enabled: true })
-  }
+  if (!file) throw new Error('WEBUI_CONFIG is required')
+  const authToken = requiredString(file.authToken, 'authToken')
 
   return {
     port: Number(env.PORT || 6060),
     authToken,
-    instances
+    instances: loadConfigFileInstances(file)
   }
 }
 

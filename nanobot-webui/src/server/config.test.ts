@@ -36,26 +36,6 @@ describe('loadConfig', () => {
     ])
   })
 
-  it('lets AUTH_TOKEN override auth token from config file', () => {
-    const config = loadConfig({
-      AUTH_TOKEN: 'env-dashboard',
-      WEBUI_CONFIG_JSON: JSON.stringify({
-        authToken: 'file-dashboard',
-        instances: [
-          {
-            id: 'alpha',
-            adminBaseUrl: 'http://nanobot-alpha:18790',
-            adminToken: 'alpha-admin-token',
-            websocketUrl: 'ws://nanobot-alpha:8765/',
-            websocketToken: 'alpha-ws-token'
-          }
-        ]
-      })
-    })
-
-    expect(config.authToken).toBe('env-dashboard')
-  })
-
   it('rejects config file instances without websocket url', () => {
     expect(() => loadConfig({
       WEBUI_CONFIG_JSON: JSON.stringify({
@@ -72,36 +52,36 @@ describe('loadConfig', () => {
     })).toThrow(/websocketUrl is required for instance: alpha/)
   })
 
-  it('parses static instances and keeps tokens server-side', () => {
-    const config = loadConfig({
-      PORT: '6060',
-      AUTH_TOKEN: 'dashboard',
-      NANOBOT_INSTANCES: 'alpha=http://nanobot-alpha:18790,beta=http://nanobot-beta:18790',
-      NANOBOT_INSTANCE_TOKENS: 'alpha=a-admin-token,beta=b-admin-token',
-      NANOBOT_INSTANCE_WEBSOCKET_TOKENS: 'alpha=a-ws-token,beta=b-ws-token'
-    })
-
-    expect(config.port).toBe(6060)
-    expect(config.authToken).toBe('dashboard')
-    expect(config.instances.map((i) => i.id)).toEqual(['alpha', 'beta'])
-    expect(config.instances[0].adminToken).toBe('a-admin-token')
-    expect(config.instances[0].websocketToken).toBe('a-ws-token')
-  })
-
-  it('rejects missing websocket tokens', () => {
+  it('rejects instance env vars without a config file', () => {
     expect(() => loadConfig({
       AUTH_TOKEN: 'dashboard',
       NANOBOT_INSTANCES: 'alpha=http://one',
-      NANOBOT_INSTANCE_TOKENS: 'alpha=a-admin-token'
-    })).toThrow(/missing websocket token for instance: alpha/)
+      NANOBOT_INSTANCE_TOKENS: 'alpha=a-admin-token',
+      NANOBOT_INSTANCE_WEBSOCKET_TOKENS: 'alpha=a-ws-token'
+    })).toThrow(/WEBUI_CONFIG is required/)
   })
 
   it('rejects duplicate instance ids', () => {
     expect(() => loadConfig({
-      AUTH_TOKEN: 'dashboard',
-      NANOBOT_INSTANCES: 'alpha=http://one,alpha=http://two',
-      NANOBOT_INSTANCE_TOKENS: 'alpha=a-token',
-      NANOBOT_INSTANCE_WEBSOCKET_TOKENS: 'alpha=a-ws-token'
+      WEBUI_CONFIG_JSON: JSON.stringify({
+        authToken: 'file-dashboard',
+        instances: [
+          {
+            id: 'alpha',
+            adminBaseUrl: 'http://one',
+            adminToken: 'alpha-admin-token',
+            websocketUrl: 'ws://one:8765/',
+            websocketToken: 'alpha-ws-token'
+          },
+          {
+            id: 'alpha',
+            adminBaseUrl: 'http://two',
+            adminToken: 'alpha-admin-token',
+            websocketUrl: 'ws://two:8765/',
+            websocketToken: 'alpha-ws-token'
+          }
+        ]
+      })
     })).toThrow(/duplicate instance id/)
   })
 })

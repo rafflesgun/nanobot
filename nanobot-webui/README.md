@@ -10,7 +10,7 @@ Standalone dashboard for multiple nanobot instances.
 
 ## Config File
 
-The recommended deployment mode is a mounted JSON config file. This keeps per-instance URLs, ports, and tokens together instead of spreading them across long environment variables.
+The webui is configured from a mounted JSON config file. This keeps dashboard auth, per-instance URLs, ports, and tokens together instead of spreading secrets across long environment variable lists.
 
 Set `WEBUI_CONFIG` to the mounted path:
 
@@ -38,29 +38,18 @@ Example `config.json`:
 }
 ```
 
-`AUTH_TOKEN` may still be set as an environment variable to override `authToken` from the file.
-
-## Environment Fallback
-
-For quick demos, the webui can still be configured using environment variables only.
-
-| Variable | Description |
+| Field | Description |
 |---|---|
-| `PORT` | Webui HTTP port, default `6060` |
-| `AUTH_TOKEN` | Browser dashboard bearer token; overrides config-file `authToken` |
-| `WEBUI_CONFIG` | Path to mounted JSON config file |
-| `NANOBOT_INSTANCES` | Comma-separated `id=url` admin gateway entries |
-| `NANOBOT_INSTANCE_TOKENS` | Comma-separated `id=token` admin API tokens matching instances |
-| `NANOBOT_INSTANCE_WEBSOCKET_TOKENS` | Comma-separated `id=token` WebSocket channel tokens matching instances; env fallback derives WebSocket URLs from admin host and port `8765` |
+| `authToken` | Browser dashboard bearer token |
+| `instances[].id` | Stable instance id used by API routes and chat events |
+| `instances[].name` | Display name; defaults to `id` when omitted |
+| `instances[].adminBaseUrl` | Nanobot gateway/admin API base URL, including host and port |
+| `instances[].adminToken` | Nanobot `gateway.admin.token` for admin API calls |
+| `instances[].websocketUrl` | Nanobot WebSocket URL, including host, port, and path |
+| `instances[].websocketToken` | Nanobot `channels.websocket.token` for chat connections |
+| `instances[].enabled` | Whether the webui should allow proxy/chat access; defaults to `true` |
 
-Environment-only example:
-
-```text
-AUTH_TOKEN=dashboard-secret
-NANOBOT_INSTANCES=alpha=http://nanobot-alpha:18790,beta=http://nanobot-beta:18790
-NANOBOT_INSTANCE_TOKENS=alpha=alpha-admin-token,beta=beta-admin-token
-NANOBOT_INSTANCE_WEBSOCKET_TOKENS=alpha=alpha-ws-token,beta=beta-ws-token
-```
+Only `PORT` and `WEBUI_CONFIG` are read from environment variables. Instance URLs and tokens must come from the config file.
 
 ## Docker Compose
 
@@ -84,6 +73,6 @@ npm run dev:server
 
 - Do not expose this dashboard publicly without HTTPS and a strong dashboard token.
 - The browser cannot choose arbitrary upstream URLs.
-- Dashboard auth, nanobot admin tokens, and nanobot WebSocket tokens can all live in the mounted config file and stay server-side.
+- Dashboard auth, nanobot admin tokens, and nanobot WebSocket tokens live in the mounted config file and stay server-side.
 - Nanobot admin tokens are injected by the webui backend for admin API calls and are not returned by `/api/instances`.
 - Nanobot WebSocket tokens are injected by the webui backend for chat connections and are not returned by `/api/instances`.
