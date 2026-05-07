@@ -174,4 +174,24 @@ describe('App', () => {
     expect(wrapper.text()).toContain('Alpha')
     expect(wrapper.text()).not.toContain('http://nanobot-alpha:18790')
   })
+
+  it('uses the sticky split-shell layout hooks after login', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }] })
+      })
+    )
+
+    const wrapper = mount(App)
+    await wrapper.get('input').setValue('secret-token')
+    await wrapper.get('form').trigger('submit')
+
+    await vi.waitFor(() => expect(wrapper.find('[data-testid="floating-header"]').exists()).toBe(true))
+    expect(wrapper.find('[data-testid="main-body"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="sidebar-panel"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="content-scroll"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="content-stage"]').classes()).toContain('is-top-aligned')
+  })
 })

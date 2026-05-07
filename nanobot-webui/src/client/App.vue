@@ -54,32 +54,38 @@ function logout() {
     </section>
 
     <section v-else data-testid="dashboard-shell" class="dashboard-shell">
-      <aside data-testid="sidebar-nav" class="sidebar-nav">
-        <div class="brand-block">
-          <p class="eyebrow">Admin Console</p>
-          <h1>Nanobot Web UI</h1>
-          <p>Manage live nanobot surfaces from one command deck.</p>
-        </div>
-        <nav class="dashboard-tabs" aria-label="Dashboard sections">
-          <button data-nav="overview" type="button" :class="{ active: activeTab === 'overview' }" @click="activeTab = 'overview'">Overview</button>
-          <button data-nav="chat" type="button" :class="{ active: activeTab === 'chat' }" @click="activeTab = 'chat'">Chat Topics</button>
-          <button data-nav="instances" type="button" :class="{ active: activeTab === 'instances' }" @click="activeTab = 'instances'">Instances</button>
-          <button data-nav="manage" type="button" :class="{ active: activeTab === 'manage' }" @click="activeTab = 'manage'">Manage</button>
-        </nav>
-      </aside>
-      <section class="dashboard-main">
-        <header class="top-bar">
+      <header data-testid="floating-header" class="floating-header">
+        <div class="floating-actions">
           <InstanceList data-testid="instance-status-bar" :instances="instances" />
           <button class="secondary" data-testid="logout-button" type="button" @click="logout">Log out</button>
-        </header>
-        <section class="content-stage">
-          <p v-if="error" class="error" role="alert">{{ error }}</p>
-          <OverviewPanel v-if="activeTab === 'overview'" :token="token" :instances="instances" />
-          <ChatPanel v-else-if="activeTab === 'chat'" :token="token" :instances="instances" />
-          <InstancesPanel v-else-if="activeTab === 'instances'" :token="token" :instances="instances" />
-          <ManagePanel v-else :token="token" :instances="instances" />
+        </div>
+      </header>
+
+      <div data-testid="main-body" class="main-body">
+        <aside data-testid="sidebar-panel" class="sidebar-nav sidebar-panel">
+          <div class="brand-block">
+            <p class="eyebrow">Admin Console</p>
+            <h1>Nanobot Web UI</h1>
+            <p>Manage live nanobot surfaces from one command deck.</p>
+          </div>
+          <nav data-testid="sidebar-nav" class="dashboard-tabs" aria-label="Dashboard sections">
+            <button data-nav="overview" type="button" :class="{ active: activeTab === 'overview' }" @click="activeTab = 'overview'">Overview</button>
+            <button data-nav="chat" type="button" :class="{ active: activeTab === 'chat' }" @click="activeTab = 'chat'">Chat Topics</button>
+            <button data-nav="instances" type="button" :class="{ active: activeTab === 'instances' }" @click="activeTab = 'instances'">Instances</button>
+            <button data-nav="manage" type="button" :class="{ active: activeTab === 'manage' }" @click="activeTab = 'manage'">Manage</button>
+          </nav>
+        </aside>
+
+        <section data-testid="content-scroll" class="content-scroll">
+          <section data-testid="content-stage" class="content-stage is-top-aligned">
+            <p v-if="error" class="error" role="alert">{{ error }}</p>
+            <OverviewPanel v-if="activeTab === 'overview'" :token="token" :instances="instances" />
+            <ChatPanel v-else-if="activeTab === 'chat'" :token="token" :instances="instances" />
+            <InstancesPanel v-else-if="activeTab === 'instances'" :token="token" :instances="instances" />
+            <ManagePanel v-else :token="token" :instances="instances" />
+          </section>
         </section>
-      </section>
+      </div>
     </section>
   </main>
 </template>
@@ -161,6 +167,13 @@ select:focus {
   min-height: 100vh;
 }
 
+.app-shell:not(.is-login) {
+  --shell-gutter: 1.5rem;
+  --sidebar-width: 17rem;
+  height: 100vh;
+  overflow: hidden;
+}
+
 .app-shell.is-login {
   display: grid;
   min-height: 100vh;
@@ -223,18 +236,53 @@ label {
 }
 
 .dashboard-shell {
-  display: grid;
-  grid-template-columns: 17rem minmax(0, 1fr);
   min-height: 100vh;
+  position: relative;
+}
+
+.floating-header {
+  pointer-events: none;
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 20;
+}
+
+.floating-actions {
+  align-items: center;
+  backdrop-filter: blur(16px);
+  background: rgba(8, 13, 28, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 1rem;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  margin: var(--shell-gutter) var(--shell-gutter) 0 auto;
+  max-width: calc(100vw - var(--sidebar-width) - var(--shell-gutter) * 4);
+  padding: 0.45rem;
+  pointer-events: auto;
+  width: max-content;
+}
+
+.main-body {
+  display: flex;
+  gap: 2rem;
+  height: 100vh;
+  overflow: hidden;
+  padding: var(--shell-gutter);
 }
 
 .sidebar-nav {
-  border-right: 1px solid rgba(148, 163, 184, 0.16);
-  background: rgba(8, 13, 28, 0.92);
+  backdrop-filter: blur(18px);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 1.1rem;
+  background: rgba(8, 13, 28, 0.76);
   display: grid;
   gap: 1.5rem;
   grid-template-rows: auto 1fr;
-  padding: 1rem;
+  flex: 0 0 var(--sidebar-width);
+  height: calc(100vh - var(--shell-gutter) * 2);
+  overflow-y: auto;
+  padding: 1.1rem;
 }
 
 .brand-block {
@@ -243,27 +291,19 @@ label {
   padding: 0.5rem 0.35rem 1rem;
 }
 
-.dashboard-main {
-  display: grid;
-  grid-template-rows: auto 1fr;
+.content-scroll {
+  flex: 1;
+  height: calc(100vh - var(--shell-gutter) * 2);
   min-width: 0;
-}
-
-.top-bar {
-  align-items: center;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
-  display: flex;
-  gap: 1rem;
-  justify-content: space-between;
-  min-width: 0;
-  padding: 0.85rem 1rem;
+  overflow-y: auto;
 }
 
 .content-stage {
+  align-content: start;
   display: grid;
   gap: 1rem;
   min-width: 0;
-  padding: 1rem;
+  padding: 5rem clamp(1rem, 3vw, 2.5rem) 2.5rem;
 }
 
 .dashboard-tabs {
@@ -320,18 +360,31 @@ label {
 }
 
 @media (max-width: 820px) {
-  .dashboard-shell {
-    grid-template-columns: 1fr;
+  .app-shell:not(.is-login) {
+    height: auto;
+    overflow: visible;
   }
 
-  .sidebar-nav {
-    border-right: 0;
-    border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+  .main-body {
+    display: grid;
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
   }
 
-  .top-bar {
-    align-items: stretch;
-    flex-direction: column;
+  .sidebar-nav,
+  .content-scroll {
+    height: auto;
+  }
+
+  .floating-actions {
+    margin-left: var(--shell-gutter);
+    max-width: calc(100vw - var(--shell-gutter) * 2);
+    width: auto;
+  }
+
+  .content-stage {
+    padding: 1rem 0 2rem;
   }
 }
 </style>
