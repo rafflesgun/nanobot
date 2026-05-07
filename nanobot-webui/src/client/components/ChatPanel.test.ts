@@ -12,28 +12,209 @@ class FakeSocket extends EventEmitter {
   disconnect = vi.fn()
 }
 
+const alpha = { id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }
+const beta = { id: 'beta', name: 'Beta', baseUrl: 'http://beta', enabled: true }
+
 describe('ChatPanel', () => {
-  it('connects selected instances and broadcasts messages', async () => {
+  it('auto-connects saved enabled topic members and sends typed topic messages', async () => {
+    const socket = new FakeSocket()
+    const loadTopics = vi.fn().mockResolvedValue([
+      {
+        id: 'ops',
+        name: 'Ops',
+        selectedIds: ['alpha', 'beta'],
+        chatMappings: {
+          alpha: { chatId: 'chat-alpha', status: 'attached' },
+          beta: { chatId: 'chat-beta', status: 'attached' }
+        },
+        transcript: { entries: [], debugEvents: [] }
+      }
+    ])
+    const wrapper = mount(ChatPanel, {
+      props: {
+        token: 'dashboard',
+        createSocket: () => socket,
+        loadTopics,
+        saveTopics: vi.fn().mockResolvedValue(undefined),
+        instances: [alpha, beta]
+      }
+    })
+
+    await vi.waitFor(() => expect(wrapper.text()).toContain('Ops'))
+    await wrapper.get('textarea').setValue('hello group')
+    await wrapper.get('form').trigger('submit')
+
+    expect(socket.emitted).toContainEqual({
+      event: 'ensure_topic_connections',
+      payload: {
+        topicId: 'ops',
+        members: ['alpha', 'beta'],
+        chatMappings: {
+          alpha: { chatId: 'chat-alpha', status: 'attached' },
+          beta: { chatId: 'chat-beta', status: 'attached' }
+        }
+      }
+    })
+    expect(socket.emitted).toContainEqual({
+      event: 'send_group_message',
+      payload: {
+        topicId: 'ops',
+        text: 'hello group',
+        memberIds: ['alpha', 'beta'],
+        chatMappings: {
+          alpha: { chatId: 'chat-alpha', status: 'attached' },
+          beta: { chatId: 'chat-beta', status: 'attached' }
+        }
+      }
+    })
+    expect(wrapper.find('[data-testid="connect-group"]').exists()).toBe(false)
+  })
+
+  it('adds a bot as a topic member, persists it, and auto-connects that member', async () => {
+    const socket = new FakeSocket()
+    const saveTopics = vi.fn().mockResolvedValue(undefined)
+    const wrapper = mount(ChatPanel, {
+      props: {
+        token: 'dashboard',
+        createSocket: () => socket,
+        loadTopics: vi.fn().mockResolvedValue([]),
+        saveTopics,
+        instances: [alpha]
+      }
+    })
+
+    await wrapper.get('[data-testid="add-member-alpha"]').trigger('click')
+
+    expect(socket.emitted).toContainEqual({ event: 'ensure_topic_connections', payload: { topicId: 'default', members: ['alpha'], chatMappings: {} } })
+    await vi.waitFor(() => expect(saveTopics).toHaveBeenLastCalledWith('dashboard', [expect.objectContaining({ selectedIds: ['alpha'] })]))
+  })
+
+  it('shows disabled saved members without auto-connecting them', async () => {
     const socket = new FakeSocket()
     const wrapper = mount(ChatPanel, {
       props: {
         token: 'dashboard',
         createSocket: () => socket,
-        instances: [
-          { id: 'alpha', name: 'alpha', baseUrl: 'http://alpha', enabled: true },
-          { id: 'beta', name: 'beta', baseUrl: 'http://beta', enabled: true }
-        ]
+        loadTopics: vi.fn().mockResolvedValue([{ id: 'ops', name: 'Ops', selectedIds: ['alpha'], transcript: { entries: [], debugEvents: [] } }]),
+        instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: false }]
       }
     })
 
-    await wrapper.get('input[value="alpha"]').setValue(true)
-    await wrapper.get('input[value="beta"]').setValue(true)
-    await wrapper.get('[data-testid="connect-group"]').trigger('click')
-    await wrapper.get('textarea').setValue('hello group')
+    await vi.waitFor(() => expect(wrapper.text()).toContain('Ops'))
+
+    expect(wrapper.text()).toContain('Alpha')
+    expect(wrapper.text()).toContain('disabled')
+    expect(socket.emitted.some((event) => event.event === 'ensure_topic_connections')).toBe(false)
+  })
+
+  it('sends pending attachments as media and renders attachment chips on the local message', async () => {
+    const socket = new FakeSocket()
+    const wrapper = mount(ChatPanel, {
+      props: {
+        token: 'dashboard',
+        createSocket: () => socket,
+        loadTopics: vi.fn().mockResolvedValue([
+          { id: 'ops', name: 'Ops', selectedIds: ['alpha'], chatMappings: { alpha: { chatId: 'chat-alpha', status: 'attached' } }, transcript: { entries: [], debugEvents: [] } }
+        ]),
+        saveTopics: vi.fn().mockResolvedValue(undefined),
+        instances: [alpha]
+      }
+    })
+    const file = new File(['notes'], 'notes.txt', { type: 'text/plain' })
+
+    await vi.waitFor(() => expect(wrapper.text()).toContain('Ops'))
+    Object.defineProperty(wrapper.get('[data-testid="attachment-input"]').element, 'files', { value: [file] })
+    await wrapper.get('[data-testid="attachment-input"]').trigger('change')
+    await vi.waitFor(() => expect(wrapper.text()).toContain('notes.txt'))
+    await wrapper.get('textarea').setValue('see attachment')
     await wrapper.get('form').trigger('submit')
 
-    expect(socket.emitted).toContainEqual({ event: 'connect_group', payload: { instanceIds: ['alpha', 'beta'] } })
-    expect(socket.emitted).toContainEqual({ event: 'send_group_message', payload: { text: 'hello group' } })
+    await vi.waitFor(() => expect(socket.emitted).toContainEqual({
+      event: 'send_group_message',
+      payload: {
+        topicId: 'ops',
+        text: 'see attachment',
+        media: [{ name: 'notes.txt', data_url: 'data:text/plain;base64,bm90ZXM=' }],
+        memberIds: ['alpha'],
+        chatMappings: { alpha: { chatId: 'chat-alpha', status: 'attached' } }
+      }
+    }))
+    expect(wrapper.find('[data-testid="sent-attachment"]').text()).toContain('notes.txt')
+  })
+
+  it('copies assistant markdown source without rendered html', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    const socket = new FakeSocket()
+    const wrapper = mount(ChatPanel, {
+      props: {
+        token: 'dashboard',
+        createSocket: () => socket,
+        instances: [alpha]
+      }
+    })
+
+    socket.emit('chat_event', { instanceId: 'alpha', event: 'delta', chatId: 'c1', text: '# Plan\n\nUse `code`.' })
+    await wrapper.vm.$nextTick()
+    await wrapper.get('[data-testid="copy-markdown"]').trigger('click')
+
+    expect(writeText).toHaveBeenCalledWith('# Plan\n\nUse `code`.')
+  })
+
+  it('routes attached events to their topic mappings without switching the active topic', async () => {
+    const socket = new FakeSocket()
+    const saveTopics = vi.fn().mockResolvedValue(undefined)
+    const wrapper = mount(ChatPanel, {
+      props: {
+        token: 'dashboard',
+        createSocket: () => socket,
+        loadTopics: vi.fn().mockResolvedValue([
+          { id: 'ops', name: 'Ops', selectedIds: ['alpha'], transcript: { entries: [], debugEvents: [] } },
+          { id: 'support', name: 'Support', selectedIds: ['alpha'], transcript: { entries: [], debugEvents: [] } }
+        ]),
+        saveTopics,
+        instances: [alpha]
+      }
+    })
+
+    await vi.waitFor(() => expect(wrapper.text()).toContain('Ops'))
+    await wrapper.get('[data-topic-id="support"]').trigger('click')
+    socket.emit('chat_event', { topicId: 'ops', instanceId: 'alpha', event: 'attached', chatId: 'ops-chat' })
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.text()).toContain('Support')
+    await vi.waitFor(() => expect(saveTopics).toHaveBeenLastCalledWith('dashboard', expect.arrayContaining([
+      expect.objectContaining({ id: 'ops', chatMappings: { alpha: { chatId: 'ops-chat', status: 'attached' } } })
+    ])))
+  })
+
+  it('routes delayed topic replies to the original topic after switching topics', async () => {
+    const socket = new FakeSocket()
+    const saveTopics = vi.fn().mockResolvedValue(undefined)
+    const wrapper = mount(ChatPanel, {
+      props: {
+        token: 'dashboard',
+        createSocket: () => socket,
+        loadTopics: vi.fn().mockResolvedValue([
+          { id: 'ops', name: 'Ops', selectedIds: ['alpha'], chatMappings: { alpha: { chatId: 'ops-chat', status: 'attached' } }, transcript: { entries: [], debugEvents: [] } },
+          { id: 'support', name: 'Support', selectedIds: [], transcript: { entries: [], debugEvents: [] } }
+        ]),
+        saveTopics,
+        instances: [alpha]
+      }
+    })
+
+    await vi.waitFor(() => expect(wrapper.text()).toContain('Ops'))
+    await wrapper.get('[data-topic-id="support"]').trigger('click')
+    socket.emit('chat_event', { topicId: 'ops', instanceId: 'alpha', event: 'delta', chatId: 'ops-chat', text: 'ops delayed reply' })
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.text()).toContain('Support')
+    expect(wrapper.text()).not.toContain('ops delayed reply')
+    await vi.waitFor(() => expect(saveTopics).toHaveBeenLastCalledWith('dashboard', expect.arrayContaining([
+      expect.objectContaining({ id: 'ops', transcript: expect.objectContaining({ entries: [expect.objectContaining({ text: 'ops delayed reply' })] }) }),
+      expect.objectContaining({ id: 'support', transcript: expect.objectContaining({ entries: [] }) })
+    ])))
   })
 
   it('renders labeled transcript events', async () => {
@@ -42,14 +223,14 @@ describe('ChatPanel', () => {
       props: {
         token: 'dashboard',
         createSocket: () => socket,
-        instances: [{ id: 'alpha', name: 'alpha', baseUrl: 'http://alpha', enabled: true }]
+        instances: [alpha]
       }
     })
 
     socket.emit('chat_event', { instanceId: 'alpha', event: 'delta', chatId: 'c1', text: 'streamed reply' })
     await wrapper.vm.$nextTick()
 
-    expect(wrapper.text()).toContain('alpha')
+    expect(wrapper.text()).toContain('Alpha')
     expect(wrapper.text()).toContain('streamed reply')
   })
 
@@ -59,7 +240,7 @@ describe('ChatPanel', () => {
       props: {
         token: 'dashboard',
         createSocket: () => socket,
-        instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }]
+        instances: [alpha]
       }
     })
 
@@ -82,7 +263,7 @@ describe('ChatPanel', () => {
       props: {
         token: 'dashboard',
         createSocket: () => socket,
-        instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }]
+        instances: [alpha]
       }
     })
 
@@ -102,7 +283,7 @@ describe('ChatPanel', () => {
       props: {
         token: 'dashboard',
         createSocket: () => socket,
-        instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }]
+        instances: [alpha]
       }
     })
 
@@ -125,7 +306,7 @@ describe('ChatPanel', () => {
       props: {
         token: 'dashboard',
         createSocket: () => socket,
-        instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }]
+        instances: [alpha]
       }
     })
 
@@ -142,7 +323,7 @@ describe('ChatPanel', () => {
       props: {
         token: 'dashboard',
         createSocket: () => socket,
-        instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }]
+        instances: [alpha]
       }
     })
 
@@ -163,10 +344,11 @@ describe('ChatPanel', () => {
       props: {
         token: 'dashboard',
         createSocket: () => socket,
-        instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }]
+        instances: [alpha]
       }
     })
 
+    await wrapper.get('[data-testid="add-member-alpha"]').trigger('click')
     socket.emit('chat_event', { instanceId: 'alpha', event: 'chat.connecting', chatId: '' })
     await wrapper.vm.$nextTick()
     expect(wrapper.text()).toContain('Alpha')
@@ -175,21 +357,6 @@ describe('ChatPanel', () => {
     socket.emit('chat_event', { instanceId: 'alpha', event: 'chat.connected', chatId: '' })
     await wrapper.vm.$nextTick()
     expect(wrapper.text()).toContain('connected')
-  })
-
-  it('disables group connect until an enabled instance is selected', async () => {
-    const socket = new FakeSocket()
-    const wrapper = mount(ChatPanel, {
-      props: {
-        token: 'dashboard',
-        createSocket: () => socket,
-        instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }]
-      }
-    })
-
-    expect(wrapper.get('[data-testid="connect-group"]').attributes('disabled')).toBeDefined()
-    await wrapper.get('input[value="alpha"]').setValue(true)
-    expect(wrapper.get('[data-testid="connect-group"]').attributes('disabled')).toBeUndefined()
   })
 
   it('loads persisted topics and saves topic changes', async () => {
@@ -202,7 +369,7 @@ describe('ChatPanel', () => {
         createSocket: () => socket,
         loadTopics,
         saveTopics,
-        instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }]
+        instances: [alpha]
       }
     })
 
@@ -215,7 +382,7 @@ describe('ChatPanel', () => {
     expect(saveTopics).toHaveBeenLastCalledWith('dashboard', expect.arrayContaining([expect.objectContaining({ id: 'ops', name: 'Ops' }), expect.objectContaining({ name: 'Support' })]))
   })
 
-  it('saves selected instances and transcript updates to persisted topics', async () => {
+  it('saves selected members and transcript updates to persisted topics', async () => {
     const socket = new FakeSocket()
     const saveTopics = vi.fn().mockResolvedValue(undefined)
     const wrapper = mount(ChatPanel, {
@@ -224,12 +391,11 @@ describe('ChatPanel', () => {
         createSocket: () => socket,
         loadTopics: vi.fn().mockResolvedValue([]),
         saveTopics,
-        instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }]
+        instances: [alpha]
       }
     })
 
-    await wrapper.get('input[value="alpha"]').setValue(true)
-    await wrapper.get('[data-testid="connect-group"]').trigger('click')
+    await wrapper.get('[data-testid="add-member-alpha"]').trigger('click')
     socket.emit('chat_event', { instanceId: 'alpha', event: 'delta', chatId: 'c1', text: 'persist me' })
     await wrapper.vm.$nextTick()
 
@@ -249,7 +415,7 @@ describe('ChatPanel', () => {
         createSocket: () => socket,
         loadTopics: vi.fn().mockResolvedValue([{ id: 'ops', name: 'Ops', selectedIds: ['alpha'], transcript: { entries: [], debugEvents: [] } }]),
         saveTopics,
-        instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }]
+        instances: [alpha]
       }
     })
 
@@ -259,6 +425,7 @@ describe('ChatPanel', () => {
 
     await vi.waitFor(() => expect(saveTopics).toHaveBeenLastCalledWith('dashboard', [expect.objectContaining({
       id: 'ops',
+      chatMappings: {},
       transcript: expect.objectContaining({ nextEntryId: 2, entries: [expect.objectContaining({ id: 1, text: 'legacy topic reply' })] })
     })]))
   })

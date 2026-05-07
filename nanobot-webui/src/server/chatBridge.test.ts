@@ -280,6 +280,54 @@ describe('registerChatBridge', () => {
     ])
   })
 
+  it('ensures topic connections by sending new_chat for members without mappings', async () => {
+    FakeWebSocket.instances = []
+    const base = await listen()
+    registerChatBridge(
+      server!,
+      {
+        port: 6060,
+        authToken: 'dashboard',
+        instances: [{ id: 'alpha', name: 'alpha', baseUrl: 'http://nanobot-alpha:18790', adminToken: 'admin-secret', websocketToken: 'alpha-ws-secret', enabled: true }]
+      },
+      { WebSocketImpl: FakeWebSocket }
+    )
+    const socket = connectChat(base, 'dashboard')
+    await waitForEvent<void>(socket, 'connect')
+
+    socket.emit('ensure_topic_connections', { topicId: 'ops', members: ['alpha'], chatMappings: {} })
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    FakeWebSocket.instances[0].open()
+
+    await vi.waitFor(() => expect(FakeWebSocket.instances[0].sent).toEqual([JSON.stringify({ type: 'new_chat' })]))
+  })
+
+  it('ensures topic connections by attaching mapped chats', async () => {
+    FakeWebSocket.instances = []
+    const base = await listen()
+    registerChatBridge(
+      server!,
+      {
+        port: 6060,
+        authToken: 'dashboard',
+        instances: [{ id: 'alpha', name: 'alpha', baseUrl: 'http://nanobot-alpha:18790', adminToken: 'admin-secret', websocketToken: 'alpha-ws-secret', enabled: true }]
+      },
+      { WebSocketImpl: FakeWebSocket }
+    )
+    const socket = connectChat(base, 'dashboard')
+    await waitForEvent<void>(socket, 'connect')
+
+    socket.emit('ensure_topic_connections', {
+      topicId: 'ops',
+      members: ['alpha'],
+      chatMappings: { alpha: { chatId: 'chat-alpha', status: 'attached' } }
+    })
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    FakeWebSocket.instances[0].open()
+
+    await vi.waitFor(() => expect(FakeWebSocket.instances[0].sent).toEqual([JSON.stringify({ type: 'attach', chat_id: 'chat-alpha' })]))
+  })
+
   it('emits connection lifecycle events for upstream websockets', async () => {
     FakeWebSocket.instances = []
     const base = await listen()
@@ -331,7 +379,38 @@ describe('registerChatBridge', () => {
     await vi.waitFor(() => expect(events).toContainEqual({ instanceId: 'alpha', event: 'chat.connection_failed', chatId: '' }))
   })
 
-  it('broadcasts group messages only to connected open upstreams', async () => {
+  it('reports not attached for topic members without chat mappings', async () => {
+    FakeWebSocket.instances = []
+    const base = await listen()
+    registerChatBridge(
+      server!,
+      {
+        port: 6060,
+        authToken: 'dashboard',
+        instances: [
+          { id: 'alpha', name: 'alpha', baseUrl: 'http://nanobot-alpha:18790', adminToken: 'admin-secret', websocketToken: 'alpha-ws-secret', enabled: true },
+          { id: 'beta', name: 'beta', baseUrl: 'http://nanobot-beta:18790', adminToken: 'admin-secret', websocketToken: 'beta-ws-secret', enabled: true }
+        ]
+      },
+      { WebSocketImpl: FakeWebSocket }
+    )
+    const socket = connectChat(base, 'dashboard')
+    await waitForEvent<void>(socket, 'connect')
+    const events: unknown[] = []
+    socket.on('chat_event', (event) => events.push(event))
+
+    socket.emit('connect_group', { instanceIds: ['alpha', 'beta'] })
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+    for (const upstream of FakeWebSocket.instances) upstream.open()
+    socket.emit('send_group_message', { topicId: 'ops', text: 'hello group', memberIds: ['alpha', 'beta'], chatMappings: {} })
+
+    await vi.waitFor(() => expect(events).toContainEqual({ topicId: 'ops', instanceId: 'alpha', event: 'error', chatId: '', detail: 'not attached' }))
+    expect(events).toContainEqual({ topicId: 'ops', instanceId: 'beta', event: 'error', chatId: '', detail: 'not attached' })
+    expect(FakeWebSocket.instances[0].sent).toEqual([])
+    expect(FakeWebSocket.instances[1].sent).toEqual([])
+  })
+
+  it('sends typed topic messages only to mapped open members', async () => {
     FakeWebSocket.instances = []
     const base = await listen()
     registerChatBridge(
@@ -349,15 +428,152 @@ describe('registerChatBridge', () => {
     const socket = connectChat(base, 'dashboard')
     await waitForEvent<void>(socket, 'connect')
 
-    socket.emit('connect_group', { instanceIds: ['alpha', 'beta'] })
+    socket.emit('ensure_topic_connections', {
+      topicId: 'ops',
+      members: ['alpha', 'beta'],
+      chatMappings: {
+        alpha: { chatId: 'chat-alpha', status: 'attached' },
+        beta: { chatId: 'chat-beta', status: 'attached' }
+      }
+    })
     await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
     for (const upstream of FakeWebSocket.instances) upstream.open()
-    socket.emit('send_group_message', { text: 'hello group' })
+    socket.emit('send_group_message', {
+      topicId: 'ops',
+      text: 'hello group',
+      media: [{ name: 'notes.txt', data_url: 'data:text/plain;base64,bm90ZXM=' }],
+      memberIds: ['alpha', 'beta'],
+      chatMappings: {
+        alpha: { chatId: 'chat-alpha', status: 'attached' },
+        beta: { chatId: 'chat-beta', status: 'attached' }
+      }
+    })
 
     await vi.waitFor(() => {
-      expect(FakeWebSocket.instances[0].sent).toEqual([JSON.stringify({ text: 'hello group' })])
-      expect(FakeWebSocket.instances[1].sent).toEqual([JSON.stringify({ text: 'hello group' })])
+      expect(FakeWebSocket.instances[0].sent.at(-1)).toBe(JSON.stringify({ type: 'message', chat_id: 'chat-alpha', content: 'hello group', media: [{ name: 'notes.txt', data_url: 'data:text/plain;base64,bm90ZXM=' }] }))
+      expect(FakeWebSocket.instances[1].sent.at(-1)).toBe(JSON.stringify({ type: 'message', chat_id: 'chat-beta', content: 'hello group', media: [{ name: 'notes.txt', data_url: 'data:text/plain;base64,bm90ZXM=' }] }))
     })
+  })
+
+  it('emits safe errors for invalid topic connection payloads', async () => {
+    FakeWebSocket.instances = []
+    const base = await listen()
+    registerChatBridge(
+      server!,
+      { port: 6060, authToken: 'dashboard', instances: [] },
+      { WebSocketImpl: FakeWebSocket }
+    )
+    const socket = connectChat(base, 'dashboard')
+    await waitForEvent<void>(socket, 'connect')
+
+    socket.emit('ensure_topic_connections', { topicId: '', members: 'alpha' })
+
+    await expect(waitForEvent(socket, 'chat_event')).resolves.toEqual({ instanceId: '', event: 'error', chatId: '', detail: 'invalid chat payload' })
+    expect(FakeWebSocket.instances).toHaveLength(0)
+  })
+
+  it('adds topic id to attached events correlated from pending new chats', async () => {
+    FakeWebSocket.instances = []
+    const base = await listen()
+    registerChatBridge(
+      server!,
+      {
+        port: 6060,
+        authToken: 'dashboard',
+        instances: [{ id: 'alpha', name: 'alpha', baseUrl: 'http://nanobot-alpha:18790', adminToken: 'admin-secret', websocketToken: 'alpha-ws-secret', enabled: true }]
+      },
+      { WebSocketImpl: FakeWebSocket }
+    )
+    const socket = connectChat(base, 'dashboard')
+    await waitForEvent<void>(socket, 'connect')
+    const events: unknown[] = []
+    socket.on('chat_event', (event) => events.push(event))
+
+    socket.emit('ensure_topic_connections', { topicId: 'ops', members: ['alpha'], chatMappings: {} })
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    FakeWebSocket.instances[0].open()
+    FakeWebSocket.instances[0].emit('message', Buffer.from('{"event":"attached","chat_id":"chat-alpha"}'))
+
+    await vi.waitFor(() => expect(events).toContainEqual({ topicId: 'ops', instanceId: 'alpha', event: 'attached', chatId: 'chat-alpha' }))
+  })
+
+  it('adds topic id to later upstream events for mapped chats', async () => {
+    FakeWebSocket.instances = []
+    const base = await listen()
+    registerChatBridge(
+      server!,
+      {
+        port: 6060,
+        authToken: 'dashboard',
+        instances: [{ id: 'alpha', name: 'alpha', baseUrl: 'http://nanobot-alpha:18790', adminToken: 'admin-secret', websocketToken: 'alpha-ws-secret', enabled: true }]
+      },
+      { WebSocketImpl: FakeWebSocket }
+    )
+    const socket = connectChat(base, 'dashboard')
+    await waitForEvent<void>(socket, 'connect')
+    const events: unknown[] = []
+    socket.on('chat_event', (event) => events.push(event))
+
+    socket.emit('ensure_topic_connections', { topicId: 'ops', members: ['alpha'], chatMappings: { alpha: { chatId: 'chat-alpha', status: 'attached' } } })
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    FakeWebSocket.instances[0].open()
+    FakeWebSocket.instances[0].emit('message', Buffer.from('{"event":"delta","chat_id":"chat-alpha","text":"ops reply"}'))
+
+    await vi.waitFor(() => expect(events).toContainEqual({ topicId: 'ops', instanceId: 'alpha', event: 'delta', chatId: 'chat-alpha', text: 'ops reply' }))
+  })
+
+  it('deduplicates repeated topic ensure requests before upstream open', async () => {
+    FakeWebSocket.instances = []
+    const base = await listen()
+    registerChatBridge(
+      server!,
+      {
+        port: 6060,
+        authToken: 'dashboard',
+        instances: [{ id: 'alpha', name: 'alpha', baseUrl: 'http://nanobot-alpha:18790', adminToken: 'admin-secret', websocketToken: 'alpha-ws-secret', enabled: true }]
+      },
+      { WebSocketImpl: FakeWebSocket }
+    )
+    const socket = connectChat(base, 'dashboard')
+    await waitForEvent<void>(socket, 'connect')
+
+    socket.emit('ensure_topic_connections', { topicId: 'ops', members: ['alpha'], chatMappings: {} })
+    socket.emit('ensure_topic_connections', { topicId: 'ops', members: ['alpha'], chatMappings: {} })
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    FakeWebSocket.instances[0].open()
+
+    await vi.waitFor(() => expect(FakeWebSocket.instances[0].sent).toEqual([JSON.stringify({ type: 'new_chat' })]))
+  })
+
+  it('rejects mapped sends that were never established for the socket topic', async () => {
+    FakeWebSocket.instances = []
+    const base = await listen()
+    registerChatBridge(
+      server!,
+      {
+        port: 6060,
+        authToken: 'dashboard',
+        instances: [{ id: 'alpha', name: 'alpha', baseUrl: 'http://nanobot-alpha:18790', adminToken: 'admin-secret', websocketToken: 'alpha-ws-secret', enabled: true }]
+      },
+      { WebSocketImpl: FakeWebSocket }
+    )
+    const socket = connectChat(base, 'dashboard')
+    await waitForEvent<void>(socket, 'connect')
+    const events: unknown[] = []
+    socket.on('chat_event', (event) => events.push(event))
+    socket.emit('connect_group', { instanceIds: ['alpha'] })
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    FakeWebSocket.instances[0].open()
+
+    socket.emit('send_group_message', {
+      topicId: 'ops',
+      text: 'forged',
+      memberIds: ['alpha'],
+      chatMappings: { alpha: { chatId: 'forged-chat', status: 'attached' } }
+    })
+
+    await vi.waitFor(() => expect(events).toContainEqual({ topicId: 'ops', instanceId: 'alpha', event: 'error', chatId: 'forged-chat', detail: 'not attached' }))
+    expect(FakeWebSocket.instances[0].sent).toEqual([])
   })
 
   it('labels group chat events by upstream instance', async () => {

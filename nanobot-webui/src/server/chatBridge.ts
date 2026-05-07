@@ -5,12 +5,24 @@ import { isDashboardAuthorized } from './auth.js'
 import { websocketUrlForInstance, type WebuiConfig } from './config.js'
 
 export type BrowserChatEvent = {
+  topicId?: string
   instanceId: string
   event: string
   chatId: string
   text?: string
   detail?: string
   [key: string]: unknown
+}
+
+type ChatMapping = {
+  chatId: string
+  status?: string
+  lastError?: string
+}
+
+type PendingAttach = {
+  topicId: string
+  chatId?: string
 }
 
 type ChatBridgeOptions = {
@@ -29,8 +41,12 @@ type WebSocketConstructor = {
   new (url: string): WebSocketLike
 }
 
-function invalidConnectPayload(instanceId = ''): BrowserChatEvent {
-  return { instanceId, event: 'error', chatId: '', detail: 'invalid connect payload' }
+function invalidPayload(instanceId = '', detail = 'invalid chat payload'): BrowserChatEvent {
+  return { instanceId, event: 'error', chatId: '', detail }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
 }
 
 export function normalizeNanobotEvent(instanceId: string, raw: string): BrowserChatEvent {
@@ -67,6 +83,8 @@ export function registerChatBridge(server: http.Server, config: WebuiConfig, opt
 
   namespace.on('connection', (socket) => {
     const upstreams = new Map<string, WebSocketLike>()
+    const pendingAttachByInstance = new Map<string, PendingAttach[]>()
+    const topicByInstanceChat = new Map<string, string>()
     let generation = 0
 
     function closeUpstreams() {
@@ -99,7 +117,11 @@ export function registerChatBridge(server: http.Server, config: WebuiConfig, opt
       })
       upstream.on('message', (data) => {
         if (currentGeneration !== generation || upstreams.get(instanceId) !== upstream) return
-        socket.emit('chat_event', normalizeNanobotEvent(instanceId, data.toString()))
+        const event = normalizeNanobotEvent(instanceId, data.toString())
+        const pending = event.event === 'attached' ? matchingPendingAttach(instanceId, event.chatId) : undefined
+        if (pending) topicByInstanceChat.set(mappingKey(instanceId, event.chatId), pending.topicId)
+        const topicId = pending?.topicId ?? topicByInstanceChat.get(mappingKey(instanceId, event.chatId))
+        socket.emit('chat_event', topicId ? { ...event, topicId } : event)
       })
       upstream.on('close', () => {
         if (currentGeneration !== generation || upstreams.get(instanceId) !== upstream) return
@@ -111,6 +133,46 @@ export function registerChatBridge(server: http.Server, config: WebuiConfig, opt
       })
     }
 
+    function openOrConnect(instanceId: string, currentGeneration: number) {
+      const existing = upstreams.get(instanceId)
+      if (existing) return existing
+      connectUpstream(instanceId, currentGeneration)
+      return upstreams.get(instanceId)
+    }
+
+    function sendWhenOpen(upstream: WebSocketLike, payload: unknown) {
+      const message = JSON.stringify(payload)
+      if (upstream.readyState === WebSocket.OPEN) {
+        upstream.send(message)
+        return
+      }
+      upstream.on('open', () => upstream.send(message))
+    }
+
+    function queuePendingAttach(instanceId: string, pending: PendingAttach) {
+      const queue = pendingAttachByInstance.get(instanceId) ?? []
+      const duplicate = queue.some((item) => item.topicId === pending.topicId && item.chatId === pending.chatId)
+      if (duplicate) return false
+      queue.push(pending)
+      pendingAttachByInstance.set(instanceId, queue)
+      return true
+    }
+
+    function matchingPendingAttach(instanceId: string, chatId: string) {
+      const queue = pendingAttachByInstance.get(instanceId) ?? []
+      const mappedIndex = queue.findIndex((item) => item.chatId === chatId)
+      const index = mappedIndex >= 0 ? mappedIndex : queue.findIndex((item) => !item.chatId)
+      if (index < 0) return undefined
+      const [pending] = queue.splice(index, 1)
+      if (queue.length === 0) pendingAttachByInstance.delete(instanceId)
+      else pendingAttachByInstance.set(instanceId, queue)
+      return pending
+    }
+
+    function mappingKey(instanceId: string, chatId: string) {
+      return `${instanceId}\u0000${chatId}`
+    }
+
     function sendToOpenUpstreams(payload: unknown) {
       const message = JSON.stringify(payload)
       for (const upstream of upstreams.values()) {
@@ -118,16 +180,87 @@ export function registerChatBridge(server: http.Server, config: WebuiConfig, opt
       }
     }
 
+    socket.on('ensure_topic_connections', (payload: unknown) => {
+      if (!isRecord(payload)) {
+        socket.emit('chat_event', invalidPayload())
+        return
+      }
+      const { topicId, members, chatMappings } = payload
+      if (typeof topicId !== 'string' || !topicId || !Array.isArray(members)) {
+        socket.emit('chat_event', invalidPayload())
+        return
+      }
+      const mappings = isRecord(chatMappings) ? chatMappings : {}
+      const currentGeneration = generation
+      for (const member of new Set(members)) {
+        if (typeof member !== 'string' || !member) {
+          socket.emit('chat_event', invalidPayload())
+          return
+        }
+        const upstream = openOrConnect(member, currentGeneration)
+        if (!upstream) continue
+        const mapping = isRecord(mappings[member]) ? (mappings[member] as Partial<ChatMapping>) : undefined
+        if (typeof mapping?.chatId === 'string' && mapping.chatId) {
+          if (topicByInstanceChat.get(mappingKey(member, mapping.chatId)) === topicId) continue
+          if (!queuePendingAttach(member, { topicId, chatId: mapping.chatId })) continue
+          topicByInstanceChat.set(mappingKey(member, mapping.chatId), topicId)
+          sendWhenOpen(upstream, { type: 'attach', chat_id: mapping.chatId })
+        } else {
+          if (!queuePendingAttach(member, { topicId })) continue
+          sendWhenOpen(upstream, { type: 'new_chat' })
+        }
+      }
+    })
+
+    socket.on('send_group_message', (payload: unknown) => {
+      if (!isRecord(payload)) {
+        socket.emit('chat_event', invalidPayload())
+        return
+      }
+      const { topicId, text, media, memberIds, chatMappings } = payload
+      if (typeof topicId !== 'string' || !topicId || typeof text !== 'string' || !Array.isArray(memberIds)) {
+        socket.emit('chat_event', invalidPayload())
+        return
+      }
+      const mappings = isRecord(chatMappings) ? chatMappings : {}
+      for (const memberId of memberIds) {
+        if (typeof memberId !== 'string' || !memberId) {
+          socket.emit('chat_event', invalidPayload())
+          return
+        }
+        const mapping = isRecord(mappings[memberId]) ? (mappings[memberId] as Partial<ChatMapping>) : undefined
+        if (typeof mapping?.chatId !== 'string' || !mapping.chatId) {
+          socket.emit('chat_event', { topicId, instanceId: memberId, event: 'error', chatId: '', detail: 'not attached' })
+          continue
+        }
+        if (topicByInstanceChat.get(mappingKey(memberId, mapping.chatId)) !== topicId) {
+          socket.emit('chat_event', { topicId, instanceId: memberId, event: 'error', chatId: mapping.chatId, detail: 'not attached' })
+          continue
+        }
+        const upstream = upstreams.get(memberId)
+        if (!upstream || upstream.readyState !== WebSocket.OPEN) {
+          socket.emit('chat_event', { topicId, instanceId: memberId, event: 'error', chatId: mapping.chatId, detail: 'not connected' })
+          continue
+        }
+        upstream.send(JSON.stringify({
+          type: 'message',
+          chat_id: mapping.chatId,
+          content: text,
+          ...(Array.isArray(media) && media.length > 0 ? { media } : {})
+        }))
+      }
+    })
+
     socket.on('connect_instance', (payload: unknown) => {
       const currentGeneration = ++generation
       closeUpstreams()
       if (!payload || typeof payload !== 'object') {
-        socket.emit('chat_event', invalidConnectPayload())
+        socket.emit('chat_event', invalidPayload('', 'invalid connect payload'))
         return
       }
       const { instanceId } = payload as { instanceId?: unknown }
       if (typeof instanceId !== 'string' || !instanceId) {
-        socket.emit('chat_event', invalidConnectPayload(typeof instanceId === 'string' ? instanceId : ''))
+        socket.emit('chat_event', invalidPayload(typeof instanceId === 'string' ? instanceId : '', 'invalid connect payload'))
         return
       }
       connectUpstream(instanceId, currentGeneration)
@@ -137,22 +270,18 @@ export function registerChatBridge(server: http.Server, config: WebuiConfig, opt
       const currentGeneration = ++generation
       closeUpstreams()
       if (!payload || typeof payload !== 'object') {
-        socket.emit('chat_event', invalidConnectPayload())
+        socket.emit('chat_event', invalidPayload('', 'invalid connect payload'))
         return
       }
       const { instanceIds } = payload as { instanceIds?: unknown }
       if (!Array.isArray(instanceIds) || instanceIds.some((instanceId) => typeof instanceId !== 'string' || !instanceId)) {
-        socket.emit('chat_event', invalidConnectPayload())
+        socket.emit('chat_event', invalidPayload('', 'invalid connect payload'))
         return
       }
       for (const instanceId of new Set(instanceIds)) connectUpstream(instanceId, currentGeneration)
     })
 
     socket.on('send_message', (payload) => {
-      sendToOpenUpstreams(payload)
-    })
-
-    socket.on('send_group_message', (payload) => {
       sendToOpenUpstreams(payload)
     })
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { fetchStateTopics, saveStateTopics, type PublicInstance } from '../api'
-import { appendOutboundMessage, applyChatEvent, createTranscriptState, type TranscriptState } from '../chatTranscript'
+import { fetchStateTopics, saveStateTopics, type ChatMapping, type ComposerMedia, type PublicInstance, type StateTopic } from '../api'
+import { appendOutboundMessage, applyChatEvent, createTranscriptState, type TranscriptEntry, type TranscriptState } from '../chatTranscript'
 import { parseMarkdownTranscript, type InlineToken, type MarkdownBlock } from '../markdownTranscript'
 import { createChatSocket, type ChatEvent, type ChatSocket } from '../socket'
 
@@ -11,6 +11,7 @@ type Topic = {
   id: string
   name: string
   selectedIds: string[]
+  chatMappings: Record<string, ChatMapping>
   transcript: TranscriptState
 }
 
@@ -26,25 +27,35 @@ const props = withDefaults(defineProps<{
   saveTopics: () => saveStateTopics
 })
 
-const selectedIds = ref<string[]>([])
 const message = ref('')
+const pendingAttachments = ref<ComposerMedia[]>([])
+const copyState = ref<Record<number, 'idle' | 'copied' | 'failed'>>({})
 const statuses = ref<Record<string, ConnectionStatus>>({})
 const newTopicName = ref('')
-const topics = ref<Topic[]>([{ id: 'default', name: 'General', selectedIds: [], transcript: createTranscriptState() }])
+const topics = ref<Topic[]>([{ id: 'default', name: 'General', selectedIds: [], chatMappings: {}, transcript: createTranscriptState() }])
 const selectedTopicId = ref('default')
 const socket = props.createSocket(props.token)
 
-const enabledInstances = computed(() => props.instances.filter((instance) => instance.enabled))
 const selectedTopic = computed(() => topics.value.find((topic) => topic.id === selectedTopicId.value) ?? topics.value[0])
+const activeMemberIds = computed(() => selectedTopic.value.selectedIds.filter((id) => instanceFor(id)?.enabled))
+const availableInstances = computed(() => props.instances.filter((instance) => !selectedTopic.value.selectedIds.includes(instance.id)))
 const transcript = computed(() => selectedTopic.value.transcript.entries)
 const debugEvents = computed(() => selectedTopic.value.transcript.debugEvents)
 
+function instanceFor(instanceId: string) {
+  return props.instances.find((instance) => instance.id === instanceId)
+}
+
 function instanceLabel(instanceId: string) {
-  return props.instances.find((instance) => instance.id === instanceId)?.name ?? instanceId
+  return instanceFor(instanceId)?.name ?? instanceId
 }
 
 function statusFor(instanceId: string): ConnectionStatus {
   return statuses.value[instanceId] ?? 'idle'
+}
+
+function memberStatus(instanceId: string) {
+  return instanceFor(instanceId)?.enabled ? statusFor(instanceId) : 'disabled'
 }
 
 function updateStatus(event: ChatEvent) {
@@ -54,27 +65,63 @@ function updateStatus(event: ChatEvent) {
   else if (event.event === 'chat.disconnected') statuses.value[event.instanceId] = 'disconnected'
 }
 
-function connectGroup() {
-  if (selectedIds.value.length === 0) return
-  selectedTopic.value.selectedIds = [...selectedIds.value]
-  for (const instanceId of selectedIds.value) statuses.value[instanceId] = 'connecting'
-  socket.emit('connect_group', { instanceIds: [...selectedIds.value] })
+function topicForEvent(event: ChatEvent) {
+  if (event.topicId) return topics.value.find((topic) => topic.id === event.topicId) ?? selectedTopic.value
+  return selectedTopic.value
+}
+
+function ensureTopicConnections(topic: Topic) {
+  const members = topic.selectedIds.filter((id) => instanceFor(id)?.enabled)
+  if (members.length === 0) return
+  for (const instanceId of members) {
+    if (statusFor(instanceId) === 'idle') statuses.value[instanceId] = 'connecting'
+  }
+  socket.emit('ensure_topic_connections', { topicId: topic.id, members, chatMappings: topic.chatMappings })
+}
+
+function addMember(instanceId: string) {
+  if (selectedTopic.value.selectedIds.includes(instanceId)) return
+  selectedTopic.value.selectedIds.push(instanceId)
+  persistTopics()
+  ensureTopicConnections(selectedTopic.value)
+}
+
+function removeMember(instanceId: string) {
+  selectedTopic.value.selectedIds = selectedTopic.value.selectedIds.filter((id) => id !== instanceId)
+  delete selectedTopic.value.chatMappings[instanceId]
   persistTopics()
 }
 
 function sendMessage() {
   const text = message.value.trim()
-  if (!text) return
+  if (!text || activeMemberIds.value.length === 0) return
 
-  socket.emit('send_group_message', { text })
-  appendOutboundMessage(selectedTopic.value.transcript, text)
+  const media = [...pendingAttachments.value]
+  socket.emit('send_group_message', {
+    topicId: selectedTopic.value.id,
+    text,
+    ...(media.length > 0 ? { media } : {}),
+    memberIds: [...activeMemberIds.value],
+    chatMappings: selectedTopic.value.chatMappings
+  })
+  appendOutboundMessage(selectedTopic.value.transcript, text, media)
   persistTopics()
   message.value = ''
+  pendingAttachments.value = []
 }
 
 function handleChatEvent(event: ChatEvent) {
   updateStatus(event)
-  applyChatEvent(selectedTopic.value.transcript, event, instanceLabel(event.instanceId))
+  const topic = topicForEvent(event)
+  if (event.event === 'attached' && event.chatId) {
+    topic.chatMappings[event.instanceId] = { chatId: event.chatId, status: 'attached' }
+    persistTopics()
+    return
+  }
+  if (event.event === 'error' && event.topicId) {
+    topic.chatMappings[event.instanceId] = { chatId: event.chatId, status: 'error', lastError: event.detail }
+  }
+  applyChatEvent(topic.transcript, event, instanceLabel(event.instanceId))
   persistTopics()
 }
 
@@ -82,7 +129,7 @@ function createTopic() {
   const name = newTopicName.value.trim()
   if (!name) return
   const id = `${Date.now()}-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
-  topics.value.push({ id, name, selectedIds: [], transcript: createTranscriptState() })
+  topics.value.push({ id, name, selectedIds: [], chatMappings: {}, transcript: createTranscriptState() })
   newTopicName.value = ''
   switchTopic(id)
   persistTopics()
@@ -90,23 +137,64 @@ function createTopic() {
 
 function switchTopic(topicId: string) {
   selectedTopicId.value = topicId
-  selectedIds.value = [...selectedTopic.value.selectedIds]
+  pendingAttachments.value = []
+  ensureTopicConnections(selectedTopic.value)
 }
 
-function normalizeTopic(topic: Topic): Topic {
+type PersistedTopicInput = Partial<Omit<Topic, 'transcript'>> & { transcript?: Partial<TranscriptState> }
+
+function normalizeTopic(topic: PersistedTopicInput): Topic {
   const entries = Array.isArray(topic.transcript?.entries) ? topic.transcript.entries : []
   const debugEvents = Array.isArray(topic.transcript?.debugEvents) ? topic.transcript.debugEvents : []
   const maxEntryId = entries.reduce((max, entry) => Math.max(max, Number.isFinite(entry.id) ? entry.id : 0), 0)
-  const nextEntryId = Number.isFinite(topic.transcript?.nextEntryId) ? topic.transcript.nextEntryId : maxEntryId + 1
+  const storedNextEntryId = topic.transcript?.nextEntryId
+  const nextEntryId = typeof storedNextEntryId === 'number' && Number.isFinite(storedNextEntryId) ? storedNextEntryId : maxEntryId + 1
   return {
-    ...topic,
+    id: typeof topic.id === 'string' ? topic.id : 'default',
+    name: typeof topic.name === 'string' ? topic.name : 'General',
     selectedIds: Array.isArray(topic.selectedIds) ? topic.selectedIds : [],
-    transcript: { entries, debugEvents, nextEntryId }
+    chatMappings: topic.chatMappings && typeof topic.chatMappings === 'object' ? topic.chatMappings : {},
+    transcript: { entries: entries as TranscriptEntry[], debugEvents: debugEvents as ChatEvent[], nextEntryId }
   }
 }
 
 function persistTopics() {
   void props.saveTopics(props.token, topics.value).catch(() => {})
+}
+
+function readFileAsDataUrl(file: File) {
+  return new Promise<ComposerMedia>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve({ name: file.name, data_url: String(reader.result) })
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+}
+
+async function addAttachments(event: Event) {
+  const input = event.target as HTMLInputElement
+  const files = Array.from(input.files ?? [])
+  const media = await Promise.all(files.map(readFileAsDataUrl))
+  pendingAttachments.value.push(...media)
+  input.value = ''
+}
+
+function removePendingAttachment(index: number) {
+  pendingAttachments.value.splice(index, 1)
+}
+
+function markdownForEntry(entry: TranscriptEntry) {
+  if (entry.kind === 'tool' || entry.kind === 'reasoning') return `### ${entry.title ?? entry.label}\n\n${entry.text}`
+  return entry.text
+}
+
+async function copyMarkdown(entry: TranscriptEntry) {
+  try {
+    await navigator.clipboard.writeText(markdownForEntry(entry))
+    copyState.value[entry.id] = 'copied'
+  } catch {
+    copyState.value[entry.id] = 'failed'
+  }
 }
 
 function markdownBlocks(text: string) {
@@ -126,9 +214,9 @@ onMounted(() => {
   void props.loadTopics(props.token)
     .then((storedTopics) => {
       if (storedTopics.length === 0) return
-      topics.value = (storedTopics as Topic[]).map(normalizeTopic)
+      topics.value = (storedTopics as StateTopic[]).map((topic) => normalizeTopic(topic as PersistedTopicInput))
       selectedTopicId.value = topics.value[0].id
-      selectedIds.value = [...topics.value[0].selectedIds]
+      ensureTopicConnections(topics.value[0])
     })
     .catch(() => {})
 })
@@ -142,8 +230,8 @@ onUnmounted(() => {
   <section class="panel">
     <div class="panel-heading">
       <div>
-        <h2>Chat</h2>
-        <p>Connect enabled instances and broadcast one prompt to the group.</p>
+        <h2>Chat Topics</h2>
+        <p>Rooms connect their member bots automatically and keep local transcript history.</p>
       </div>
     </div>
 
@@ -162,70 +250,109 @@ onUnmounted(() => {
           :data-topic-id="topic.id"
           @click="switchTopic(topic.id)"
         >
-          {{ topic.name }}
+          <span>{{ topic.name }}</span>
+          <small>{{ topic.transcript.entries.length }} messages · {{ topic.selectedIds.length }} bots</small>
         </button>
       </aside>
 
-      <div class="instance-picker">
-        <p>Select enabled upstreams for this group chat.</p>
-        <label v-for="instance in enabledInstances" :key="instance.id" class="instance-option">
-          <input v-model="selectedIds" type="checkbox" :value="instance.id">
-          <span>{{ instance.name }}</span>
-          <small>{{ instance.baseUrl }}</small>
-          <em class="connection-status" :class="`is-${statusFor(instance.id)}`">{{ statusFor(instance.id) }}</em>
-        </label>
-        <p v-if="enabledInstances.length === 0" class="empty-state">No enabled instances loaded.</p>
-        <button data-testid="connect-group" type="button" :disabled="selectedIds.length === 0" @click="connectGroup">Connect selected</button>
-      </div>
+      <main class="chat-workspace">
+        <header class="chat-header">
+          <div>
+            <h3>{{ selectedTopic.name }}</h3>
+            <p>{{ transcript.length }} saved messages</p>
+          </div>
+        </header>
 
-      <div class="transcript" aria-live="polite">
-        <div v-if="transcript.length === 0" class="empty-state">Transcript events will appear here.</div>
-        <article
-          v-for="entry in transcript"
-          :key="entry.id"
-          class="transcript-entry"
-          :class="[`is-${entry.kind ?? 'message'}`, `is-${entry.role}`]"
-        >
-          <header>
-            <strong>{{ entry.title ?? entry.label }}</strong>
-            <span>{{ entry.role }}</span>
-          </header>
-          <div class="markdown-body">
-            <template v-for="(block, blockIndex) in markdownBlocks(entry.text)" :key="blockKey(entry.id, block, blockIndex)">
-              <component :is="`h${block.level}`" v-if="block.type === 'heading'" class="markdown-heading">
-                <template v-for="(token, tokenIndex) in block.content" :key="inlineKey(token, tokenIndex)">
-                  <code v-if="token.type === 'inlineCode'">{{ token.text }}</code>
-                  <span v-else>{{ token.text }}</span>
-                </template>
-              </component>
-              <p v-else-if="block.type === 'paragraph'">
-                <template v-for="(token, tokenIndex) in block.content" :key="inlineKey(token, tokenIndex)">
-                  <code v-if="token.type === 'inlineCode'">{{ token.text }}</code>
-                  <span v-else>{{ token.text }}</span>
-                </template>
-              </p>
-              <ul v-else-if="block.type === 'list'">
-                <li v-for="(item, itemIndex) in block.items" :key="itemIndex">
-                  <template v-for="(token, tokenIndex) in item" :key="inlineKey(token, tokenIndex)">
+        <div class="member-bar" data-testid="member-bar">
+          <span
+            v-for="memberId in selectedTopic.selectedIds"
+            :key="memberId"
+            class="member-chip"
+            :class="`is-${memberStatus(memberId)}`"
+          >
+            {{ instanceLabel(memberId) }}
+            <em>{{ memberStatus(memberId) }}</em>
+            <button type="button" :aria-label="`Remove ${instanceLabel(memberId)}`" @click="removeMember(memberId)">×</button>
+          </span>
+          <div class="add-member-menu">
+            <button
+              v-for="instance in availableInstances"
+              :key="instance.id"
+              type="button"
+              :data-testid="`add-member-${instance.id}`"
+              @click="addMember(instance.id)"
+            >
+              + {{ instance.name }}
+            </button>
+          </div>
+        </div>
+
+        <div class="transcript" aria-live="polite">
+          <div v-if="transcript.length === 0" class="empty-state">Start the topic by adding a bot and sending a message.</div>
+          <article
+            v-for="entry in transcript"
+            :key="entry.id"
+            class="transcript-entry"
+            :class="[`is-${entry.kind ?? 'message'}`, `is-${entry.role}`]"
+          >
+            <header>
+              <strong>{{ entry.title ?? entry.label }}</strong>
+              <span>{{ entry.role }}</span>
+              <button v-if="entry.role !== 'user'" data-testid="copy-markdown" type="button" @click="copyMarkdown(entry)">
+                {{ copyState[entry.id] === 'copied' ? 'Copied' : 'Copy Markdown' }}
+              </button>
+            </header>
+            <div class="markdown-body">
+              <template v-for="(block, blockIndex) in markdownBlocks(entry.text)" :key="blockKey(entry.id, block, blockIndex)">
+                <component :is="`h${block.level}`" v-if="block.type === 'heading'" class="markdown-heading">
+                  <template v-for="(token, tokenIndex) in block.content" :key="inlineKey(token, tokenIndex)">
                     <code v-if="token.type === 'inlineCode'">{{ token.text }}</code>
                     <span v-else>{{ token.text }}</span>
                   </template>
-                </li>
-              </ul>
-              <pre v-else class="markdown-code"><code :data-language="block.language">{{ block.code }}</code></pre>
-            </template>
-          </div>
-        </article>
-        <details class="debug-events">
-          <summary>Debug events ({{ debugEvents.length }})</summary>
-          <pre>{{ JSON.stringify(debugEvents, null, 2) }}</pre>
-        </details>
-      </div>
+                </component>
+                <p v-else-if="block.type === 'paragraph'">
+                  <template v-for="(token, tokenIndex) in block.content" :key="inlineKey(token, tokenIndex)">
+                    <code v-if="token.type === 'inlineCode'">{{ token.text }}</code>
+                    <span v-else>{{ token.text }}</span>
+                  </template>
+                </p>
+                <ul v-else-if="block.type === 'list'">
+                  <li v-for="(item, itemIndex) in block.items" :key="itemIndex">
+                    <template v-for="(token, tokenIndex) in item" :key="inlineKey(token, tokenIndex)">
+                      <code v-if="token.type === 'inlineCode'">{{ token.text }}</code>
+                      <span v-else>{{ token.text }}</span>
+                    </template>
+                  </li>
+                </ul>
+                <pre v-else class="markdown-code"><code :data-language="block.language">{{ block.code }}</code></pre>
+              </template>
+            </div>
+            <div v-if="entry.attachments?.length" class="attachment-row">
+              <span v-for="attachment in entry.attachments" :key="attachment.data_url" data-testid="sent-attachment" class="attachment-chip">{{ attachment.name ?? 'attachment' }}</span>
+            </div>
+          </article>
+          <details class="debug-events">
+            <summary>Debug events ({{ debugEvents.length }})</summary>
+            <pre>{{ JSON.stringify(debugEvents, null, 2) }}</pre>
+          </details>
+        </div>
 
-      <form class="composer" @submit.prevent="sendMessage">
-        <textarea v-model="message" placeholder="Message all selected instances"></textarea>
-        <button type="submit" :disabled="selectedIds.length === 0 || !message.trim()">Send to group</button>
-      </form>
+        <form class="composer" @submit.prevent="sendMessage">
+          <div v-if="pendingAttachments.length" class="attachment-row">
+            <button v-for="(attachment, index) in pendingAttachments" :key="attachment.data_url" type="button" class="attachment-chip" @click="removePendingAttachment(index)">
+              {{ attachment.name ?? 'attachment' }} ×
+            </button>
+          </div>
+          <textarea v-model="message" placeholder="Message this topic's bot members"></textarea>
+          <div class="composer-actions">
+            <label class="attachment-button">
+              + File
+              <input data-testid="attachment-input" type="file" multiple @change="addAttachments">
+            </label>
+            <button type="submit" :disabled="activeMemberIds.length === 0 || !message.trim()">Send to topic</button>
+          </div>
+        </form>
+      </main>
     </div>
   </section>
 </template>
@@ -236,7 +363,8 @@ onUnmounted(() => {
 }
 
 .panel-heading p,
-.instance-picker p {
+.chat-header p,
+.topic-button small {
   color: #69778c;
   line-height: 1.5;
   margin: 0.25rem 0 0;
@@ -244,25 +372,29 @@ onUnmounted(() => {
 
 .chat-shell {
   display: grid;
-  grid-template-columns: minmax(12rem, 0.45fr) minmax(16rem, 0.65fr) minmax(22rem, 1.4fr);
+  grid-template-columns: minmax(13rem, 0.35fr) minmax(0, 1fr);
   gap: 1rem;
+  min-height: 34rem;
 }
 
 .topic-sidebar,
-.instance-picker,
-.transcript,
-.composer {
+.chat-workspace {
   border: 1px solid rgba(148, 163, 184, 0.2);
-  border-radius: 0.85rem;
+  border-radius: 1.1rem;
   background: rgba(8, 13, 28, 0.72);
+}
+
+.topic-sidebar {
+  align-content: start;
+  display: grid;
+  gap: 0.75rem;
   padding: 1rem;
 }
 
-.topic-sidebar,
-.instance-picker {
+.chat-workspace {
   display: grid;
-  gap: 0.75rem;
-  align-content: start;
+  grid-template-rows: auto auto minmax(18rem, 1fr) auto;
+  overflow: hidden;
 }
 
 .topic-create {
@@ -274,6 +406,8 @@ onUnmounted(() => {
   background: transparent;
   border-color: rgba(148, 163, 184, 0.18);
   color: #cbd5e1;
+  display: grid;
+  gap: 0.2rem;
   justify-self: stretch;
   text-align: left;
 }
@@ -284,62 +418,99 @@ onUnmounted(() => {
   color: #dbeafe;
 }
 
-.instance-option {
+.chat-header,
+.member-bar,
+.composer {
+  padding: 1rem;
+}
+
+.chat-header {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.chat-header h3,
+.chat-header p {
+  margin: 0;
+}
+
+.member-bar {
   align-items: center;
-  display: grid;
-  gap: 0.35rem 0.65rem;
-  grid-template-columns: auto 1fr auto;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 
-.instance-option small {
-  color: #69778c;
-  grid-column: 2;
-}
-
-.connection-status {
-  border: 1px solid rgba(148, 163, 184, 0.3);
+.member-chip,
+.attachment-chip {
+  align-items: center;
+  border: 1px solid rgba(148, 163, 184, 0.24);
   border-radius: 999px;
+  background: rgba(15, 23, 42, 0.72);
+  color: #dbeafe;
+  display: inline-flex;
+  gap: 0.4rem;
+  padding: 0.35rem 0.65rem;
+}
+
+.member-chip.is-connected,
+.member-chip.is-attached {
+  border-color: rgba(134, 239, 172, 0.6);
+}
+
+.member-chip.is-connecting {
+  border-color: rgba(147, 197, 253, 0.7);
+}
+
+.member-chip.is-error,
+.member-chip.is-disconnected,
+.member-chip.is-disabled {
+  border-color: rgba(254, 202, 202, 0.7);
+}
+
+.member-chip em {
   color: #94a3b8;
   font-size: 0.75rem;
   font-style: normal;
-  grid-row: 1 / span 2;
-  padding: 0.2rem 0.5rem;
 }
 
-.connection-status.is-connected {
-  border-color: #86efac;
-  color: #86efac;
+.member-chip button {
+  padding: 0 0.25rem;
 }
 
-.connection-status.is-connecting {
-  border-color: #93c5fd;
-  color: #93c5fd;
-}
-
-.connection-status.is-error,
-.connection-status.is-disconnected {
-  border-color: #fecaca;
-  color: #fecaca;
+.add-member-menu {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
 }
 
 .transcript {
   display: grid;
-  gap: 0.75rem;
+  gap: 1.15rem;
   min-height: 12rem;
+  overflow: auto;
+  padding: 1.25rem clamp(1rem, 4vw, 3rem);
 }
 
 .transcript-entry {
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  border-radius: 0.75rem;
-  background: rgba(15, 23, 42, 0.82);
-  padding: 0.85rem;
+  max-width: min(48rem, 100%);
+}
+
+.transcript-entry.is-user {
+  justify-self: end;
+}
+
+.transcript-entry.is-user .markdown-body {
+  border-radius: 1rem 1rem 0.25rem 1rem;
+  background: rgba(37, 99, 235, 0.22);
+  padding: 0.75rem 0.9rem;
 }
 
 .transcript-entry header {
   align-items: center;
   display: flex;
   gap: 0.5rem;
-  justify-content: space-between;
+  margin-bottom: 0.35rem;
 }
 
 .transcript-entry header span {
@@ -347,10 +518,15 @@ onUnmounted(() => {
   font-size: 0.85rem;
 }
 
+.transcript-entry.is-tool,
+.transcript-entry.is-reasoning {
+  border-left: 2px solid rgba(167, 139, 250, 0.5);
+  padding-left: 0.85rem;
+}
+
 .markdown-body {
   color: #d7e2f1;
   line-height: 1.55;
-  margin-top: 0.65rem;
 }
 
 .markdown-body p,
@@ -408,33 +584,37 @@ onUnmounted(() => {
   white-space: pre;
 }
 
-.transcript-entry.is-tool {
-  border-color: rgba(251, 191, 36, 0.36);
-  background: rgba(69, 46, 8, 0.34);
-}
-
-.transcript-entry.is-reasoning {
-  border-color: rgba(167, 139, 250, 0.36);
-  background: rgba(46, 16, 101, 0.24);
-}
-
 .composer {
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
   display: grid;
   gap: 0.75rem;
 }
 
+.composer-actions,
+.attachment-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.attachment-button input {
+  display: none;
+}
+
 textarea {
   border: 1px solid rgba(148, 163, 184, 0.28);
-  border-radius: 0.75rem;
+  border-radius: 1rem;
   background: rgba(15, 23, 42, 0.82);
   color: #e2e8f0;
   font: inherit;
   min-height: 6rem;
-  padding: 0.75rem;
+  padding: 0.85rem;
   resize: vertical;
 }
 
-button {
+button,
+.attachment-button {
   justify-self: start;
 }
 
