@@ -125,6 +125,19 @@ function logout() {
       </main>
     </div>
   </main>
+
+  <Teleport to="body">
+    <div v-if="mobileMenuOpen" class="drawer-backdrop" @click="mobileMenuOpen = false"></div>
+    <aside v-if="mobileMenuOpen" class="mobile-drawer" aria-label="Mobile navigation">
+      <nav class="nav-section">
+        <div class="section-label">Workspace</div>
+        <button data-nav="overview" class="nav-item" :class="{ 'is-active': activeTab === 'overview' }" @click="activeTab = 'overview'; mobileMenuOpen = false"><span class="nav-left"><span class="nav-icon"></span>Overview</span></button>
+        <button data-nav="chat" class="nav-item" :class="{ 'is-active': activeTab === 'chat' }" @click="activeTab = 'chat'; mobileMenuOpen = false"><span class="nav-left"><span class="nav-icon"></span>Chat</span></button>
+        <button data-nav="instances" class="nav-item" :class="{ 'is-active': activeTab === 'instances' }" @click="activeTab = 'instances'; mobileMenuOpen = false"><span class="nav-left"><span class="nav-icon"></span>Instances</span></button>
+        <button data-nav="manage" class="nav-item" :class="{ 'is-active': activeTab === 'manage' }" @click="activeTab = 'manage'; mobileMenuOpen = false"><span class="nav-left"><span class="nav-icon"></span>Manage</span></button>
+      </nav>
+    </aside>
+  </Teleport>
 </template>
 
 <style>
@@ -645,6 +658,26 @@ label {
   .content {
     padding: 14px;
   }
+}
+
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: oklch(0% 0 0 / 0.5);
+}
+
+.mobile-drawer {
+  position: fixed;
+  inset-block: 0;
+  inset-inline-start: 0;
+  z-index: 50;
+  width: 268px;
+  border-inline-end: 1px solid var(--border);
+  background: oklch(16% 0.012 255 / 0.97);
+  backdrop-filter: blur(18px);
+  padding: 18px 10px;
+  overflow-y: auto;
 }
 
 @media (max-width: 620px) {

@@ -200,6 +200,32 @@ describe('App', () => {
     expect(wrapper.find('.sidebar.is-collapsed').exists()).toBe(false)
   })
 
+  it('opens and closes mobile drawer at narrow viewport', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }] })
+      })
+    )
+
+    const wrapper = mount(App, { attachTo: document.body })
+    await wrapper.get('input').setValue('secret-token')
+    await wrapper.get('form').trigger('submit')
+    await vi.waitFor(() => expect(wrapper.find('[data-testid="dashboard-shell"]').exists()).toBe(true))
+
+    expect(document.querySelector('.mobile-drawer')).toBeNull()
+
+    await wrapper.get('[aria-label="Open navigation"]').trigger('click')
+    expect(document.querySelector('.mobile-drawer')).not.toBeNull()
+
+    document.querySelector<HTMLElement>('.drawer-backdrop')!.click()
+    await wrapper.vm.$nextTick()
+    expect(document.querySelector('.mobile-drawer')).toBeNull()
+
+    wrapper.unmount()
+  })
+
   it('uses the sticky split-shell layout hooks after login', async () => {
     vi.stubGlobal(
       'fetch',
