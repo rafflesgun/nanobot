@@ -365,7 +365,7 @@ onUnmounted(() => {
 .panel-heading p,
 .chat-header p,
 .topic-button small {
-  color: #69778c;
+  color: var(--muted);
   line-height: 1.5;
   margin: 0.25rem 0 0;
 }
@@ -379,9 +379,9 @@ onUnmounted(() => {
 
 .topic-sidebar,
 .chat-workspace {
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  border-radius: 1.1rem;
-  background: rgba(8, 13, 28, 0.72);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: oklch(19% 0.014 255 / 0.88);
 }
 
 .topic-sidebar {
@@ -404,8 +404,8 @@ onUnmounted(() => {
 
 .topic-button {
   background: transparent;
-  border-color: rgba(148, 163, 184, 0.18);
-  color: #cbd5e1;
+  border-color: var(--border);
+  color: var(--fg);
   display: grid;
   gap: 0.2rem;
   justify-self: stretch;
@@ -413,9 +413,9 @@ onUnmounted(() => {
 }
 
 .topic-button.active {
-  background: rgba(37, 99, 235, 0.2);
-  border-color: rgba(96, 165, 250, 0.42);
-  color: #dbeafe;
+  background: oklch(64% 0.18 255 / 0.18);
+  border-color: oklch(64% 0.18 255 / 0.35);
+  color: var(--fg);
 }
 
 .chat-header,
@@ -425,7 +425,7 @@ onUnmounted(() => {
 }
 
 .chat-header {
-  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  border-bottom: 1px solid var(--border);
 }
 
 .chat-header h3,
@@ -435,7 +435,7 @@ onUnmounted(() => {
 
 .member-bar {
   align-items: center;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  border-bottom: 1px solid var(--border);
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
@@ -444,10 +444,10 @@ onUnmounted(() => {
 .member-chip,
 .attachment-chip {
   align-items: center;
-  border: 1px solid rgba(148, 163, 184, 0.24);
+  border: 1px solid var(--border);
   border-radius: 999px;
-  background: rgba(15, 23, 42, 0.72);
-  color: #dbeafe;
+  background: var(--surface);
+  color: var(--fg);
   display: inline-flex;
   gap: 0.4rem;
   padding: 0.35rem 0.65rem;
@@ -455,21 +455,21 @@ onUnmounted(() => {
 
 .member-chip.is-connected,
 .member-chip.is-attached {
-  border-color: rgba(134, 239, 172, 0.6);
+  border-color: oklch(70% 0.14 145 / 0.6);
 }
 
 .member-chip.is-connecting {
-  border-color: rgba(147, 197, 253, 0.7);
+  border-color: oklch(64% 0.18 255 / 0.7);
 }
 
 .member-chip.is-error,
 .member-chip.is-disconnected,
 .member-chip.is-disabled {
-  border-color: rgba(254, 202, 202, 0.7);
+  border-color: oklch(68% 0.17 25 / 0.7);
 }
 
 .member-chip em {
-  color: #94a3b8;
+  color: var(--muted);
   font-size: 0.75rem;
   font-style: normal;
 }
@@ -502,7 +502,7 @@ onUnmounted(() => {
 
 .transcript-entry.is-user .markdown-body {
   border-radius: 1rem 1rem 0.25rem 1rem;
-  background: rgba(37, 99, 235, 0.22);
+  background: oklch(64% 0.18 255 / 0.18);
   padding: 0.75rem 0.9rem;
 }
 
@@ -514,18 +514,18 @@ onUnmounted(() => {
 }
 
 .transcript-entry header span {
-  color: #69778c;
+  color: var(--muted);
   font-size: 0.85rem;
 }
 
 .transcript-entry.is-tool,
 .transcript-entry.is-reasoning {
-  border-left: 2px solid rgba(167, 139, 250, 0.5);
+  border-left: 2px solid oklch(64% 0.18 255 / 0.5);
   padding-left: 0.85rem;
 }
 
 .markdown-body {
-  color: #d7e2f1;
+  color: var(--fg);
   line-height: 1.55;
 }
 
@@ -548,7 +548,7 @@ onUnmounted(() => {
 }
 
 .markdown-heading {
-  color: #f8fafc;
+  color: var(--fg);
   font-size: 1rem;
   line-height: 1.3;
 }
@@ -558,19 +558,19 @@ onUnmounted(() => {
 }
 
 .markdown-body code {
-  border: 1px solid rgba(125, 211, 252, 0.18);
+  border: 1px solid oklch(64% 0.18 255 / 0.18);
   border-radius: 0.35rem;
-  background: rgba(2, 6, 23, 0.72);
-  color: #bae6fd;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  background: oklch(12% 0.012 255);
+  color: var(--accent);
+  font-family: var(--font-mono);
   font-size: 0.9em;
   padding: 0.08rem 0.28rem;
 }
 
 .markdown-code {
-  border: 1px solid rgba(96, 165, 250, 0.22);
+  border: 1px solid oklch(64% 0.18 255 / 0.22);
   border-radius: 0.7rem;
-  background: rgba(2, 6, 23, 0.88);
+  background: oklch(12% 0.012 255);
   overflow: auto;
   padding: 0.75rem;
 }
@@ -578,14 +578,14 @@ onUnmounted(() => {
 .markdown-code code {
   border: 0;
   background: transparent;
-  color: #dbeafe;
+  color: var(--fg);
   display: block;
   padding: 0;
   white-space: pre;
 }
 
 .composer {
-  border-top: 1px solid rgba(148, 163, 184, 0.12);
+  border-top: 1px solid var(--border);
   display: grid;
   gap: 0.75rem;
 }
@@ -603,10 +603,10 @@ onUnmounted(() => {
 }
 
 textarea {
-  border: 1px solid rgba(148, 163, 184, 0.28);
+  border: 1px solid var(--border);
   border-radius: 1rem;
-  background: rgba(15, 23, 42, 0.82);
-  color: #e2e8f0;
+  background: var(--surface);
+  color: var(--fg);
   font: inherit;
   min-height: 6rem;
   padding: 0.85rem;
@@ -619,12 +619,12 @@ button,
 }
 
 .empty-state {
-  color: #69778c;
+  color: var(--muted);
 }
 
 .debug-events {
-  border-top: 1px solid rgba(148, 163, 184, 0.16);
-  color: #94a3b8;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
   padding-top: 0.75rem;
 }
 

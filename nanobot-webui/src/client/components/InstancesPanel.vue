@@ -143,22 +143,22 @@ onMounted(() => {
 
 <style scoped>
 .panel-heading { margin-bottom: 1rem; }
-.panel-heading p { color: #93a4bd; line-height: 1.5; margin: 0.25rem 0 0; }
+.panel-heading p { color: var(--muted); line-height: 1.5; margin: 0.25rem 0 0; }
 .instances-layout { display: grid; grid-template-columns: minmax(18rem, 0.8fr) minmax(22rem, 1.2fr); gap: 1rem; }
 .instance-form,
-.instance-card { border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 0.85rem; background: rgba(8, 13, 28, 0.72); padding: 1rem; }
+.instance-card { border: 1px solid var(--border); border-radius: var(--radius); background: oklch(19% 0.014 255 / 0.88); padding: 1rem; }
 .instance-form { display: grid; gap: 0.85rem; align-content: start; }
 .instance-form label { display: grid; gap: 0.4rem; }
-.instance-form span { color: #cbd5e1; font-weight: 700; }
+.instance-form span { color: var(--fg); font-weight: 700; }
 .instance-cards { display: grid; gap: 0.75rem; }
 .instance-card { display: grid; gap: 0.75rem; }
 .instance-card header { display: flex; justify-content: space-between; gap: 1rem; }
 .instance-card header div { display: grid; gap: 0.25rem; }
 .instance-card span,
 .instance-card p,
-.instance-card small { color: #93a4bd; margin: 0; }
-.instance-card em { border: 1px solid rgba(148, 163, 184, 0.24); border-radius: 999px; color: #dbe7ff; font-size: 0.75rem; font-style: normal; padding: 0.2rem 0.55rem; }
+.instance-card small { color: var(--muted); margin: 0; }
+.instance-card em { border: 1px solid var(--border); border-radius: 999px; color: var(--fg); font-size: 0.75rem; font-style: normal; padding: 0.2rem 0.55rem; }
 .instance-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-.danger { border-color: rgba(248, 113, 113, 0.42); color: #fecaca; }
+.danger { border-color: oklch(68% 0.17 25 / 0.42); color: oklch(80% 0.12 25); }
 @media (max-width: 900px) { .instances-layout { grid-template-columns: 1fr; } }
 </style>
