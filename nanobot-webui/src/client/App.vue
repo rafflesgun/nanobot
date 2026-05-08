@@ -92,12 +92,25 @@ function logout() {
 
 <style>
 :root {
-  color: #dbe7ff;
-  background: #050814;
-  font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+  font-family: var(--font-body);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+  --bg: oklch(15% 0.012 255);
+  --surface: oklch(19% 0.014 255);
+  --surface-2: oklch(23% 0.014 255);
+  --fg: oklch(94% 0.006 255);
+  --muted: oklch(66% 0.012 255);
+  --border: oklch(29% 0.012 255);
+  --accent: oklch(64% 0.18 255);
+  --success: oklch(70% 0.14 145);
+  --warn: oklch(78% 0.14 85);
+  --danger: oklch(68% 0.17 25);
+  --font-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
+  --font-body: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Monaco, Consolas, monospace;
+  --radius: 14px;
 }
 
 * {
@@ -109,9 +122,9 @@ body {
   min-width: 320px;
   min-height: 100vh;
   background:
-    radial-gradient(circle at top left, rgba(59, 130, 246, 0.18), transparent 34rem),
-    radial-gradient(circle at 80% 0%, rgba(14, 165, 233, 0.11), transparent 30rem),
-    #050814;
+    radial-gradient(circle at top left, oklch(35% 0.08 255 / 0.28), transparent 34rem),
+    radial-gradient(circle at 80% 0%, oklch(35% 0.08 255 / 0.11), transparent 30rem),
+    var(--bg);
 }
 
 button,
@@ -121,10 +134,10 @@ select {
 }
 
 button {
-  border: 1px solid rgba(96, 165, 250, 0.45);
-  border-radius: 0.65rem;
-  background: linear-gradient(135deg, #2563eb, #0891b2);
-  color: #fff;
+  border: 1px solid color-mix(in oklch, var(--accent), var(--border) 58%);
+  border-radius: 9px;
+  background: linear-gradient(135deg, var(--accent), oklch(54% 0.15 195));
+  color: oklch(100% 0 0);
   cursor: pointer;
   font-weight: 700;
   min-height: 2.75rem;
@@ -136,7 +149,7 @@ button {
 }
 
 button:hover:not(:disabled) {
-  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.24);
+  box-shadow: 0 10px 24px oklch(64% 0.18 255 / 0.24);
   transform: translateY(-1px);
 }
 
@@ -148,18 +161,18 @@ button:disabled {
 input,
 select {
   width: 100%;
-  border: 1px solid rgba(148, 163, 184, 0.28);
-  border-radius: 0.65rem;
-  background: rgba(15, 23, 42, 0.82);
-  color: #e2e8f0;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: oklch(19% 0.014 255 / 0.88);
+  color: var(--fg);
   min-height: 2.75rem;
   padding: 0 0.85rem;
 }
 
 input:focus,
 select:focus {
-  border-color: #2458d3;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.22);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px oklch(64% 0.18 255 / 0.22);
   outline: none;
 }
 
@@ -186,17 +199,17 @@ select:focus {
 
 .login-card,
 .panel {
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  border-radius: 1rem;
-  background: rgba(15, 23, 42, 0.78);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: oklch(19% 0.014 255 / 0.88);
+  box-shadow: 0 20px 60px oklch(0% 0 0 / 0.28);
 }
 
 .login-card {
-  border: 1px solid rgba(148, 163, 184, 0.34);
-  border-radius: 1rem;
-  background: rgba(15, 23, 42, 0.9);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.34);
+  border: 1px solid color-mix(in oklch, var(--border), var(--fg) 10%);
+  border-radius: var(--radius);
+  background: oklch(19% 0.014 255 / 0.9);
+  box-shadow: 0 20px 60px oklch(0% 0 0 / 0.34);
 }
 
 .login-card {
@@ -208,7 +221,7 @@ select:focus {
 .login-card h1,
 .brand-block h1 {
   margin: 0;
-  color: #f8fbff;
+  color: var(--fg);
   font-size: clamp(1.7rem, 3vw, 2.25rem);
   letter-spacing: -0.04em;
 }
@@ -216,13 +229,13 @@ select:focus {
 .login-copy,
 .brand-block p {
   margin: 0;
-  color: #93a4bd;
+  color: var(--muted);
   line-height: 1.55;
 }
 
 .eyebrow {
   margin: 0;
-  color: #60a5fa;
+  color: var(--accent);
   font-size: 0.75rem;
   font-weight: 800;
   letter-spacing: 0.12em;
@@ -230,7 +243,7 @@ select:focus {
 }
 
 label {
-  color: #cbd5e1;
+  color: var(--fg);
   font-size: 0.9rem;
   font-weight: 700;
 }
@@ -250,9 +263,9 @@ label {
 .floating-actions {
   align-items: center;
   backdrop-filter: blur(16px);
-  background: rgba(8, 13, 28, 0.72);
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  border-radius: 1rem;
+  background: oklch(16% 0.012 255 / 0.9);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   display: flex;
   gap: 1rem;
   justify-content: space-between;
@@ -273,9 +286,9 @@ label {
 
 .sidebar-nav {
   backdrop-filter: blur(18px);
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  border-radius: 1.1rem;
-  background: rgba(8, 13, 28, 0.76);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: oklch(16% 0.012 255 / 0.9);
   display: grid;
   gap: 1.5rem;
   grid-template-rows: auto 1fr;
@@ -316,33 +329,33 @@ label {
 .dashboard-tabs button {
   border: 1px solid transparent;
   background: transparent;
-  color: #94a3b8;
+  color: var(--muted);
   justify-content: start;
   text-align: left;
 }
 
 .dashboard-tabs button.active {
-  border-color: rgba(96, 165, 250, 0.32);
-  background: rgba(37, 99, 235, 0.18);
-  color: #dbeafe;
+  border-color: color-mix(in oklch, var(--accent), var(--border) 58%);
+  background: oklch(64% 0.18 255 / 0.18);
+  color: var(--fg);
 }
 
 .secondary {
-  border: 1px solid rgba(148, 163, 184, 0.28);
-  background: rgba(15, 23, 42, 0.72);
-  color: #dbe7ff;
+  border: 1px solid var(--border);
+  background: oklch(14% 0.012 255 / 0.72);
+  color: var(--fg);
 }
 
 .secondary:hover:not(:disabled) {
-  background: rgba(30, 41, 59, 0.9);
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22);
+  background: var(--surface-2);
+  box-shadow: 0 8px 20px oklch(0% 0 0 / 0.22);
 }
 
 .error {
-  border: 1px solid #fecaca;
-  border-radius: 0.75rem;
-  background: #fff1f2;
-  color: #a12135;
+  border: 1px solid var(--danger);
+  border-radius: 12px;
+  background: oklch(68% 0.17 25 / 0.15);
+  color: oklch(50% 0.17 25);
   margin: 0;
   padding: 0.8rem 0.95rem;
 }
@@ -354,7 +367,7 @@ label {
 
 .panel h2 {
   margin: 0 0 1rem;
-  color: #f8fbff;
+  color: var(--fg);
   font-size: 1rem;
   letter-spacing: -0.01em;
 }
