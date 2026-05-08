@@ -2,9 +2,8 @@
 import { computed, ref, watch } from 'vue'
 import { fetchInstanceLogs, fetchLogTail, fetchWebuiLogs, type LogInfo, type LogTail, type PublicInstance } from '../api'
 
-const props = defineProps<{ token: string; instances: PublicInstance[] }>()
+const props = defineProps<{ token: string; instance: PublicInstance | undefined }>()
 
-const selectedInstanceId = ref('')
 const selectedLogName = ref('')
 const logs = ref<LogInfo[]>([])
 const tail = ref<LogTail | null>(null)
@@ -18,8 +17,6 @@ let logsSequence = 0
 let tailSequence = 0
 let webuiLogsSequence = 0
 
-const enabledInstances = computed(() => props.instances.filter((instance) => instance.enabled))
-const selectedInstance = computed(() => enabledInstances.value.find((instance) => instance.id === selectedInstanceId.value))
 const filteredLogs = computed(() => {
   const needle = filter.value.trim().toLowerCase()
   if (!needle) return logs.value
@@ -27,7 +24,7 @@ const filteredLogs = computed(() => {
 })
 
 async function loadLogs() {
-  const instance = selectedInstance.value
+  const instance = props.instance
   const sequence = ++logsSequence
   tailSequence++
   selectedLogName.value = ''
@@ -54,7 +51,7 @@ async function loadLogs() {
 }
 
 async function loadTail(name: string) {
-  const instance = selectedInstance.value
+  const instance = props.instance
   if (!instance) return
 
   const sequence = ++tailSequence
@@ -96,12 +93,8 @@ async function loadWebuiLogs() {
   }
 }
 
-watch(enabledInstances, (instances) => {
-  if (instances.some((instance) => instance.id === selectedInstanceId.value)) return
-  selectedInstanceId.value = instances[0]?.id ?? ''
-}, { immediate: true })
-
-watch([selectedInstanceId, () => props.token], loadLogs, { immediate: true })
+watch(() => props.instance, loadLogs, { immediate: true })
+watch(() => props.token, loadLogs)
 </script>
 
 <template>
@@ -109,22 +102,13 @@ watch([selectedInstanceId, () => props.token], loadLogs, { immediate: true })
     <div class="panel-heading">
       <div>
         <h2>Logs</h2>
-        <p>Inspect read-only log tails for enabled instances.</p>
+        <p>Inspect read-only log tails for the selected instance.</p>
       </div>
     </div>
 
-    <p v-if="enabledInstances.length === 0" class="empty-state">No enabled instances loaded.</p>
+    <p v-if="!instance" class="empty-state">No target instance selected.</p>
 
     <div v-else class="logs-grid">
-      <label class="instance-select">
-        <span>Instance</span>
-        <select v-model="selectedInstanceId">
-          <option v-for="instance in enabledInstances" :key="instance.id" :value="instance.id">
-            {{ instance.name }}
-          </option>
-        </select>
-      </label>
-
       <div class="logs-toolbar" data-testid="logs-toolbar">
         <label>
           <span>Filter</span>
@@ -186,7 +170,7 @@ watch([selectedInstanceId, () => props.token], loadLogs, { immediate: true })
 
 .panel-heading p,
 .empty-state {
-  color: #93a4bd;
+  color: var(--muted);
   line-height: 1.5;
   margin: 0.25rem 0 0;
 }
@@ -196,7 +180,6 @@ watch([selectedInstanceId, () => props.token], loadLogs, { immediate: true })
   gap: 1rem;
 }
 
-.instance-select,
 .logs-toolbar label {
   display: grid;
   gap: 0.45rem;
@@ -204,9 +187,9 @@ watch([selectedInstanceId, () => props.token], loadLogs, { immediate: true })
 
 .logs-toolbar {
   align-items: end;
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  border-radius: 0.85rem;
-  background: rgba(8, 13, 28, 0.72);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: oklch(19% 0.014 255 / 0.88);
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
@@ -225,27 +208,26 @@ watch([selectedInstanceId, () => props.token], loadLogs, { immediate: true })
 }
 
 .view-toggle button {
-  border-color: rgba(148, 163, 184, 0.28);
-  background: rgba(15, 23, 42, 0.72);
+  border-color: var(--border);
+  background: var(--surface);
 }
 
 .view-toggle button.active {
-  border-color: rgba(56, 189, 248, 0.62);
-  background: rgba(14, 165, 233, 0.18);
-  color: #e0f2fe;
+  border-color: var(--accent);
+  background: oklch(64% 0.18 255 / 0.18);
+  color: var(--fg);
 }
 
-.instance-select span,
 .logs-toolbar span {
-  color: #cbd5e1;
+  color: var(--fg);
   font-weight: 700;
 }
 
 .log-list,
 .log-tail {
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  border-radius: 0.85rem;
-  background: rgba(8, 13, 28, 0.72);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: oklch(19% 0.014 255 / 0.88);
   padding: 1rem;
 }
 
@@ -257,8 +239,8 @@ watch([selectedInstanceId, () => props.token], loadLogs, { immediate: true })
 }
 
 .log-button.is-selected {
-  border-color: #2563eb;
-  color: #93c5fd;
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .log-tail {
@@ -281,18 +263,18 @@ watch([selectedInstanceId, () => props.token], loadLogs, { immediate: true })
 }
 
 .line-number {
-  color: #64748b;
+  color: var(--muted);
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
 
 .line-text {
-  color: #dbeafe;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: var(--fg);
+  font-family: var(--font-mono);
 }
 
 .error-text {
-  color: #fdba74;
+  color: var(--warn);
   line-height: 1.5;
   margin: 0;
 }

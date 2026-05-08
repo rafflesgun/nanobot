@@ -2,9 +2,8 @@
 import { computed, ref, watch } from 'vue'
 import { fetchInstanceSettings, patchInstanceSettings, type InstanceSettings, type PublicInstance } from '../api'
 
-const props = defineProps<{ token: string; instances: PublicInstance[] }>()
+const props = defineProps<{ token: string; instance: PublicInstance | undefined }>()
 
-const selectedInstanceId = ref('')
 const settings = ref<InstanceSettings | null>(null)
 const model = ref('')
 const provider = ref('')
@@ -16,8 +15,6 @@ const saving = ref(false)
 let loadSequence = 0
 let saveSequence = 0
 
-const enabledInstances = computed(() => props.instances.filter((instance) => instance.enabled))
-const selectedInstance = computed(() => enabledInstances.value.find((instance) => instance.id === selectedInstanceId.value))
 const settingsSnapshot = computed<InstanceSettings | null>(() => settings.value
   ? { ...settings.value, agent: { ...settings.value.agent, model: model.value, provider: provider.value } }
   : null)
@@ -40,7 +37,7 @@ function selectMode(nextMode: 'gui' | 'json' | 'markdown') {
 }
 
 async function loadSettings() {
-  const instance = selectedInstance.value
+  const instance = props.instance
   const sequence = ++loadSequence
   settings.value = null
   model.value = ''
@@ -74,7 +71,7 @@ async function loadSettings() {
 }
 
 async function saveSettings() {
-  const instance = selectedInstance.value
+  const instance = props.instance
   if (!instance) return
 
   const sequence = ++saveSequence
@@ -109,12 +106,8 @@ async function saveSettings() {
   }
 }
 
-watch(enabledInstances, (instances) => {
-  if (instances.some((instance) => instance.id === selectedInstanceId.value)) return
-  selectedInstanceId.value = instances[0]?.id ?? ''
-}, { immediate: true })
-
-watch([selectedInstanceId, () => props.token], loadSettings, { immediate: true })
+watch(() => props.instance, loadSettings, { immediate: true })
+watch(() => props.token, loadSettings)
 </script>
 
 <template>
@@ -126,18 +119,9 @@ watch([selectedInstanceId, () => props.token], loadSettings, { immediate: true }
       </div>
     </div>
 
-    <p v-if="enabledInstances.length === 0" class="empty-state">No enabled instances loaded.</p>
+    <p v-if="!instance" class="empty-state">No target instance selected.</p>
 
     <div v-else class="settings-grid">
-      <label class="instance-select">
-        <span>Instance</span>
-        <select v-model="selectedInstanceId">
-          <option v-for="instance in enabledInstances" :key="instance.id" :value="instance.id">
-            {{ instance.name }}
-          </option>
-        </select>
-      </label>
-
       <p v-if="loading" class="empty-state">Loading settings...</p>
       <p v-if="error" class="error-text" role="alert">{{ error }}</p>
 
@@ -184,24 +168,22 @@ watch([selectedInstanceId, () => props.token], loadSettings, { immediate: true }
 
 .panel-heading p,
 .empty-state {
-  color: #93a4bd;
+  color: var(--muted);
   line-height: 1.5;
   margin: 0.25rem 0 0;
 }
 
 .settings-grid,
-.settings-form,
-.instance-select {
+.settings-form {
   display: grid;
   gap: 1rem;
 }
 
-.instance-select,
 .settings-form,
 .settings-meta {
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  border-radius: 0.85rem;
-  background: rgba(8, 13, 28, 0.72);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: oklch(19% 0.014 255 / 0.88);
   padding: 1rem;
 }
 
@@ -219,29 +201,28 @@ watch([selectedInstanceId, () => props.token], loadSettings, { immediate: true }
 }
 
 .settings-toolbar button {
-  border-color: rgba(148, 163, 184, 0.28);
-  background: rgba(15, 23, 42, 0.72);
+  border-color: var(--border);
+  background: var(--surface);
 }
 
 .settings-toolbar button.active {
-  border-color: rgba(56, 189, 248, 0.62);
-  background: rgba(14, 165, 233, 0.18);
-  color: #e0f2fe;
+  border-color: var(--accent);
+  background: oklch(64% 0.18 255 / 0.18);
+  color: var(--fg);
 }
 
-.instance-select span,
 .settings-form span {
-  color: #cbd5e1;
+  color: var(--fg);
   font-weight: 700;
 }
 
 .settings-json,
 .settings-markdown {
-  border: 1px solid rgba(148, 163, 184, 0.2);
+  border: 1px solid var(--border);
   border-radius: 0.75rem;
-  background: rgba(2, 6, 23, 0.62);
-  color: #dbeafe;
-  font: 0.88rem/1.6 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  background: oklch(12% 0.012 255);
+  color: var(--fg);
+  font: 0.88rem/1.6 var(--font-mono);
   margin: 0;
   min-height: 14rem;
   padding: 0.85rem;
@@ -269,7 +250,7 @@ button {
 }
 
 dt {
-  color: #93a4bd;
+  color: var(--muted);
 }
 
 dd {
@@ -278,16 +259,16 @@ dd {
 }
 
 .error-text {
-  color: #fdba74;
+  color: var(--warn);
   line-height: 1.5;
   margin: 0;
 }
 
 .restart-warning {
-  border: 1px solid rgba(251, 146, 60, 0.45);
+  border: 1px solid oklch(78% 0.14 85 / 0.45);
   border-radius: 0.75rem;
-  background: rgba(67, 20, 7, 0.38);
-  color: #fdba74;
+  background: oklch(78% 0.14 85 / 0.12);
+  color: var(--warn);
   font-weight: 800;
   margin: 0;
   padding: 0.8rem 0.95rem;

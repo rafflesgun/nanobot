@@ -13,7 +13,7 @@ describe('SettingsPanel', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const wrapper = mount(SettingsPanel, {
-      props: { token: 'dashboard', instances: [{ id: 'alpha', name: 'alpha', baseUrl: 'http://alpha', enabled: true }] }
+      props: { token: 'dashboard', instance: { id: 'alpha', name: 'alpha', baseUrl: 'http://alpha', enabled: true } }
     })
 
     await vi.waitFor(() => expect((wrapper.get('input[name="model"]').element as HTMLInputElement).value).toBe('old'))
@@ -40,7 +40,7 @@ describe('SettingsPanel', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const wrapper = mount(SettingsPanel, {
-      props: { token: 'dashboard', instances: [{ id: 'alpha', name: 'alpha', baseUrl: 'http://alpha', enabled: true }] }
+      props: { token: 'dashboard', instance: { id: 'alpha', name: 'alpha', baseUrl: 'http://alpha', enabled: true } }
     })
 
     await vi.waitFor(() => expect((wrapper.get('input[name="model"]').element as HTMLInputElement).value).toBe('old'))
@@ -65,7 +65,7 @@ describe('SettingsPanel', () => {
     }))
 
     const wrapper = mount(SettingsPanel, {
-      props: { token: 'dashboard', instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }] }
+      props: { token: 'dashboard', instance: { id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true } }
     })
 
     await vi.waitFor(() => expect((wrapper.get('input[name="model"]').element as HTMLInputElement).value).toBe('gpt-4'))
@@ -91,7 +91,7 @@ describe('SettingsPanel', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const wrapper = mount(SettingsPanel, {
-      props: { token: 'dashboard', instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }] }
+      props: { token: 'dashboard', instance: { id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true } }
     })
 
     await vi.waitFor(() => expect((wrapper.get('input[name="model"]').element as HTMLInputElement).value).toBe('gpt-4'))

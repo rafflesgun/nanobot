@@ -13,7 +13,7 @@ describe('LogsPanel', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const wrapper = mount(LogsPanel, {
-      props: { token: 'dashboard', instances: [{ id: 'alpha', name: 'alpha', baseUrl: 'http://alpha', enabled: true }] }
+      props: { token: 'dashboard', instance: { id: 'alpha', name: 'alpha', baseUrl: 'http://alpha', enabled: true } }
     })
 
     await vi.waitFor(() => expect(wrapper.text()).toContain('nanobot.log'))
@@ -21,16 +21,16 @@ describe('LogsPanel', () => {
     await vi.waitFor(() => expect(wrapper.text()).toContain('line two'))
   })
 
-  it('clears log loading state when no instance is selected', async () => {
+  it('clears log loading state when instance is removed', async () => {
     const fetchMock = vi.fn().mockReturnValue(new Promise(() => {}))
     vi.stubGlobal('fetch', fetchMock)
 
     const wrapper = mount(LogsPanel, {
-      props: { token: 'dashboard', instances: [{ id: 'alpha', name: 'alpha', baseUrl: 'http://alpha', enabled: true }] }
+      props: { token: 'dashboard', instance: { id: 'alpha', name: 'alpha', baseUrl: 'http://alpha', enabled: true } }
     })
 
     await vi.waitFor(() => expect(wrapper.text()).toContain('Loading logs...'))
-    await wrapper.setProps({ instances: [{ id: 'alpha', name: 'alpha', baseUrl: 'http://alpha', enabled: false }] })
+    await wrapper.setProps({ instance: undefined })
 
     await vi.waitFor(() => expect((wrapper.vm as unknown as { loadingLogs: boolean }).loadingLogs).toBe(false))
   })
@@ -42,7 +42,7 @@ describe('LogsPanel', () => {
     }))
 
     const wrapper = mount(LogsPanel, {
-      props: { token: 'dashboard', instances: [{ id: 'alpha', name: 'alpha', baseUrl: 'http://alpha', enabled: true }] }
+      props: { token: 'dashboard', instance: { id: 'alpha', name: 'alpha', baseUrl: 'http://alpha', enabled: true } }
     })
 
     await vi.waitFor(() => expect(wrapper.text()).toContain('debug.log'))
@@ -62,7 +62,7 @@ describe('LogsPanel', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const wrapper = mount(LogsPanel, {
-      props: { token: 'dashboard', instances: [{ id: 'alpha', name: 'alpha', baseUrl: 'http://alpha', enabled: true }] }
+      props: { token: 'dashboard', instance: { id: 'alpha', name: 'alpha', baseUrl: 'http://alpha', enabled: true } }
     })
 
     await vi.waitFor(() => expect(wrapper.text()).toContain('nanobot.log'))
@@ -82,7 +82,7 @@ describe('LogsPanel', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const wrapper = mount(LogsPanel, {
-      props: { token: 'dashboard', instances: [{ id: 'alpha', name: 'alpha', baseUrl: 'http://alpha', enabled: true }] }
+      props: { token: 'dashboard', instance: { id: 'alpha', name: 'alpha', baseUrl: 'http://alpha', enabled: true } }
     })
 
     await vi.waitFor(() => expect(wrapper.text()).toContain('WebUI Runtime'))

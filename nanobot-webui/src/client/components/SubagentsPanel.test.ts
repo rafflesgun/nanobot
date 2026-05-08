@@ -10,7 +10,7 @@ describe('SubagentsPanel', () => {
       { name: 'recall', description: 'Searches history', model: 'deepseek-v4-flash', source: 'builtin', editable: false },
       { name: 'ops-triage', description: 'Triage incidents', model: 'test/model', source: 'workspace', editable: true }
     ] }) }))
-    const wrapper = mount(SubagentsPanel, { props: { token: 'dashboard', instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }] } })
+    const wrapper = mount(SubagentsPanel, { props: { token: 'dashboard', instance: { id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true } } })
 
     await vi.waitFor(() => expect(wrapper.text()).toContain('ops-triage'))
     expect(wrapper.text()).toContain('Searches history')
@@ -28,7 +28,7 @@ describe('SubagentsPanel', () => {
         ? { name: 'ops-triage', description: 'Triage incidents', model: 'test/model', source: 'workspace', editable: true, content: '---\nname: ops-triage\ndescription: Triage incidents\n---\n\nBody' }
         : { subagents: [{ name: 'ops-triage', description: 'Triage incidents', model: 'test/model', source: 'workspace', editable: true }] }) }))
     vi.stubGlobal('fetch', fetchMock)
-    const wrapper = mount(SubagentsPanel, { props: { token: 'dashboard', instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }] } })
+    const wrapper = mount(SubagentsPanel, { props: { token: 'dashboard', instance: { id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true } } })
 
     await vi.waitFor(() => expect(wrapper.text()).toContain('ops-triage'))
     await wrapper.get('[data-testid="edit-ops-triage"]').trigger('click')
@@ -44,7 +44,7 @@ describe('SubagentsPanel', () => {
       ? { name: 'recall', description: 'Searches history', model: 'deepseek', source: 'builtin', editable: false, content: '---\nname: recall\n---\n\nBody' }
       : { subagents: [{ name: 'recall', description: 'Searches history', model: 'deepseek', source: 'builtin', editable: false }] }) }))
     vi.stubGlobal('fetch', fetchMock)
-    const wrapper = mount(SubagentsPanel, { props: { token: 'dashboard', instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }] } })
+    const wrapper = mount(SubagentsPanel, { props: { token: 'dashboard', instance: { id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true } } })
 
     await vi.waitFor(() => expect(wrapper.text()).toContain('recall'))
     await wrapper.get('[data-testid="edit-recall"]').trigger('click')
