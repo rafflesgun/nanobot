@@ -226,6 +226,26 @@ describe('App', () => {
     wrapper.unmount()
   })
 
+  it('shows nav count badges after login', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }] })
+      })
+    )
+
+    const wrapper = mount(App)
+    await wrapper.get('input').setValue('secret-token')
+    await wrapper.get('form').trigger('submit')
+    await vi.waitFor(() => expect(wrapper.text()).toContain('Overview'))
+
+    expect(wrapper.find('[data-nav="overview"] .count').exists()).toBe(true)
+    expect(wrapper.find('[data-nav="instances"] .count').exists()).toBe(true)
+    expect(wrapper.find('[data-nav="manage"] .count').exists()).toBe(true)
+    expect(wrapper.find('[data-nav="chat"] .count').exists()).toBe(true)
+  })
+
   it('uses the sticky split-shell layout hooks after login', async () => {
     vi.stubGlobal(
       'fetch',

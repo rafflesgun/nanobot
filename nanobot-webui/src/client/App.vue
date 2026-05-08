@@ -22,6 +22,8 @@ const activeTabLabel = computed(() => {
 
 const onlineCount = computed(() => instances.value.filter(i => i.enabled).length)
 
+const manageSectionCount = computed(() => 6)
+
 async function login() {
   error.value = ''
   loading.value = true
@@ -76,10 +78,10 @@ function logout() {
 
         <nav class="nav-section" aria-label="Main">
           <div class="section-label">Workspace</div>
-          <button data-nav="overview" class="nav-item" :class="{ 'is-active': activeTab === 'overview' }" @click="activeTab = 'overview'"><span class="nav-left"><span class="nav-icon"></span>Overview</span></button>
-          <button data-nav="chat" class="nav-item" :class="{ 'is-active': activeTab === 'chat' }" @click="activeTab = 'chat'"><span class="nav-left"><span class="nav-icon"></span>Chat Topics</span></button>
-          <button data-nav="instances" class="nav-item" :class="{ 'is-active': activeTab === 'instances' }" @click="activeTab = 'instances'"><span class="nav-left"><span class="nav-icon"></span>Instances</span></button>
-          <button data-nav="manage" class="nav-item" :class="{ 'is-active': activeTab === 'manage' }" @click="activeTab = 'manage'"><span class="nav-left"><span class="nav-icon"></span>Manage</span></button>
+          <button data-nav="overview" class="nav-item" :class="{ 'is-active': activeTab === 'overview' }" @click="activeTab = 'overview'"><span class="nav-left"><span class="nav-icon"></span>Overview</span><span class="count">{{ instances.length.toString().padStart(2, '0') }}</span></button>
+          <button data-nav="chat" class="nav-item" :class="{ 'is-active': activeTab === 'chat' }" @click="activeTab = 'chat'"><span class="nav-left"><span class="nav-icon"></span>Chat Topics</span><span class="count">0</span></button>
+          <button data-nav="instances" class="nav-item" :class="{ 'is-active': activeTab === 'instances' }" @click="activeTab = 'instances'"><span class="nav-left"><span class="nav-icon"></span>Instances</span><span class="count">{{ instances.length.toString().padStart(2, '0') }}</span></button>
+          <button data-nav="manage" class="nav-item" :class="{ 'is-active': activeTab === 'manage' }" @click="activeTab = 'manage'"><span class="nav-left"><span class="nav-icon"></span>Manage</span><span class="count">{{ manageSectionCount }}</span></button>
         </nav>
 
         <div class="sidebar-bottom">
@@ -442,6 +444,13 @@ label {
 
 .is-active .nav-icon {
   background: var(--accent);
+}
+
+.count {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 .sidebar-bottom {
