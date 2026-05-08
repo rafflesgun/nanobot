@@ -272,6 +272,25 @@ describe('App', () => {
     expect(wrapper.text()).toContain('Release checklist')
   })
 
+  it('renders topbar action buttons and status pill', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }] })
+      })
+    )
+
+    const wrapper = mount(App)
+    await wrapper.get('input').setValue('secret-token')
+    await wrapper.get('form').trigger('submit')
+    await vi.waitFor(() => expect(wrapper.text()).toContain('Overview'))
+
+    expect(wrapper.find('[data-testid="refresh-button"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="new-chat-button"]').exists()).toBe(true)
+    expect(wrapper.find('.top-actions .pill').exists()).toBe(true)
+  })
+
   it('uses the sticky split-shell layout hooks after login', async () => {
     vi.stubGlobal(
       'fetch',

@@ -127,6 +127,9 @@ function logout() {
           <button class="icon-button mobile-menu" aria-label="Open navigation" @click="mobileMenuOpen = !mobileMenuOpen">☰</button>
           <div class="crumbs"><span>nanobot</span><span>/</span><strong>{{ activeTabLabel }}</strong></div>
           <div class="top-actions">
+            <span class="pill"><span class="dot success"></span>{{ onlineCount }} online</span>
+            <button class="button" data-testid="refresh-button" @click="login()">Refresh</button>
+            <button class="button primary" data-testid="new-chat-button" @click="activeTab = 'chat'">New chat</button>
             <button class="button" data-testid="logout-button" @click="logout">Log out</button>
           </div>
         </header>
