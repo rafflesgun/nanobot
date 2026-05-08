@@ -22,12 +22,6 @@ const activeTabLabel = computed(() => {
 
 const onlineCount = computed(() => instances.value.filter(i => i.enabled).length)
 
-const instanceSummary = computed(() => {
-  if (instances.value.length === 0) return 'No instances'
-  const on = onlineCount.value
-  return on === instances.value.length ? `${on} online` : `${on}/${instances.value.length} online`
-})
-
 async function login() {
   error.value = ''
   loading.value = true
@@ -94,7 +88,13 @@ function logout() {
               <div class="connection-title">Gateway</div>
               <span class="pill"><span class="dot" :class="{ success: onlineCount > 0 }"></span>{{ onlineCount > 0 ? 'online' : 'offline' }}</span>
             </div>
-            <div class="muted mono" style="font-size: 11px; line-height: 1.5;">{{ instanceSummary }}</div>
+            <div v-if="instances.length === 0" class="muted mono" style="font-size: 11px; line-height: 1.5;">No instances</div>
+            <div v-else class="connection-instances">
+              <span v-for="instance in instances" :key="instance.id" class="connection-pill" :title="`${instance.name} (${instance.enabled ? 'enabled' : 'disabled'})`">
+                <span class="dot" :class="{ success: instance.enabled }"></span>
+                <span>{{ instance.name }}</span>
+              </span>
+            </div>
           </div>
         </div>
       </aside>
@@ -428,6 +428,20 @@ label {
 .connection-title {
   font-size: 12px;
   font-weight: 600;
+}
+
+.connection-instances {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.connection-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--fg);
 }
 
 .pill {
