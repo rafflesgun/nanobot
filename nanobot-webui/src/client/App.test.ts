@@ -91,7 +91,7 @@ describe('App', () => {
     expect(wrapper.text()).toContain('Chat Topics')
     expect(wrapper.text()).toContain('Instances')
     expect(wrapper.text()).toContain('Manage')
-    expect(wrapper.find('[data-nav="logs"]').exists()).toBe(false)
+    expect(wrapper.find('[data-nav="logs"]').exists()).toBe(true)
     expect(wrapper.find('[data-nav="settings"]').exists()).toBe(false)
   })
 
@@ -331,5 +331,24 @@ describe('App', () => {
     await wrapper.get('[data-nav="manage"]').trigger('click')
     const crumbs = wrapper.find('.crumbs')
     expect(crumbs.text()).toContain('Alpha')
+  })
+
+  it('shows Logs as a primary nav item and renders LogsPanel when selected', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }] })
+      })
+    )
+
+    const wrapper = mount(App)
+    await wrapper.get('input').setValue('secret-token')
+    await wrapper.get('form').trigger('submit')
+    await vi.waitFor(() => expect(wrapper.text()).toContain('Overview'))
+
+    expect(wrapper.find('[data-nav="logs"]').exists()).toBe(true)
+    await wrapper.get('[data-nav="logs"]').trigger('click')
+    expect(wrapper.text()).toContain('Logs')
   })
 })

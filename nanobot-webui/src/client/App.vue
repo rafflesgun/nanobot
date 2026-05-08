@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { fetchInstances, fetchStateTopics, type PublicInstance, type StateTopic } from './api'
 import OverviewPanel from './components/OverviewPanel.vue'
 import ChatPanel from './components/ChatPanel.vue'
 import InstancesPanel from './components/InstancesPanel.vue'
+import LogsPanel from './components/LogsPanel.vue'
 import ManagePanel from './components/ManagePanel.vue'
 
 const token = ref('')
@@ -11,7 +12,7 @@ const instances = ref<PublicInstance[]>([])
 const error = ref('')
 const authenticated = ref(false)
 const loading = ref(false)
-const activeTab = ref<'overview' | 'chat' | 'instances' | 'manage'>('overview')
+const activeTab = ref<'overview' | 'chat' | 'instances' | 'manage' | 'logs'>('overview')
 const sidebarCollapsed = ref(false)
 const mobileMenuOpen = ref(false)
 const pinnedTopics = ref<StateTopic[]>([])
@@ -29,7 +30,7 @@ function openPinnedTopic() {
 }
 
 const activeTabLabel = computed(() => {
-  const map: Record<string, string> = { overview: 'Overview', chat: 'Chat Topics', instances: 'Instances', manage: 'Manage' }
+  const map: Record<string, string> = { overview: 'Overview', chat: 'Chat Topics', instances: 'Instances', manage: 'Manage', logs: 'Logs' }
   return map[activeTab.value] ?? 'Overview'
 })
 
@@ -43,6 +44,12 @@ const breadcrumbInstance = computed(() => {
 })
 
 const manageSectionCount = computed(() => 6)
+
+const logsInstanceId = ref('')
+
+watch(enabledInstances, (ei) => {
+  if (!ei.some((i) => i.id === logsInstanceId.value)) logsInstanceId.value = ei[0]?.id ?? ''
+}, { immediate: true })
 
 async function login() {
   error.value = ''
@@ -103,6 +110,7 @@ function logout() {
           <button data-nav="chat" class="nav-item" :class="{ 'is-active': activeTab === 'chat' }" @click="activeTab = 'chat'"><span class="nav-left"><span class="nav-icon"></span>Chat Topics</span><span class="count">0</span></button>
           <button data-nav="instances" class="nav-item" :class="{ 'is-active': activeTab === 'instances' }" @click="activeTab = 'instances'"><span class="nav-left"><span class="nav-icon"></span>Instances</span><span class="count">{{ instances.length.toString().padStart(2, '0') }}</span></button>
           <button data-nav="manage" class="nav-item" :class="{ 'is-active': activeTab === 'manage' }" @click="activeTab = 'manage'"><span class="nav-left"><span class="nav-icon"></span>Manage</span><span class="count">{{ manageSectionCount }}</span></button>
+          <button data-nav="logs" class="nav-item" :class="{ 'is-active': activeTab === 'logs' }" @click="activeTab = 'logs'"><span class="nav-left"><span class="nav-icon"></span>Logs</span><span class="count">live</span></button>
         </nav>
 
         <nav v-if="pinnedTopics.length > 0" class="nav-section" aria-label="Pinned chats">
@@ -146,6 +154,7 @@ function logout() {
           <button class="pill" :class="{ 'is-active': activeTab === 'chat' }" @click="activeTab = 'chat'">Chat</button>
           <button class="pill" :class="{ 'is-active': activeTab === 'instances' }" @click="activeTab = 'instances'">Instances</button>
           <button class="pill" :class="{ 'is-active': activeTab === 'manage' }" @click="activeTab = 'manage'">Manage</button>
+          <button class="pill" :class="{ 'is-active': activeTab === 'logs' }" @click="activeTab = 'logs'">Logs</button>
         </div>
 
         <section class="content">
@@ -153,7 +162,14 @@ function logout() {
           <OverviewPanel v-if="activeTab === 'overview'" :token="token" :instances="instances" />
           <ChatPanel v-else-if="activeTab === 'chat'" :token="token" :instances="instances" />
           <InstancesPanel v-else-if="activeTab === 'instances'" :token="token" :instances="instances" />
-          <ManagePanel v-else :token="token" :instances="instances" />
+          <ManagePanel v-else-if="activeTab === 'manage'" :token="token" :instances="instances" />
+          <section v-else-if="activeTab === 'logs'" class="logs-page">
+            <div class="panel-heading">
+              <div><h2>Logs</h2><p>Instance log viewer</p></div>
+              <label v-if="enabledInstances.length > 0" class="target-select"><span>Target instance</span><select v-model="logsInstanceId"><option v-for="inst in enabledInstances" :key="inst.id" :value="inst.id">{{ inst.name }}</option></select></label>
+            </div>
+            <LogsPanel :token="token" :instance="enabledInstances.find((i) => i.id === logsInstanceId)" />
+          </section>
         </section>
       </main>
     </div>
@@ -168,6 +184,7 @@ function logout() {
         <button data-nav="chat" class="nav-item" :class="{ 'is-active': activeTab === 'chat' }" @click="activeTab = 'chat'; mobileMenuOpen = false"><span class="nav-left"><span class="nav-icon"></span>Chat</span></button>
         <button data-nav="instances" class="nav-item" :class="{ 'is-active': activeTab === 'instances' }" @click="activeTab = 'instances'; mobileMenuOpen = false"><span class="nav-left"><span class="nav-icon"></span>Instances</span></button>
         <button data-nav="manage" class="nav-item" :class="{ 'is-active': activeTab === 'manage' }" @click="activeTab = 'manage'; mobileMenuOpen = false"><span class="nav-left"><span class="nav-icon"></span>Manage</span></button>
+        <button data-nav="logs" class="nav-item" :class="{ 'is-active': activeTab === 'logs' }" @click="activeTab = 'logs'; mobileMenuOpen = false"><span class="nav-left"><span class="nav-icon"></span>Logs</span></button>
       </nav>
     </aside>
   </Teleport>
@@ -632,6 +649,34 @@ label {
   width: min(100%, 1440px);
   margin-inline: auto;
   padding: 22px;
+}
+
+.logs-page {
+  display: grid;
+  gap: 1rem;
+}
+
+.panel-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.panel-heading p {
+  color: var(--muted);
+  margin: 0.25rem 0 0;
+}
+
+.target-select {
+  display: grid;
+  gap: 0.45rem;
+  min-width: 16rem;
+}
+
+.target-select span {
+  color: var(--fg);
+  font-weight: 700;
 }
 
 .mobile-tabs {
