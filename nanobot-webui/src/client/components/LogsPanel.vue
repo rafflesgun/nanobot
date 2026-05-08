@@ -95,6 +95,14 @@ async function loadWebuiLogs() {
 
 watch(() => props.instance, loadLogs, { immediate: true })
 watch(() => props.token, loadLogs)
+
+function parseLogLine(line: string): [string, string, string] {
+  const match = line.match(/^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)\s+(\w+)\s+(.*)$/)
+  if (match) return [match[1].replace(/^.*T/, '').replace(/Z$/, ''), match[2], match[3]]
+  const parts = line.split(/\s+/)
+  if (parts.length >= 3) return [parts[0], parts[1], parts.slice(2).join(' ')]
+  return ['', '', line]
+}
 </script>
 
 <template>
@@ -148,12 +156,13 @@ watch(() => props.token, loadLogs)
       <p v-if="error" class="error-text">{{ error }}</p>
 
       <pre v-if="tail && viewMode === 'raw'" class="log-tail" data-testid="raw-log-tail">{{ tail.lines.join('\n') }}</pre>
-      <ol v-else-if="tail" class="log-tail formatted-log-tail">
-        <li v-for="(line, index) in tail.lines" :key="`${tail.name}-${index}`" data-testid="formatted-log-line">
-          <span class="line-number">{{ index + 1 }}</span>
-          <span class="line-text">{{ line }}</span>
-        </li>
-      </ol>
+      <div v-else-if="tail && viewMode === 'formatted'" class="log-body" data-testid="formatted-log-tail">
+        <div v-for="(line, index) in tail.lines" :key="`${tail.name}-${index}`" class="log-line" data-testid="formatted-log-line">
+          <span>{{ parseLogLine(line)[0] }}</span>
+          <span>{{ parseLogLine(line)[1] }}</span>
+          <span>{{ parseLogLine(line)[2] }}</span>
+        </div>
+      </div>
       <div v-else class="log-tail empty-state">{{ loadingTail || loadingWebuiLogs ? 'Loading log tail...' : 'Select a log to view its tail.' }}</div>
     </div>
   </section>
@@ -250,27 +259,38 @@ watch(() => props.token, loadLogs)
   white-space: pre-wrap;
 }
 
-.formatted-log-tail {
+.log-body {
   display: grid;
-  gap: 0.35rem;
-  list-style: none;
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin: 0;
+  min-height: 12rem;
+  overflow: auto;
 }
 
-.formatted-log-tail li {
+.log-line {
   display: grid;
-  gap: 0.75rem;
-  grid-template-columns: 3rem minmax(0, 1fr);
-}
-
-.line-number {
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
-.line-text {
-  color: var(--fg);
+  grid-template-columns: 76px 82px minmax(0, 1fr);
+  gap: 12px;
+  padding: 10px 16px;
+  background: oklch(17% 0.012 255);
   font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.log-line span:nth-child(1),
+.log-line span:nth-child(2) {
+  color: var(--muted);
+}
+
+@media (max-width: 620px) {
+  .log-line {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
 }
 
 .error-text {

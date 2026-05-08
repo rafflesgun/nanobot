@@ -69,6 +69,10 @@ describe('LogsPanel', () => {
     await wrapper.get('button[data-log="nanobot.log"]').trigger('click')
     await vi.waitFor(() => expect(wrapper.findAll('[data-testid="formatted-log-line"]')).toHaveLength(2))
 
+    const lines = wrapper.findAll('[data-testid="formatted-log-line"]')
+    expect(lines[0].text()).toContain('INFO')
+    expect(lines[1].text()).toContain('ERROR')
+
     await wrapper.get('[data-view="raw"]').trigger('click')
 
     expect(wrapper.get('[data-testid="raw-log-tail"]').text()).toContain('INFO booted\nERROR failed')
