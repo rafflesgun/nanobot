@@ -716,6 +716,17 @@ label {
   .content {
     padding: 18px;
   }
+  .hero {
+    grid-template-columns: 1fr;
+  }
+  .workspace {
+    grid-template-columns: 196px minmax(0, 1fr);
+  }
+  .span-4,
+  .span-5,
+  .span-7 {
+    grid-column: span 6;
+  }
 }
 
 @media (max-width: 920px) {
@@ -743,6 +754,25 @@ label {
   .content {
     padding: 14px;
   }
+  .top-actions .button:not(.primary),
+  .top-actions .pill {
+    display: none;
+  }
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+  .hero-panel {
+    padding: 18px;
+  }
+  .hero-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .span-4,
+  .span-5,
+  .span-7,
+  .span-12 {
+    grid-column: span 12;
+  }
 }
 
 .drawer-backdrop {
@@ -769,13 +799,36 @@ label {
   .crumbs {
     font-size: 11px;
   }
-
   .topbar {
     min-height: 56px;
   }
-
   .content {
     padding: 10px;
+  }
+  .hero-panel,
+  .card {
+    border-radius: 12px;
+    padding: 14px;
+  }
+  .hero-head {
+    flex-direction: column;
+    margin-block-end: 16px;
+  }
+  .hero h2 {
+    font-size: 30px;
+  }
+  .hero-metrics {
+    grid-template-columns: 1fr;
+  }
+  .runtime-meta {
+    grid-template-columns: 1fr;
+  }
+  .workgrid {
+    gap: 10px;
+  }
+  .panel-header {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 </style>
