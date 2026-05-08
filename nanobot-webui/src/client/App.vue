@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { fetchInstances, type PublicInstance } from './api'
+import { fetchInstances, fetchStateTopics, type PublicInstance, type StateTopic } from './api'
 import OverviewPanel from './components/OverviewPanel.vue'
 import ChatPanel from './components/ChatPanel.vue'
 import InstancesPanel from './components/InstancesPanel.vue'
@@ -14,6 +14,19 @@ const loading = ref(false)
 const activeTab = ref<'overview' | 'chat' | 'instances' | 'manage'>('overview')
 const sidebarCollapsed = ref(false)
 const mobileMenuOpen = ref(false)
+const pinnedTopics = ref<StateTopic[]>([])
+
+async function loadPinnedTopics() {
+  if (!token.value) return
+  try {
+    const topics = await fetchStateTopics(token.value)
+    pinnedTopics.value = Array.isArray(topics) ? topics : []
+  } catch { pinnedTopics.value = [] }
+}
+
+function openPinnedTopic() {
+  activeTab.value = 'chat'
+}
 
 const activeTabLabel = computed(() => {
   const map: Record<string, string> = { overview: 'Overview', chat: 'Chat Topics', instances: 'Instances', manage: 'Manage' }
@@ -31,6 +44,7 @@ async function login() {
     instances.value = await fetchInstances(token.value)
     authenticated.value = true
     activeTab.value = 'overview'
+    loadPinnedTopics()
   } catch (err) {
     authenticated.value = false
     instances.value = []
@@ -82,6 +96,13 @@ function logout() {
           <button data-nav="chat" class="nav-item" :class="{ 'is-active': activeTab === 'chat' }" @click="activeTab = 'chat'"><span class="nav-left"><span class="nav-icon"></span>Chat Topics</span><span class="count">0</span></button>
           <button data-nav="instances" class="nav-item" :class="{ 'is-active': activeTab === 'instances' }" @click="activeTab = 'instances'"><span class="nav-left"><span class="nav-icon"></span>Instances</span><span class="count">{{ instances.length.toString().padStart(2, '0') }}</span></button>
           <button data-nav="manage" class="nav-item" :class="{ 'is-active': activeTab === 'manage' }" @click="activeTab = 'manage'"><span class="nav-left"><span class="nav-icon"></span>Manage</span><span class="count">{{ manageSectionCount }}</span></button>
+        </nav>
+
+        <nav v-if="pinnedTopics.length > 0" class="nav-section" aria-label="Pinned chats">
+          <div class="section-label">Pinned chats</div>
+          <button v-for="topic in pinnedTopics" :key="topic.id" class="nav-item" @click="openPinnedTopic">
+            <span class="nav-left"><span class="nav-icon"></span>{{ topic.name }}</span>
+          </button>
         </nav>
 
         <div class="sidebar-bottom">

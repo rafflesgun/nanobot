@@ -246,6 +246,32 @@ describe('App', () => {
     expect(wrapper.find('[data-nav="chat"] .count').exists()).toBe(true)
   })
 
+  it('shows pinned chats section when topics exist', async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/instances') {
+        return Promise.resolve({
+          ok: true,
+          json: vi.fn().mockResolvedValue({ instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }] })
+        })
+      }
+      if (url === '/api/state/topics') {
+        return Promise.resolve({
+          ok: true,
+          json: vi.fn().mockResolvedValue({ topics: [{ id: 't1', name: 'Release checklist', selectedIds: [], transcript: { entries: [], debugEvents: [] } }] })
+        })
+      }
+      throw new Error(`unexpected: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const wrapper = mount(App)
+    await wrapper.get('input').setValue('secret-token')
+    await wrapper.get('form').trigger('submit')
+    await vi.waitFor(() => expect(wrapper.text()).toContain('Pinned chats'))
+    expect(wrapper.text()).toContain('Release checklist')
+  })
+
   it('uses the sticky split-shell layout hooks after login', async () => {
     vi.stubGlobal(
       'fetch',
