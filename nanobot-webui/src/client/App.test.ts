@@ -155,7 +155,7 @@ describe('App', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/state/instances', { headers: { authorization: 'Bearer secret-token' } })
   })
 
-  it('renders the dark dashboard shell without full instance details after login', async () => {
+  it('renders the dark dashboard shell with sidebar and topbar after login', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -169,8 +169,9 @@ describe('App', () => {
     await wrapper.get('form').trigger('submit')
 
     await vi.waitFor(() => expect(wrapper.find('[data-testid="dashboard-shell"]').exists()).toBe(true))
-    expect(wrapper.find('[data-testid="sidebar-nav"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="instance-status-bar"]').exists()).toBe(true)
+    expect(wrapper.find('.sidebar').exists()).toBe(true)
+    expect(wrapper.find('.topbar').exists()).toBe(true)
+    expect(wrapper.find('.content').exists()).toBe(true)
     expect(wrapper.text()).toContain('Alpha')
     expect(wrapper.text()).not.toContain('http://nanobot-alpha:18790')
   })
@@ -188,10 +189,13 @@ describe('App', () => {
     await wrapper.get('input').setValue('secret-token')
     await wrapper.get('form').trigger('submit')
 
-    await vi.waitFor(() => expect(wrapper.find('[data-testid="floating-header"]').exists()).toBe(true))
-    expect(wrapper.find('[data-testid="main-body"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="sidebar-panel"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="content-scroll"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="content-stage"]').classes()).toContain('is-top-aligned')
+    await vi.waitFor(() => expect(wrapper.find('.app').exists()).toBe(true))
+    expect(wrapper.find('.sidebar').exists()).toBe(true)
+    expect(wrapper.find('.brand').exists()).toBe(true)
+    expect(wrapper.find('.nav-section').exists()).toBe(true)
+    expect(wrapper.find('.topbar').exists()).toBe(true)
+    expect(wrapper.find('.crumbs').exists()).toBe(true)
+    expect(wrapper.find('.top-actions').exists()).toBe(true)
+    expect(wrapper.find('.content').exists()).toBe(true)
   })
 })

@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { fetchInstances, type PublicInstance } from './api'
-import InstanceList from './components/InstanceList.vue'
 import OverviewPanel from './components/OverviewPanel.vue'
 import ChatPanel from './components/ChatPanel.vue'
 import InstancesPanel from './components/InstancesPanel.vue'
@@ -13,6 +12,21 @@ const error = ref('')
 const authenticated = ref(false)
 const loading = ref(false)
 const activeTab = ref<'overview' | 'chat' | 'instances' | 'manage'>('overview')
+const sidebarCollapsed = ref(false)
+const mobileMenuOpen = ref(false)
+
+const activeTabLabel = computed(() => {
+  const map: Record<string, string> = { overview: 'Overview', chat: 'Chat Topics', instances: 'Instances', manage: 'Manage' }
+  return map[activeTab.value] ?? 'Overview'
+})
+
+const onlineCount = computed(() => instances.value.filter(i => i.enabled).length)
+
+const instanceSummary = computed(() => {
+  if (instances.value.length === 0) return 'No instances'
+  const on = onlineCount.value
+  return on === instances.value.length ? `${on} online` : `${on}/${instances.value.length} online`
+})
 
 async function login() {
   error.value = ''
@@ -53,40 +67,63 @@ function logout() {
       </form>
     </section>
 
-    <section v-else data-testid="dashboard-shell" class="dashboard-shell">
-      <header data-testid="floating-header" class="floating-header">
-        <div class="floating-actions">
-          <InstanceList data-testid="instance-status-bar" :instances="instances" />
-          <button class="secondary" data-testid="logout-button" type="button" @click="logout">Log out</button>
-        </div>
-      </header>
-
-      <div data-testid="main-body" class="main-body">
-        <aside data-testid="sidebar-panel" class="sidebar-nav sidebar-panel">
-          <div class="brand-block">
-            <p class="eyebrow">Admin Console</p>
-            <h1>Nanobot Web UI</h1>
-            <p>Manage live nanobot surfaces from one command deck.</p>
+    <div v-else data-testid="dashboard-shell" class="app">
+      <aside class="sidebar" aria-label="Primary navigation">
+        <div class="brand">
+          <div class="brand-mark">
+            <div class="logo">nb</div>
+            <div>
+              <h1>nanobot</h1>
+              <p>local agent console</p>
+            </div>
           </div>
-          <nav data-testid="sidebar-nav" class="dashboard-tabs" aria-label="Dashboard sections">
-            <button data-nav="overview" type="button" :class="{ active: activeTab === 'overview' }" @click="activeTab = 'overview'">Overview</button>
-            <button data-nav="chat" type="button" :class="{ active: activeTab === 'chat' }" @click="activeTab = 'chat'">Chat Topics</button>
-            <button data-nav="instances" type="button" :class="{ active: activeTab === 'instances' }" @click="activeTab = 'instances'">Instances</button>
-            <button data-nav="manage" type="button" :class="{ active: activeTab === 'manage' }" @click="activeTab = 'manage'">Manage</button>
-          </nav>
-        </aside>
+          <button class="icon-button" aria-label="Collapse sidebar" @click="sidebarCollapsed = !sidebarCollapsed">⌘</button>
+        </div>
 
-        <section data-testid="content-scroll" class="content-scroll">
-          <section data-testid="content-stage" class="content-stage is-top-aligned">
-            <p v-if="error" class="error" role="alert">{{ error }}</p>
-            <OverviewPanel v-if="activeTab === 'overview'" :token="token" :instances="instances" />
-            <ChatPanel v-else-if="activeTab === 'chat'" :token="token" :instances="instances" />
-            <InstancesPanel v-else-if="activeTab === 'instances'" :token="token" :instances="instances" />
-            <ManagePanel v-else :token="token" :instances="instances" />
-          </section>
+        <nav class="nav-section" aria-label="Main">
+          <div class="section-label">Workspace</div>
+          <button data-nav="overview" class="nav-item" :class="{ 'is-active': activeTab === 'overview' }" @click="activeTab = 'overview'"><span class="nav-left"><span class="nav-icon"></span>Overview</span></button>
+          <button data-nav="chat" class="nav-item" :class="{ 'is-active': activeTab === 'chat' }" @click="activeTab = 'chat'"><span class="nav-left"><span class="nav-icon"></span>Chat Topics</span></button>
+          <button data-nav="instances" class="nav-item" :class="{ 'is-active': activeTab === 'instances' }" @click="activeTab = 'instances'"><span class="nav-left"><span class="nav-icon"></span>Instances</span></button>
+          <button data-nav="manage" class="nav-item" :class="{ 'is-active': activeTab === 'manage' }" @click="activeTab = 'manage'"><span class="nav-left"><span class="nav-icon"></span>Manage</span></button>
+        </nav>
+
+        <div class="sidebar-bottom">
+          <div class="connection-card">
+            <div class="connection-row">
+              <div class="connection-title">Gateway</div>
+              <span class="pill"><span class="dot" :class="{ success: onlineCount > 0 }"></span>{{ onlineCount > 0 ? 'online' : 'offline' }}</span>
+            </div>
+            <div class="muted mono" style="font-size: 11px; line-height: 1.5;">{{ instanceSummary }}</div>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <button class="icon-button mobile-menu" aria-label="Open navigation" @click="mobileMenuOpen = !mobileMenuOpen">☰</button>
+          <div class="crumbs"><span>nanobot</span><span>/</span><strong>{{ activeTabLabel }}</strong></div>
+          <div class="top-actions">
+            <button class="button" data-testid="logout-button" @click="logout">Log out</button>
+          </div>
+        </header>
+
+        <div class="mobile-tabs" aria-label="Mobile navigation">
+          <button class="pill" :class="{ 'is-active': activeTab === 'overview' }" @click="activeTab = 'overview'">Overview</button>
+          <button class="pill" :class="{ 'is-active': activeTab === 'chat' }" @click="activeTab = 'chat'">Chat</button>
+          <button class="pill" :class="{ 'is-active': activeTab === 'instances' }" @click="activeTab = 'instances'">Instances</button>
+          <button class="pill" :class="{ 'is-active': activeTab === 'manage' }" @click="activeTab = 'manage'">Manage</button>
+        </div>
+
+        <section class="content">
+          <p v-if="error" class="error" role="alert">{{ error }}</p>
+          <OverviewPanel v-if="activeTab === 'overview'" :token="token" :instances="instances" />
+          <ChatPanel v-else-if="activeTab === 'chat'" :token="token" :instances="instances" />
+          <InstancesPanel v-else-if="activeTab === 'instances'" :token="token" :instances="instances" />
+          <ManagePanel v-else :token="token" :instances="instances" />
         </section>
-      </div>
-    </section>
+      </main>
+    </div>
   </main>
 </template>
 
@@ -117,14 +154,21 @@ function logout() {
   box-sizing: border-box;
 }
 
+html {
+  min-height: 100%;
+  background: var(--bg);
+}
+
 body {
   margin: 0;
-  min-width: 320px;
   min-height: 100vh;
+  font-family: var(--font-body);
+  color: var(--fg);
   background:
-    radial-gradient(circle at top left, oklch(35% 0.08 255 / 0.28), transparent 34rem),
-    radial-gradient(circle at 80% 0%, oklch(35% 0.08 255 / 0.11), transparent 30rem),
-    var(--bg);
+    radial-gradient(circle at 72% -20%, oklch(35% 0.08 255 / 0.28), transparent 34rem),
+    linear-gradient(180deg, oklch(18% 0.014 255), var(--bg) 26rem);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 button,
@@ -134,28 +178,7 @@ select {
 }
 
 button {
-  border: 1px solid color-mix(in oklch, var(--accent), var(--border) 58%);
-  border-radius: 9px;
-  background: linear-gradient(135deg, var(--accent), oklch(54% 0.15 195));
-  color: oklch(100% 0 0);
   cursor: pointer;
-  font-weight: 700;
-  min-height: 2.75rem;
-  padding: 0 1rem;
-  transition:
-    background 150ms ease,
-    box-shadow 150ms ease,
-    transform 150ms ease;
-}
-
-button:hover:not(:disabled) {
-  box-shadow: 0 10px 24px oklch(64% 0.18 255 / 0.24);
-  transform: translateY(-1px);
-}
-
-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.72;
 }
 
 input,
@@ -180,13 +203,6 @@ select:focus {
   min-height: 100vh;
 }
 
-.app-shell:not(.is-login) {
-  --shell-gutter: 1.5rem;
-  --sidebar-width: 17rem;
-  height: 100vh;
-  overflow: hidden;
-}
-
 .app-shell.is-login {
   display: grid;
   min-height: 100vh;
@@ -197,37 +213,24 @@ select:focus {
   width: min(440px, 100%);
 }
 
-.login-card,
-.panel {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: oklch(19% 0.014 255 / 0.88);
-  box-shadow: 0 20px 60px oklch(0% 0 0 / 0.28);
-}
-
 .login-card {
   border: 1px solid color-mix(in oklch, var(--border), var(--fg) 10%);
   border-radius: var(--radius);
   background: oklch(19% 0.014 255 / 0.9);
   box-shadow: 0 20px 60px oklch(0% 0 0 / 0.34);
-}
-
-.login-card {
   display: grid;
   gap: 0.9rem;
   padding: 2rem;
 }
 
-.login-card h1,
-.brand-block h1 {
+.login-card h1 {
   margin: 0;
   color: var(--fg);
   font-size: clamp(1.7rem, 3vw, 2.25rem);
   letter-spacing: -0.04em;
 }
 
-.login-copy,
-.brand-block p {
+.login-copy {
   margin: 0;
   color: var(--muted);
   line-height: 1.55;
@@ -248,107 +251,306 @@ label {
   font-weight: 700;
 }
 
-.dashboard-shell {
+.login-card button {
+  border: 1px solid color-mix(in oklch, var(--accent), var(--border) 58%);
+  border-radius: 9px;
+  background: linear-gradient(135deg, var(--accent), oklch(54% 0.15 195));
+  color: oklch(100% 0 0);
+  cursor: pointer;
+  font-weight: 700;
+  min-height: 2.75rem;
+  padding: 0 1rem;
+  transition: background 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+}
+
+.login-card button:hover:not(:disabled) {
+  box-shadow: 0 10px 24px oklch(64% 0.18 255 / 0.24);
+  transform: translateY(-1px);
+}
+
+.login-card button:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.app {
+  display: grid;
+  grid-template-columns: 268px minmax(0, 1fr);
   min-height: 100vh;
-  position: relative;
 }
 
-.floating-header {
-  pointer-events: none;
-  position: fixed;
-  inset: 0 0 auto;
-  z-index: 20;
-}
-
-.floating-actions {
-  align-items: center;
-  backdrop-filter: blur(16px);
-  background: oklch(16% 0.012 255 / 0.9);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  display: flex;
-  gap: 1rem;
-  justify-content: space-between;
-  margin: var(--shell-gutter) var(--shell-gutter) 0 auto;
-  max-width: calc(100vw - var(--sidebar-width) - var(--shell-gutter) * 4);
-  padding: 0.45rem;
-  pointer-events: auto;
-  width: max-content;
-}
-
-.main-body {
-  display: flex;
-  gap: 2rem;
+.sidebar {
+  position: sticky;
+  top: 0;
   height: 100vh;
-  overflow: hidden;
-  padding: var(--shell-gutter);
-}
-
-.sidebar-nav {
-  backdrop-filter: blur(18px);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  border-inline-end: 1px solid var(--border);
   background: oklch(16% 0.012 255 / 0.9);
-  display: grid;
-  gap: 1.5rem;
-  grid-template-rows: auto 1fr;
-  flex: 0 0 var(--sidebar-width);
-  height: calc(100vh - var(--shell-gutter) * 2);
-  overflow-y: auto;
-  padding: 1.1rem;
+  backdrop-filter: blur(18px);
 }
 
-.brand-block {
-  display: grid;
-  gap: 0.45rem;
-  padding: 0.5rem 0.35rem 1rem;
+.brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 18px 16px 14px;
 }
 
-.content-scroll {
-  flex: 1;
-  height: calc(100vh - var(--shell-gutter) * 2);
+.brand-mark {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   min-width: 0;
-  overflow-y: auto;
 }
 
-.content-stage {
-  align-content: start;
+.logo {
   display: grid;
-  gap: 1rem;
-  min-width: 0;
-  padding: 5rem clamp(1rem, 3vw, 2.5rem) 2.5rem;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid color-mix(in oklch, var(--accent), var(--border) 58%);
+  border-radius: 9px;
+  background: oklch(21% 0.05 255);
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
 }
 
-.dashboard-tabs {
-  align-content: start;
-  display: grid;
-  gap: 0.55rem;
+.brand h1 {
   margin: 0;
+  font-family: var(--font-display);
+  font-size: 15px;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
 }
 
-.dashboard-tabs button {
+.brand p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.nav-section {
+  padding: 10px;
+}
+
+.section-label {
+  margin: 10px 8px 7px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: 34px;
+  padding: 8px 9px;
   border: 1px solid transparent;
+  border-radius: 9px;
   background: transparent;
   color: var(--muted);
-  justify-content: start;
-  text-align: left;
+  text-align: start;
+  font-size: 13px;
+  line-height: 1.2;
 }
 
-.dashboard-tabs button.active {
-  border-color: color-mix(in oklch, var(--accent), var(--border) 58%);
-  background: oklch(64% 0.18 255 / 0.18);
+.nav-item + .nav-item {
+  margin-block-start: 2px;
+}
+
+.nav-item.is-active {
+  border-color: var(--border);
+  background: var(--surface);
   color: var(--fg);
 }
 
-.secondary {
+.nav-left {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.nav-icon {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--border);
+}
+
+.is-active .nav-icon {
+  background: var(--accent);
+}
+
+.sidebar-bottom {
+  margin-block-start: auto;
+  padding: 12px 10px;
+  border-block-start: 1px solid var(--border);
+}
+
+.connection-card {
+  padding: 11px;
   border: 1px solid var(--border);
-  background: oklch(14% 0.012 255 / 0.72);
-  color: var(--fg);
+  border-radius: 12px;
+  background: var(--surface);
 }
 
-.secondary:hover:not(:disabled) {
+.connection-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-block-end: 8px;
+}
+
+.connection-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
   background: var(--surface-2);
-  box-shadow: 0 8px 20px oklch(0% 0 0 / 0.22);
+  color: var(--fg);
+  font-size: 11px;
+  font-weight: 560;
+  white-space: nowrap;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--muted);
+}
+
+.dot.success {
+  background: var(--success);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  min-height: 62px;
+  padding: 12px 22px;
+  border-block-end: 1px solid var(--border);
+  background: oklch(16% 0.012 255 / 0.82);
+  backdrop-filter: blur(18px);
+}
+
+.mobile-menu {
+  display: none;
+}
+
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.crumbs strong {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.top-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 560;
+  white-space: nowrap;
+}
+
+.button.primary {
+  border-color: color-mix(in oklch, var(--accent), black 10%);
+  background: var(--accent);
+  color: oklch(99% 0.002 255);
+}
+
+.content {
+  width: min(100%, 1440px);
+  margin-inline: auto;
+  padding: 22px;
+}
+
+.mobile-tabs {
+  display: none;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 10px 14px;
+  border-block-end: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.mobile-tabs .pill {
+  flex: 0 0 auto;
 }
 
 .error {
@@ -360,44 +562,61 @@ label {
   padding: 0.8rem 0.95rem;
 }
 
-.panel {
-  min-width: 0;
-  padding: 1.25rem;
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }
 
-.panel h2 {
-  margin: 0 0 1rem;
-  color: var(--fg);
-  font-size: 1rem;
-  letter-spacing: -0.01em;
+@media (max-width: 1180px) {
+  .content {
+    padding: 18px;
+  }
 }
 
-@media (max-width: 820px) {
-  .app-shell:not(.is-login) {
-    height: auto;
-    overflow: visible;
+@media (max-width: 920px) {
+  .app {
+    grid-template-columns: 1fr;
   }
 
-  .main-body {
-    display: grid;
-    height: auto;
-    min-height: 100vh;
-    overflow: visible;
+  .sidebar {
+    display: none;
   }
 
-  .sidebar-nav,
-  .content-scroll {
-    height: auto;
+  .mobile-menu {
+    display: inline-grid;
   }
 
-  .floating-actions {
-    margin-left: var(--shell-gutter);
-    max-width: calc(100vw - var(--shell-gutter) * 2);
-    width: auto;
+  .mobile-tabs {
+    display: flex;
   }
 
-  .content-stage {
-    padding: 1rem 0 2rem;
+  .topbar {
+    grid-template-columns: auto minmax(0, 1fr);
+    padding: 10px 14px;
+  }
+
+  .content {
+    padding: 14px;
+  }
+}
+
+@media (max-width: 620px) {
+  .crumbs {
+    font-size: 11px;
+  }
+
+  .topbar {
+    min-height: 56px;
+  }
+
+  .content {
+    padding: 10px;
   }
 }
 </style>
