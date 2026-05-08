@@ -156,7 +156,7 @@ watch(selectedUsageInstanceId, loadUsage)
           <span class="pill"><span class="dot success"></span>ready</span>
         </div>
         <div class="settings-list">
-          <div class="setting-row"><span class="row-title">Bootstrap token</span><span class="row-sub">{{ firstHealthyEntry?.status?.has_api_key ? 'valid' : 'missing' }}</span></div>
+          <div class="setting-row"><span class="row-title">Admin channel</span><span class="row-sub">{{ firstHealthyEntry?.status?.status || 'unknown' }}</span></div>
           <div class="setting-row"><span class="row-title">WebSocket channel</span><span class="row-sub">{{ firstHealthyEntry?.status?.websocket?.enabled ? 'open' : 'closed' }}</span></div>
           <div class="setting-row"><span class="row-title">Provider</span><span class="row-sub">{{ firstHealthyEntry?.status?.resolved_provider || 'unknown' }}</span></div>
         </div>
