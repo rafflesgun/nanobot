@@ -61,8 +61,8 @@ function logout() {
       </form>
     </section>
 
-    <div v-else data-testid="dashboard-shell" class="app">
-      <aside class="sidebar" aria-label="Primary navigation">
+    <div v-else data-testid="dashboard-shell" class="app" :class="{ 'is-collapsed': sidebarCollapsed }">
+      <aside class="sidebar" :class="{ 'is-collapsed': sidebarCollapsed }" aria-label="Primary navigation">
         <div class="brand">
           <div class="brand-mark">
             <div class="logo">nb</div>
@@ -279,6 +279,10 @@ label {
   min-height: 100vh;
 }
 
+.app.is-collapsed {
+  grid-template-columns: 64px minmax(0, 1fr);
+}
+
 .sidebar {
   position: sticky;
   top: 0;
@@ -288,6 +292,29 @@ label {
   border-inline-end: 1px solid var(--border);
   background: oklch(16% 0.012 255 / 0.9);
   backdrop-filter: blur(18px);
+}
+
+.sidebar.is-collapsed .brand-mark > div,
+.sidebar.is-collapsed .section-label,
+.sidebar.is-collapsed .nav-left span:not(.nav-icon),
+.sidebar.is-collapsed .count,
+.sidebar.is-collapsed .connection-card,
+.sidebar.is-collapsed .sidebar-bottom .connection-instances {
+  display: none;
+}
+
+.sidebar.is-collapsed .nav-item {
+  justify-content: center;
+  padding: 8px;
+}
+
+.sidebar.is-collapsed .brand {
+  justify-content: center;
+  padding: 18px 8px 14px;
+}
+
+.sidebar.is-collapsed .sidebar-bottom {
+  padding: 12px 8px;
 }
 
 .brand {

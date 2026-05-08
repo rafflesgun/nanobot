@@ -176,6 +176,30 @@ describe('App', () => {
     expect(wrapper.text()).not.toContain('http://nanobot-alpha:18790')
   })
 
+  it('toggles sidebar collapse state', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }] })
+      })
+    )
+
+    const wrapper = mount(App)
+    await wrapper.get('input').setValue('secret-token')
+    await wrapper.get('form').trigger('submit')
+    await vi.waitFor(() => expect(wrapper.find('[data-testid="dashboard-shell"]').exists()).toBe(true))
+
+    const collapseButton = wrapper.get('[aria-label="Collapse sidebar"]')
+    expect(wrapper.find('.sidebar.is-collapsed').exists()).toBe(false)
+
+    await collapseButton.trigger('click')
+    expect(wrapper.find('.sidebar.is-collapsed').exists()).toBe(true)
+
+    await collapseButton.trigger('click')
+    expect(wrapper.find('.sidebar.is-collapsed').exists()).toBe(false)
+  })
+
   it('uses the sticky split-shell layout hooks after login', async () => {
     vi.stubGlobal(
       'fetch',
