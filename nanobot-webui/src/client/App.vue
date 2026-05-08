@@ -35,6 +35,13 @@ const activeTabLabel = computed(() => {
 
 const onlineCount = computed(() => instances.value.filter(i => i.enabled).length)
 
+const enabledInstances = computed(() => instances.value.filter(i => i.enabled))
+
+const breadcrumbInstance = computed(() => {
+  if (activeTab.value !== 'manage') return null
+  return enabledInstances.value[0] ?? null
+})
+
 const manageSectionCount = computed(() => 6)
 
 async function login() {
@@ -125,7 +132,7 @@ function logout() {
       <main class="main">
         <header class="topbar">
           <button class="icon-button mobile-menu" aria-label="Open navigation" @click="mobileMenuOpen = !mobileMenuOpen">☰</button>
-          <div class="crumbs"><span>nanobot</span><span>/</span><strong>{{ activeTabLabel }}</strong></div>
+          <div class="crumbs"><span>nanobot</span><span>/</span><strong>{{ activeTabLabel }}</strong><template v-if="breadcrumbInstance"><span>/</span><span>{{ breadcrumbInstance.name }}</span></template></div>
           <div class="top-actions">
             <span class="pill"><span class="dot success"></span>{{ onlineCount }} online</span>
             <button class="button" data-testid="refresh-button" @click="login()">Refresh</button>

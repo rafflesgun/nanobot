@@ -313,4 +313,23 @@ describe('App', () => {
     expect(wrapper.find('.top-actions').exists()).toBe(true)
     expect(wrapper.find('.content').exists()).toBe(true)
   })
+
+  it('shows instance name in breadcrumbs on Manage tab', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }] })
+      })
+    )
+
+    const wrapper = mount(App)
+    await wrapper.get('input').setValue('secret-token')
+    await wrapper.get('form').trigger('submit')
+    await vi.waitFor(() => expect(wrapper.text()).toContain('Overview'))
+
+    await wrapper.get('[data-nav="manage"]').trigger('click')
+    const crumbs = wrapper.find('.crumbs')
+    expect(crumbs.text()).toContain('Alpha')
+  })
 })
