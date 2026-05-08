@@ -31,4 +31,11 @@ describe('ManagePanel', () => {
     await wrapper.get('[data-section="logs"]').trigger('click')
     expect(wrapper.text()).toContain('Inspect read-only log tails')
   })
+
+  it('renders credentials section in manage subnav', async () => {
+    const wrapper = mount(ManagePanel, {
+      props: { token: 'tok', instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }] }
+    })
+    expect(wrapper.find('[data-section="credentials"]').exists()).toBe(true)
+  })
 })
