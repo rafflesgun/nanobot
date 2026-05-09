@@ -96,7 +96,7 @@ function logout() {
         <div class="brand">
           <div class="brand-mark">
             <div class="logo">nb</div>
-            <div>
+            <div class="brand-text">
               <h1>nanobot</h1>
               <p>local agent console</p>
             </div>
@@ -106,17 +106,17 @@ function logout() {
 
         <nav class="nav-section" aria-label="Main">
           <div class="section-label">Workspace</div>
-          <button data-nav="overview" class="nav-item" :class="{ 'is-active': activeTab === 'overview' }" @click="activeTab = 'overview'"><span class="nav-left"><span class="nav-icon"></span>Overview</span><span class="count">{{ instances.length.toString().padStart(2, '0') }}</span></button>
-          <button data-nav="chat" class="nav-item" :class="{ 'is-active': activeTab === 'chat' }" @click="activeTab = 'chat'"><span class="nav-left"><span class="nav-icon"></span>Chat Topics</span><span class="count">0</span></button>
-          <button data-nav="instances" class="nav-item" :class="{ 'is-active': activeTab === 'instances' }" @click="activeTab = 'instances'"><span class="nav-left"><span class="nav-icon"></span>Instances</span><span class="count">{{ instances.length.toString().padStart(2, '0') }}</span></button>
-          <button data-nav="manage" class="nav-item" :class="{ 'is-active': activeTab === 'manage' }" @click="activeTab = 'manage'"><span class="nav-left"><span class="nav-icon"></span>Manage</span><span class="count">{{ manageSectionCount }}</span></button>
-          <button data-nav="logs" class="nav-item" :class="{ 'is-active': activeTab === 'logs' }" @click="activeTab = 'logs'"><span class="nav-left"><span class="nav-icon"></span>Logs</span><span class="count">live</span></button>
+          <button data-nav="overview" class="nav-item" :class="{ 'is-active': activeTab === 'overview' }" @click="activeTab = 'overview'"><span class="nav-left"><span class="nav-icon"></span><span class="nav-label">Overview</span></span><span class="count">{{ instances.length.toString().padStart(2, '0') }}</span></button>
+          <button data-nav="chat" class="nav-item" :class="{ 'is-active': activeTab === 'chat' }" @click="activeTab = 'chat'"><span class="nav-left"><span class="nav-icon"></span><span class="nav-label">Chat Topics</span></span><span class="count">0</span></button>
+          <button data-nav="instances" class="nav-item" :class="{ 'is-active': activeTab === 'instances' }" @click="activeTab = 'instances'"><span class="nav-left"><span class="nav-icon"></span><span class="nav-label">Instances</span></span><span class="count">{{ instances.length.toString().padStart(2, '0') }}</span></button>
+          <button data-nav="manage" class="nav-item" :class="{ 'is-active': activeTab === 'manage' }" @click="activeTab = 'manage'"><span class="nav-left"><span class="nav-icon"></span><span class="nav-label">Manage</span></span><span class="count">{{ manageSectionCount }}</span></button>
+          <button data-nav="logs" class="nav-item" :class="{ 'is-active': activeTab === 'logs' }" @click="activeTab = 'logs'"><span class="nav-left"><span class="nav-icon"></span><span class="nav-label">Logs</span></span><span class="count">live</span></button>
         </nav>
 
         <nav v-if="pinnedTopics.length > 0" class="nav-section" aria-label="Pinned chats">
           <div class="section-label">Pinned chats</div>
           <button v-for="topic in pinnedTopics" :key="topic.id" class="nav-item" @click="openPinnedTopic">
-            <span class="nav-left"><span class="nav-icon"></span>{{ topic.name }}</span>
+            <span class="nav-left"><span class="nav-icon"></span><span class="nav-label">{{ topic.name }}</span></span>
           </button>
         </nav>
 
@@ -180,11 +180,11 @@ function logout() {
     <aside v-if="mobileMenuOpen" class="mobile-drawer" aria-label="Mobile navigation">
       <nav class="nav-section">
         <div class="section-label">Workspace</div>
-        <button data-nav="overview" class="nav-item" :class="{ 'is-active': activeTab === 'overview' }" @click="activeTab = 'overview'; mobileMenuOpen = false"><span class="nav-left"><span class="nav-icon"></span>Overview</span></button>
-        <button data-nav="chat" class="nav-item" :class="{ 'is-active': activeTab === 'chat' }" @click="activeTab = 'chat'; mobileMenuOpen = false"><span class="nav-left"><span class="nav-icon"></span>Chat</span></button>
-        <button data-nav="instances" class="nav-item" :class="{ 'is-active': activeTab === 'instances' }" @click="activeTab = 'instances'; mobileMenuOpen = false"><span class="nav-left"><span class="nav-icon"></span>Instances</span></button>
-        <button data-nav="manage" class="nav-item" :class="{ 'is-active': activeTab === 'manage' }" @click="activeTab = 'manage'; mobileMenuOpen = false"><span class="nav-left"><span class="nav-icon"></span>Manage</span></button>
-        <button data-nav="logs" class="nav-item" :class="{ 'is-active': activeTab === 'logs' }" @click="activeTab = 'logs'; mobileMenuOpen = false"><span class="nav-left"><span class="nav-icon"></span>Logs</span></button>
+        <button data-nav="overview" class="nav-item" :class="{ 'is-active': activeTab === 'overview' }" @click="activeTab = 'overview'; mobileMenuOpen = false"><span class="nav-left"><span class="nav-icon"></span><span class="nav-label">Overview</span></span></button>
+        <button data-nav="chat" class="nav-item" :class="{ 'is-active': activeTab === 'chat' }" @click="activeTab = 'chat'; mobileMenuOpen = false"><span class="nav-left"><span class="nav-icon"></span><span class="nav-label">Chat</span></span></button>
+        <button data-nav="instances" class="nav-item" :class="{ 'is-active': activeTab === 'instances' }" @click="activeTab = 'instances'; mobileMenuOpen = false"><span class="nav-left"><span class="nav-icon"></span><span class="nav-label">Instances</span></span></button>
+        <button data-nav="manage" class="nav-item" :class="{ 'is-active': activeTab === 'manage' }" @click="activeTab = 'manage'; mobileMenuOpen = false"><span class="nav-left"><span class="nav-icon"></span><span class="nav-label">Manage</span></span></button>
+        <button data-nav="logs" class="nav-item" :class="{ 'is-active': activeTab === 'logs' }" @click="activeTab = 'logs'; mobileMenuOpen = false"><span class="nav-left"><span class="nav-icon"></span><span class="nav-label">Logs</span></span></button>
       </nav>
     </aside>
   </Teleport>
@@ -361,9 +361,9 @@ label {
   overflow: hidden;
 }
 
-.sidebar.is-collapsed .brand-mark > div,
+.sidebar.is-collapsed .brand-text,
 .sidebar.is-collapsed .section-label,
-.sidebar.is-collapsed .nav-left span:not(.nav-icon),
+.sidebar.is-collapsed .nav-label,
 .sidebar.is-collapsed .count,
 .sidebar.is-collapsed .connection-card,
 .sidebar.is-collapsed .sidebar-bottom .connection-instances {
