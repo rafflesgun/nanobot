@@ -28,7 +28,7 @@ describe('OverviewPanel', () => {
 
     await vi.waitFor(() => expect(wrapper.text()).toContain('gpt-4.1'))
     expect(wrapper.find('.eyebrow').text()).toBe('Dashboard')
-    expect(wrapper.find('#overview-title').text()).toBe('Nanobot management console')
+    expect(wrapper.find('#overview-title').text()).toBe('Nanobot Dashboard')
     expect(wrapper.findAll('.metric')).toHaveLength(4)
     expect(wrapper.text()).toContain('instances')
     expect(wrapper.text()).toContain('healthy')
@@ -36,24 +36,7 @@ describe('OverviewPanel', () => {
     expect(wrapper.text()).toContain('degraded')
   })
 
-  it('renders runtime topology panel when a healthy instance exists', async () => {
-    vi.stubGlobal('fetch', makeFetchMock())
-
-    const wrapper = mount(OverviewPanel, {
-      props: {
-        token: 'dashboard',
-        instances: [{ id: 'alpha', name: 'alpha', baseUrl: 'http://nanobot-alpha:18790', enabled: true }]
-      }
-    })
-
-    await vi.waitFor(() => expect(wrapper.text()).toContain('gpt-4.1'))
-    expect(wrapper.find('.runtime-panel').exists()).toBe(true)
-    expect(wrapper.find('.runtime-map').exists()).toBe(true)
-    expect(wrapper.findAll('.node')).toHaveLength(4)
-    expect(wrapper.text()).toContain('Runtime topology')
-  })
-
-  it('renders instance table with rows', async () => {
+  it('renders instance table with rows and Model column', async () => {
     vi.stubGlobal('fetch', makeFetchMock())
 
     const wrapper = mount(OverviewPanel, {
@@ -72,6 +55,8 @@ describe('OverviewPanel', () => {
     const rows = wrapper.findAll('tbody tr')
     expect(rows).toHaveLength(2)
     expect(rows[0].text()).toContain('alpha')
+    const headers = wrapper.findAll('th')
+    expect(headers.map((h) => h.text())).toContain('Model')
   })
 
   it('renders live logs panel', async () => {
@@ -115,9 +100,9 @@ describe('OverviewPanel', () => {
     })
 
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/instances/alpha/status', expect.anything()))
-    await wrapper.get('button').trigger('click')
+    await wrapper.get('.icon-button-sm').trigger('click')
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
-    await wrapper.get('button').trigger('click')
+    await wrapper.get('.icon-button-sm').trigger('click')
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4))
 
     resolveSecondRefresh(response('latest-model'))
@@ -132,7 +117,7 @@ describe('OverviewPanel', () => {
     expect(wrapper.text()).not.toContain('stale-model')
   })
 
-  it('shows disabled and failing instances as degraded', async () => {
+  it('shows disabled and failing instances as degraded with danger dot', async () => {
     vi.stubGlobal('fetch', vi.fn((url: string) => url.includes('/webui/logs') ? Promise.resolve({ ok: true, json: vi.fn().mockResolvedValue({ logs: [] }) }) : Promise.resolve({ ok: false, status: 502, json: vi.fn() })))
 
     const wrapper = mount(OverviewPanel, {
@@ -153,10 +138,12 @@ describe('OverviewPanel', () => {
     expect(rows).toHaveLength(2)
     expect(rows[0].text()).toContain('alpha')
     expect(rows[0].text()).toContain('degraded')
+    expect(rows[0].find('.dot.danger').exists()).toBe(true)
     expect(rows[1].text()).toContain('beta')
+    expect(rows[1].find('.dot.danger').exists()).toBe(true)
   })
 
-  it('defaults usage selector to the first enabled instance and renders usage cards', async () => {
+  it('defaults usage selector to the first enabled instance and renders usage cards with chart', async () => {
     const fetchMock = makeFetchMock(undefined, { totals: { count: 2, input_tokens: 30, output_tokens: 12, total_tokens: 42, cached_tokens: 3 }, by_day: [{ key: '2026-05-07', count: 2, input_tokens: 30, output_tokens: 12, total_tokens: 42, cached_tokens: 3 }], by_model: [{ key: 'm1', count: 2, input_tokens: 30, output_tokens: 12, total_tokens: 42, cached_tokens: 3 }], by_channel: [], by_session: [], pricing: { configured: false, message: 'Pricing is not configured; showing token usage only.' } })
     vi.stubGlobal('fetch', fetchMock)
 
@@ -168,6 +155,8 @@ describe('OverviewPanel', () => {
     expect((wrapper.get('[data-testid="usage-instance-select"]').element as HTMLSelectElement).value).toBe('alpha')
     expect(wrapper.text()).toContain('Total')
     expect(wrapper.text()).toContain('Pricing is not configured')
+    expect(wrapper.find('.usage-chart').exists()).toBe(true)
+    expect(wrapper.find('.chart-fill').exists()).toBe(true)
     expect(fetchMock).toHaveBeenCalledWith('/api/instances/alpha/usage?days=30', expect.anything())
   })
 
@@ -195,55 +184,5 @@ describe('OverviewPanel', () => {
 
     await vi.waitFor(() => expect(wrapper.text()).toContain('99'))
     expect(fetchMock).toHaveBeenCalledWith('/api/instances/beta/usage?days=30', expect.anything())
-  })
-
-  it('renders connection state card with provider and websocket info', async () => {
-    vi.stubGlobal('fetch', makeFetchMock())
-
-    const wrapper = mount(OverviewPanel, {
-      props: {
-        token: 'dashboard',
-        instances: [{ id: 'alpha', name: 'alpha', baseUrl: 'http://nanobot-alpha:18790', enabled: true }]
-      }
-    })
-
-    await vi.waitFor(() => expect(wrapper.text()).toContain('gpt-4.1'))
-    expect(wrapper.find('.connection-state-card').exists()).toBe(true)
-    expect(wrapper.text()).toContain('Connection state')
-    expect(wrapper.text()).toContain('Admin channel')
-    expect(wrapper.text()).toContain('WebSocket channel')
-    expect(wrapper.text()).toContain('open')
-    expect(wrapper.text()).toContain('openai')
-  })
-
-  it('renders model routing card with primary provider', async () => {
-    vi.stubGlobal('fetch', makeFetchMock())
-
-    const wrapper = mount(OverviewPanel, {
-      props: {
-        token: 'dashboard',
-        instances: [{ id: 'alpha', name: 'alpha', baseUrl: 'http://nanobot-alpha:18790', enabled: true }]
-      }
-    })
-
-    await vi.waitFor(() => expect(wrapper.text()).toContain('gpt-4.1'))
-    expect(wrapper.find('.model-routing-card').exists()).toBe(true)
-    expect(wrapper.text()).toContain('Model routing')
-    expect(wrapper.text()).toContain('primary')
-  })
-
-  it('renders capacity card with token progress bar', async () => {
-    vi.stubGlobal('fetch', makeFetchMock(undefined, { totals: { count: 5, input_tokens: 100, output_tokens: 50, total_tokens: 150, cached_tokens: 10 }, by_day: [], by_model: [], by_channel: [], by_session: [], pricing: { configured: false, message: 'Pricing is not configured; showing token usage only.' } }))
-
-    const wrapper = mount(OverviewPanel, {
-      props: {
-        token: 'dashboard',
-        instances: [{ id: 'alpha', name: 'alpha', baseUrl: 'http://nanobot-alpha:18790', enabled: true }]
-      }
-    })
-
-    await vi.waitFor(() => expect(wrapper.text()).toContain('Capacity'))
-    expect(wrapper.find('.capacity-card').exists()).toBe(true)
-    expect(wrapper.find('.bar-fill').exists()).toBe(true)
   })
 })

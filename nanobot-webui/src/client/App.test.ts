@@ -11,7 +11,7 @@ describe('App', () => {
   it('shows only the login landing before authentication', () => {
     const wrapper = mount(App)
 
-    expect(wrapper.get('h1').text()).toBe('Nanobot Web UI')
+    expect(wrapper.get('h1').text()).toBe('Nanobot Dashboard')
     expect(wrapper.get('input[type="password"]').attributes('placeholder')).toBe('Dashboard token')
     expect(wrapper.get('button').text()).toBe('Log in')
     expect(wrapper.text()).not.toContain('Instances')

@@ -82,7 +82,7 @@ function logout() {
     <section v-if="!authenticated" class="login-page" aria-label="Dashboard login">
       <form class="login-card" @submit.prevent="login">
         <p class="eyebrow">Admin Console</p>
-        <h1>Nanobot Web UI</h1>
+        <h1>Nanobot Dashboard</h1>
         <p class="login-copy">Sign in with your dashboard token to manage configured nanobot instances.</p>
         <label for="dashboard-token">Dashboard token</label>
         <input id="dashboard-token" v-model="token" type="password" placeholder="Dashboard token" autocomplete="current-password" />
@@ -129,7 +129,7 @@ function logout() {
             <div v-if="instances.length === 0" class="muted mono" style="font-size: 11px; line-height: 1.5;">No instances</div>
             <div v-else class="connection-instances">
               <span v-for="instance in instances" :key="instance.id" class="connection-pill" :title="`${instance.name} (${instance.enabled ? 'enabled' : 'disabled'})`">
-                <span class="dot" :class="{ success: instance.enabled }"></span>
+                <span class="dot" :class="instance.enabled ? 'success' : 'danger'"></span>
                 <span>{{ instance.name }}</span>
               </span>
             </div>
@@ -143,8 +143,8 @@ function logout() {
           <div class="crumbs"><span>nanobot</span><span>/</span><strong>{{ activeTabLabel }}</strong><template v-if="breadcrumbInstance"><span>/</span><span>{{ breadcrumbInstance.name }}</span></template></div>
           <div class="top-actions">
             <span class="pill"><span class="dot success"></span>{{ onlineCount }} online</span>
-            <button class="button" data-testid="refresh-button" @click="login()">Refresh</button>
-            <button class="button primary" data-testid="new-chat-button" @click="activeTab = 'chat'">New chat</button>
+            <button class="button" data-testid="refresh-button" @click="login()">↻ Refresh</button>
+            <button class="button primary" data-testid="new-chat-button" @click="activeTab = 'chat'">+ New chat</button>
             <button class="button" data-testid="logout-button" @click="logout">Log out</button>
           </div>
         </header>
@@ -357,6 +357,10 @@ label {
   backdrop-filter: blur(18px);
 }
 
+.sidebar.is-collapsed {
+  overflow: hidden;
+}
+
 .sidebar.is-collapsed .brand-mark > div,
 .sidebar.is-collapsed .section-label,
 .sidebar.is-collapsed .nav-left span:not(.nav-icon),
@@ -369,6 +373,7 @@ label {
 .sidebar.is-collapsed .nav-item {
   justify-content: center;
   padding: 8px;
+  overflow: hidden;
 }
 
 .sidebar.is-collapsed .brand {
@@ -565,6 +570,10 @@ label {
 
 .dot.success {
   background: var(--success);
+}
+
+.dot.danger {
+  background: var(--danger);
 }
 
 .muted {
