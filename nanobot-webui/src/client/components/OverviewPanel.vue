@@ -233,8 +233,8 @@ watch(selectedUsageInstanceId, loadUsage)
           <div class="top-actions"><button class="button" @click="emit('navigate', 'logs')">View all</button></div>
         </div>
         <div class="log-body">
-          <div v-if="webuiLogs.length === 0" class="log-line"><span>--</span><span>--</span><span>No recent log entries.</span></div>
-          <div v-for="(entry, i) in webuiLogs.slice(0, 20)" :key="i" class="log-line">
+          <div v-if="!webuiLogs || webuiLogs.length === 0" class="log-line"><span>--</span><span>--</span><span>No recent log entries.</span></div>
+          <div v-for="(entry, i) in (webuiLogs ?? []).slice(0, 20)" :key="i" class="log-line">
             <span>{{ entry.at }}</span>
             <span>{{ entry.level?.toUpperCase() || 'INFO' }}</span>
             <span>{{ [entry.method, entry.path, entry.status, entry.message].filter(Boolean).join(' ') }}</span>

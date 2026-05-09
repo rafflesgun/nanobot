@@ -210,7 +210,7 @@ describe('OverviewPanel', () => {
     await vi.waitFor(() => expect(wrapper.text()).toContain('gpt-4.1'))
     expect(wrapper.find('.connection-state-card').exists()).toBe(true)
     expect(wrapper.text()).toContain('Connection state')
-    expect(wrapper.text()).toContain('Bootstrap token')
+    expect(wrapper.text()).toContain('Admin channel')
     expect(wrapper.text()).toContain('WebSocket channel')
     expect(wrapper.text()).toContain('open')
     expect(wrapper.text()).toContain('openai')
