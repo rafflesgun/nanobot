@@ -39,6 +39,24 @@ export type StateTopic = {
   }
 }
 
+export type Conversation = StateTopic
+
+export type ConversationSummary = {
+  id: string
+  name: string
+  memberCount: number
+  updatedAt: string
+  lastMessage: string | null
+}
+
+export async function fetchConversations(token: string): Promise<Conversation[]> {
+  return fetchStateTopics(token)
+}
+
+export async function saveConversations(token: string, conversations: Conversation[]): Promise<Conversation[]> {
+  return saveStateTopics(token, conversations)
+}
+
 export type StateInstance = PublicInstance & {
   adminToken?: string
   websocketToken?: string
