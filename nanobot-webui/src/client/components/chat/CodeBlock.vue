@@ -17,7 +17,18 @@ const ext: Record<string, string> = {
 }
 
 async function copyCode() {
-  await navigator.clipboard.writeText(props.code)
+  try {
+    await navigator.clipboard.writeText(props.code)
+  } catch {
+    const ta = document.createElement('textarea')
+    ta.value = props.code
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    document.execCommand('copy')
+    document.body.removeChild(ta)
+  }
   copied.value = true
   setTimeout(() => { copied.value = false }, 2000)
 }

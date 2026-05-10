@@ -40,8 +40,23 @@ function avatarColor(): string {
   return colors[sum % colors.length]
 }
 
+async function copyToClipboard(text: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    document.execCommand('copy')
+    document.body.removeChild(ta)
+  }
+}
+
 async function copyMarkdown() {
-  await navigator.clipboard.writeText(props.entry.text)
+  await copyToClipboard(props.entry.text)
   copied.value = true
   setTimeout(() => { copied.value = false }, 2000)
 }
@@ -100,10 +115,13 @@ function parsedBlocks(): Array<{ type: 'html' | 'code'; content: string; languag
           </template>
           <span v-if="isStreaming()" class="streaming-cursor">▍</span>
         </div>
+        <div class="message-actions">
+          <button class="action-btn" @click="copyMarkdown">
+            <Icon :icon="copied ? 'mdi:check' : 'mdi:content-copy'" :width="14" />
+            <span>{{ copied ? 'Copied' : 'Copy' }}</span>
+          </button>
+        </div>
       </div>
-      <button class="copy-button" @click="copyMarkdown">
-        <Icon :icon="copied ? 'mdi:check' : 'mdi:content-copy'" />
-      </button>
     </div>
   </div>
 </template>
@@ -153,7 +171,6 @@ function parsedBlocks(): Array<{ type: 'html' | 'code'; content: string; languag
   display: flex;
   gap: 10px;
   max-width: 90%;
-  position: relative;
 }
 
 .bot-avatar {
@@ -208,30 +225,34 @@ function parsedBlocks(): Array<{ type: 'html' | 'code'; content: string; languag
   color: var(--accent);
 }
 
-.copy-button {
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 28px;
-  height: 28px;
+.message-actions {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--muted);
-  cursor: pointer;
+  gap: 4px;
+  margin-top: 6px;
   opacity: 0;
   transition: opacity 0.15s;
 }
 
-.bot-message:hover .copy-button {
+.bot-message:hover .message-actions {
   opacity: 1;
 }
 
-.copy-button:hover {
+.action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.action-btn:hover {
   color: var(--fg);
+  background: var(--surface-2);
 }
 
 @keyframes blink {

@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { Icon } from '@iconify/vue'
 import type { PublicInstance } from '../../api'
 
 const props = defineProps<{
   instances: PublicInstance[]
+  existingNames?: string[]
 }>()
 
 const emit = defineEmits<{
@@ -19,9 +20,19 @@ const enabledInstances = computed(() =>
   props.instances.filter((i) => i.enabled)
 )
 
-const canCreate = computed(
-  () => chatName.value.trim().length > 0 && selectedIds.value.size > 0
+const isDuplicate = computed(() =>
+  chatName.value.trim().length > 0 &&
+  (props.existingNames ?? []).some(n => n.toLowerCase() === chatName.value.trim().toLowerCase())
 )
+
+const canCreate = computed(
+  () => chatName.value.trim().length > 0 && selectedIds.value.size > 0 && !isDuplicate.value
+)
+
+watch(() => props.instances, () => {
+  chatName.value = ''
+  selectedIds.value = new Set()
+})
 
 function toggleInstance(id: string) {
   const next = new Set(selectedIds.value)
@@ -33,6 +44,8 @@ function toggleInstance(id: string) {
 function handleCreate() {
   if (!canCreate.value) return
   emit('create', chatName.value.trim(), [...selectedIds.value])
+  chatName.value = ''
+  selectedIds.value = new Set()
 }
 
 function handleKeydown(e: KeyboardEvent) {
@@ -59,6 +72,7 @@ function handleKeydown(e: KeyboardEvent) {
           placeholder="Enter chat name…"
           @keydown="handleKeydown"
         />
+        <p v-if="isDuplicate" class="field-error">A chat with this name already exists</p>
 
         <label class="field-label">Select bots (min 1)</label>
         <div v-if="enabledInstances.length === 0" class="no-instances">
@@ -171,6 +185,12 @@ function handleKeydown(e: KeyboardEvent) {
 
 .field-input:focus {
   border-color: oklch(64% 0.18 255 / 0.4);
+}
+
+.field-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 0.78rem;
 }
 
 .instance-list {

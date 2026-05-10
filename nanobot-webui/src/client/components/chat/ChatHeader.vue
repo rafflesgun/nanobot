@@ -6,12 +6,13 @@ const props = defineProps<{
   name: string
   members: PublicInstance[]
   connectionStatuses: Record<string, 'idle' | 'connecting' | 'connected' | 'error' | 'disconnected'>
+  sidebarCollapsed: boolean
 }>()
 
 const emit = defineEmits<{
   addMember: []
   removeMember: [instanceId: string]
-  settings: []
+  toggleSidebar: []
 }>()
 
 function statusBorderColor(id: string): string {
@@ -25,6 +26,9 @@ function statusBorderColor(id: string): string {
 <template>
   <div class="chat-header">
     <div class="header-left">
+      <button class="icon-btn" @click="emit('toggleSidebar')">
+        <Icon :icon="sidebarCollapsed ? 'mdi:chevron-right' : 'mdi:chevron-left'" width="18" />
+      </button>
       <h3 class="chat-title">{{ name }}</h3>
       <div class="member-avatars">
         <div
@@ -44,9 +48,6 @@ function statusBorderColor(id: string): string {
         </button>
       </div>
     </div>
-    <button class="icon-btn" @click="emit('settings')">
-      <Icon icon="mdi:cog-outline" :width="18" />
-    </button>
   </div>
 </template>
 
@@ -57,6 +58,7 @@ function statusBorderColor(id: string): string {
   justify-content: space-between;
   padding: 10px 20px;
   border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
 .header-left {
@@ -143,6 +145,7 @@ function statusBorderColor(id: string): string {
   cursor: pointer;
   display: grid;
   place-items: center;
+  flex-shrink: 0;
 }
 
 .icon-btn:hover {

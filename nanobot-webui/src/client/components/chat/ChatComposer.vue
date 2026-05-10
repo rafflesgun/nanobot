@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue'
+import { ref, watch, nextTick, computed } from 'vue'
 import { Icon } from '@iconify/vue'
 import type { ComposerMedia } from '../../api'
 
@@ -16,6 +16,8 @@ const emit = defineEmits<{
 const message = ref('')
 const pendingAttachments = ref<ComposerMedia[]>([])
 const textarea = ref<HTMLTextAreaElement | null>(null)
+
+const isMultiline = computed(() => message.value.includes('\n'))
 
 watch(message, () => {
   nextTick(() => {
@@ -93,16 +95,7 @@ function onPaste(e: ClipboardEvent) {
         {{ att.name ?? 'attachment' }} ×
       </span>
     </div>
-    <div class="input-row">
-      <label class="attach-button">
-        <Icon icon="mdi:plus-circle-outline" :width="28" />
-        <input
-          type="file"
-          multiple
-          data-testid="attachment-input"
-          @change="onFileSelect"
-        />
-      </label>
+    <div class="composer-input" :class="{ multiline: isMultiline }">
       <textarea
         ref="textarea"
         v-model="message"
@@ -114,31 +107,43 @@ function onPaste(e: ClipboardEvent) {
         @keydown="handleKeydown"
         @paste="onPaste"
       />
-      <button
-        v-if="isGenerating"
-        class="send-button stop"
-        data-testid="stop-button"
-        @click="emit('stop')"
-      >
-        <Icon icon="mdi:stop-circle" :width="24" />
-      </button>
-      <button
-        v-else
-        class="send-button"
-        :class="{ disabled: disabled || (!message.trim() && !pendingAttachments.length) }"
-        data-testid="send-button"
-        :disabled="disabled"
-        @click="send"
-      >
-        <Icon icon="mdi:send" :width="20" />
-      </button>
+      <div class="composer-actions">
+        <label class="attach-button">
+          <Icon icon="mdi:plus-circle-outline" :width="22" />
+          <input
+            type="file"
+            multiple
+            data-testid="attachment-input"
+            @change="onFileSelect"
+          />
+        </label>
+        <button
+          v-if="isGenerating"
+          class="send-button stop"
+          data-testid="stop-button"
+          @click="emit('stop')"
+        >
+          <Icon icon="mdi:stop-circle" :width="22" />
+        </button>
+        <button
+          v-else
+          class="send-button"
+          :class="{ disabled: disabled || (!message.trim() && !pendingAttachments.length) }"
+          data-testid="send-button"
+          :disabled="disabled"
+          @click="send"
+        >
+          <Icon icon="mdi:arrow-up" :width="20" />
+        </button>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
 .composer {
-  padding: 10px 20px 16px;
+  padding: 8px 20px 16px;
+  flex-shrink: 0;
 }
 
 .attachment-row {
@@ -163,24 +168,58 @@ function onPaste(e: ClipboardEvent) {
   border-color: var(--accent);
 }
 
-.input-row {
-  position: relative;
+.composer-input {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
+  gap: 4px;
   border: 2px solid var(--border);
-  border-radius: 16px;
+  border-radius: 24px;
   background: oklch(19% 0.014 255 / 0.88);
+  padding: 6px 8px 6px 4px;
   transition: border-color 150ms;
 }
 
-.input-row:focus-within {
+.composer-input:focus-within {
   border-color: var(--accent);
+}
+
+.composer-input.multiline {
+  border-radius: 16px;
+  align-items: flex-end;
+}
+
+.chat-textarea {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  padding: 6px 4px 6px 12px;
+  resize: none;
+  outline: none;
+  min-height: 24px;
+  max-height: 360px;
+}
+
+.chat-textarea::placeholder {
+  color: var(--muted);
+}
+
+.composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
 }
 
 .attach-button {
   display: grid;
   place-items: center;
-  padding: 10px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
   color: var(--muted);
   cursor: pointer;
 }
@@ -193,33 +232,13 @@ function onPaste(e: ClipboardEvent) {
   display: none;
 }
 
-.chat-textarea {
-  flex: 1;
-  border: none;
-  background: transparent;
-  color: var(--fg);
-  font-family: inherit;
-  font-size: 0.88rem;
-  line-height: 1.5;
-  padding: 12px 0;
-  resize: none;
-  outline: none;
-  min-height: 24px;
-  max-height: 360px;
-}
-
-.chat-textarea::placeholder {
-  color: var(--muted);
-}
-
 .send-button {
   display: grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
-  margin: 6px;
+  width: 32px;
+  height: 32px;
   border: none;
-  border-radius: 8px;
+  border-radius: 50%;
   background: var(--accent);
   color: oklch(99% 0 0);
   cursor: pointer;

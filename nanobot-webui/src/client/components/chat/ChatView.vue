@@ -7,7 +7,7 @@ import { useConversations } from './useConversations'
 import ConversationSidebar from './ConversationSidebar.vue'
 import ChatArea from './ChatArea.vue'
 import NewChatDialog from './NewChatDialog.vue'
-import { Icon } from '@iconify/vue'
+import AddMemberDialog from './AddMemberDialog.vue'
 
 type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'error' | 'disconnected'
 
@@ -26,6 +26,7 @@ const props = withDefaults(defineProps<{
 const socket = props.createSocket(props.token)
 const sidebarCollapsed = ref(false)
 const showNewChatDialog = ref(false)
+const showAddMemberDialog = ref(false)
 const statuses = ref<Record<string, ConnectionStatus>>({})
 const isGenerating = ref(false)
 const activeGeneratingIds = ref<Set<string>>(new Set())
@@ -50,7 +51,14 @@ const activeEntries = computed<TranscriptEntry[]>(() => {
   return (activeConversation.value?.transcript.entries ?? []) as TranscriptEntry[]
 })
 
-const canSend = computed(() => activeMembers.value.length > 0)
+const canSend = computed(() => {
+  if (!activeConversation.value || activeMembers.value.length === 0) return false
+  const mappings = activeConversation.value.chatMappings ?? {}
+  return activeConversation.value.selectedIds.every((id: string) => {
+    const m = mappings[id]
+    return m && m.status === 'attached' && m.chatId
+  })
+})
 
 function updateStatus(event: ChatEvent) {
   const map: Record<string, ConnectionStatus> = {
@@ -188,6 +196,7 @@ function addMemberToActive(instanceId: string) {
     ensureConnections(activeConversation.value)
     persistConversations(props.token)
   }
+  showAddMemberDialog.value = false
 }
 
 function removeMemberFromActive(instanceId: string) {
@@ -221,6 +230,7 @@ defineExpose({
   activeConversationId,
   activeConversation,
   isGenerating,
+  canSend,
   handleCreateConversation,
   handleDeleteConversation,
   handleRenameConversation,
@@ -242,25 +252,28 @@ defineExpose({
       @collapse="toggleSidebar"
     />
     <div class="chat-main">
-      <button v-if="!sidebarCollapsed" class="collapse-btn" @click="toggleSidebar">
-        <Icon icon="mdi:chevron-left" width="18" />
-      </button>
       <ChatArea
         v-if="activeConversation"
         :name="activeConversation.name" :members="activeMembers"
         :entries="activeEntries" :instances="instances"
         :connection-statuses="statuses" :is-generating="isGenerating" :can-send="canSend"
+        :sidebar-collapsed="sidebarCollapsed"
         @send="sendMessage" @stop="stopGenerating"
-        @add-member="showNewChatDialog = true"
-        @remove-member="removeMemberFromActive" @settings="() => {}"
+        @add-member="showAddMemberDialog = true"
+        @remove-member="removeMemberFromActive" @toggle-sidebar="toggleSidebar"
       />
       <div v-else class="no-conversation">
-        <Icon icon="mdi:message-text-outline" width="48" class="empty-icon" />
         <p>Select or create a conversation to start chatting</p>
       </div>
     </div>
     <NewChatDialog v-if="showNewChatDialog" :instances="instances"
+      :existing-names="conversations.map((c: Conversation) => c.name)"
       @create="handleCreateConversation" @close="showNewChatDialog = false" />
+    <AddMemberDialog
+      v-if="showAddMemberDialog && activeConversation"
+      :instances="instances" :current-member-ids="activeConversation.selectedIds"
+      @add="addMemberToActive" @close="showAddMemberDialog = false"
+    />
   </div>
 </template>
 
@@ -276,27 +289,6 @@ defineExpose({
   display: flex;
   flex-direction: column;
   min-width: 0;
-  position: relative;
-}
-
-.collapse-btn {
-  position: absolute;
-  top: 12px;
-  left: 4px;
-  z-index: 3;
-  width: 28px;
-  height: 28px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--muted);
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-}
-
-.collapse-btn:hover {
-  color: var(--fg);
 }
 
 .no-conversation {
@@ -306,10 +298,6 @@ defineExpose({
   gap: 12px;
   color: var(--muted);
   font-size: 0.9rem;
-}
-
-.empty-icon {
-  opacity: 0.4;
 }
 
 @media (max-width: 768px) {

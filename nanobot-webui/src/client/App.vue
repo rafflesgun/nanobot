@@ -136,7 +136,7 @@ function logout() {
           <button class="pill" :class="{ 'is-active': activeTab === 'logs' }" @click="activeTab = 'logs'">Logs</button>
         </div>
 
-        <section class="content">
+        <section class="content" :class="{ 'chat-content': activeTab === 'chat' }">
           <p v-if="error" class="error" role="alert">{{ error }}</p>
           <OverviewPanel v-if="activeTab === 'overview'" :token="token" :instances="instances" />
           <ChatView v-else-if="activeTab === 'chat'" :token="token" :instances="instances" />
@@ -194,6 +194,29 @@ function logout() {
 
 * {
   box-sizing: border-box;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: oklch(30% 0.012 255);
+  border-radius: 3px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: oklch(40% 0.014 255);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: oklch(30% 0.012 255) transparent;
 }
 
 html {
@@ -637,6 +660,12 @@ label {
   width: min(100%, 1440px);
   margin-inline: auto;
   padding: 22px;
+}
+
+.content.chat-content {
+  width: 100%;
+  max-width: none;
+  padding: 0;
 }
 
 .logs-page {

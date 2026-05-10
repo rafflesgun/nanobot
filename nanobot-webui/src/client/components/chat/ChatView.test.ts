@@ -29,7 +29,8 @@ function mountChatView(socket: FakeSocket, options: Record<string, unknown> = {}
       stubs: {
         ConversationSidebar: true,
         ChatArea: true,
-        NewChatDialog: true
+        NewChatDialog: true,
+        AddMemberDialog: true
       }
     }
   })
@@ -67,6 +68,10 @@ describe('ChatView', () => {
     wrapper.vm.handleCreateConversation('Chat', ['alpha'])
     await wrapper.vm.$nextTick()
 
+    const conv = wrapper.vm.conversations[0]
+    conv.chatMappings = { alpha: { chatId: 'chat-1', status: 'attached' } }
+    await wrapper.vm.$nextTick()
+
     wrapper.vm.sendMessage('hello', [])
     await wrapper.vm.$nextTick()
 
@@ -75,6 +80,23 @@ describe('ChatView', () => {
     )
     const msgEmit = socket.emitted.find(e => e.event === 'send_group_message')
     expect((msgEmit!.payload as any).text).toBe('hello')
+  })
+
+  it('canSend is false until chatMappings are attached', async () => {
+    const socket = new FakeSocket()
+    const wrapper = mountChatView(socket)
+    await vi.waitFor(() => expect(wrapper.vm.conversations).toBeDefined())
+
+    wrapper.vm.handleCreateConversation('Chat', ['alpha'])
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.vm.canSend).toBe(false)
+
+    const conv = wrapper.vm.conversations[0]
+    conv.chatMappings = { alpha: { chatId: 'chat-1', status: 'attached' } }
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.vm.canSend).toBe(true)
   })
 
   it('handles delta events as streaming and stops on stream_end', async () => {

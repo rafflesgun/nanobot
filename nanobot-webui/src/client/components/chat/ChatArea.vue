@@ -13,6 +13,7 @@ const props = defineProps<{
   connectionStatuses: Record<string, 'idle' | 'connecting' | 'connected' | 'error' | 'disconnected'>
   isGenerating: boolean
   canSend: boolean
+  sidebarCollapsed: boolean
 }>()
 
 const emit = defineEmits<{
@@ -20,7 +21,7 @@ const emit = defineEmits<{
   stop: []
   addMember: []
   removeMember: [instanceId: string]
-  settings: []
+  toggleSidebar: []
 }>()
 </script>
 
@@ -30,9 +31,10 @@ const emit = defineEmits<{
       :name="props.name"
       :members="props.members"
       :connection-statuses="props.connectionStatuses"
+      :sidebar-collapsed="props.sidebarCollapsed"
       @add-member="emit('addMember')"
       @remove-member="emit('removeMember', $event)"
-      @settings="emit('settings')"
+      @toggle-sidebar="emit('toggleSidebar')"
     />
     <MessageList :entries="props.entries" :instances="props.instances" />
     <ChatComposer
