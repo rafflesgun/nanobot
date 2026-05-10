@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { Icon } from '@iconify/vue'
 import { fetchInstances, type PublicInstance } from './api'
 import OverviewPanel from './components/OverviewPanel.vue'
 import ChatView from './components/chat/ChatView.vue'
@@ -12,12 +13,12 @@ const instances = ref<PublicInstance[]>([])
 const error = ref('')
 const authenticated = ref(false)
 const loading = ref(false)
-const activeTab = ref<'overview' | 'chat' | 'instances' | 'manage' | 'logs'>('overview')
+const activeTab = ref<'overview' | 'chat' | 'agents' | 'manage' | 'logs'>('overview')
 const sidebarCollapsed = ref(false)
 const mobileMenuOpen = ref(false)
 
 const activeTabLabel = computed(() => {
-  const map: Record<string, string> = { overview: 'Overview', chat: 'Chat', instances: 'Instances', manage: 'Manage', logs: 'Logs' }
+  const map: Record<string, string> = { overview: 'Overview', chat: 'Chat', agents: 'Agents', manage: 'Manage Agents', logs: 'Logs' }
   return map[activeTab.value] ?? 'Overview'
 })
 
@@ -29,8 +30,6 @@ const breadcrumbInstance = computed(() => {
   if (activeTab.value !== 'manage') return null
   return enabledInstances.value[0] ?? null
 })
-
-const manageSectionCount = computed(() => 6)
 
 const logsInstanceId = ref('')
 
@@ -81,22 +80,25 @@ function logout() {
       <aside class="sidebar" :class="{ 'is-collapsed': sidebarCollapsed }" aria-label="Primary navigation">
         <div class="brand">
           <div class="brand-mark">
-            <div class="logo">nb</div>
+            <div class="logo">
+              <Icon icon="mdi:robot-outline" :width="18" />
+            </div>
             <div class="brand-text">
               <h1>nanobot</h1>
-              <p>local agent console</p>
+              <p>agents dashboard</p>
             </div>
           </div>
-          <button class="icon-button" aria-label="Collapse sidebar" @click="sidebarCollapsed = !sidebarCollapsed">⌘</button>
+          <button class="icon-button" aria-label="Collapse sidebar" @click="sidebarCollapsed = !sidebarCollapsed">
+            <Icon :icon="sidebarCollapsed ? 'mdi:chevron-right' : 'mdi:chevron-left'" :width="16" />
+          </button>
         </div>
 
         <nav class="nav-section" aria-label="Main">
-          <div class="section-label">Workspace</div>
-          <button data-nav="overview" class="nav-item" :class="{ 'is-active': activeTab === 'overview' }" @click="activeTab = 'overview'"><span class="nav-left"><span class="nav-icon"></span><span class="nav-label">Overview</span></span><span class="count">{{ instances.length.toString().padStart(2, '0') }}</span></button>
-          <button data-nav="chat" class="nav-item" :class="{ 'is-active': activeTab === 'chat' }" @click="activeTab = 'chat'"><span class="nav-left"><span class="nav-icon"></span><span class="nav-label">Chat</span></span><span class="count">0</span></button>
-          <button data-nav="instances" class="nav-item" :class="{ 'is-active': activeTab === 'instances' }" @click="activeTab = 'instances'"><span class="nav-left"><span class="nav-icon"></span><span class="nav-label">Instances</span></span><span class="count">{{ instances.length.toString().padStart(2, '0') }}</span></button>
-          <button data-nav="manage" class="nav-item" :class="{ 'is-active': activeTab === 'manage' }" @click="activeTab = 'manage'"><span class="nav-left"><span class="nav-icon"></span><span class="nav-label">Manage</span></span><span class="count">{{ manageSectionCount }}</span></button>
-          <button data-nav="logs" class="nav-item" :class="{ 'is-active': activeTab === 'logs' }" @click="activeTab = 'logs'"><span class="nav-left"><span class="nav-icon"></span><span class="nav-label">Logs</span></span><span class="count">live</span></button>
+          <button data-nav="overview" class="nav-item" :class="{ 'is-active': activeTab === 'overview' }" @click="activeTab = 'overview'"><span class="nav-left"><Icon icon="mdi:view-dashboard-outline" :width="18" class="nav-iconify" /><span class="nav-label">Overview</span></span></button>
+          <button data-nav="chat" class="nav-item" :class="{ 'is-active': activeTab === 'chat' }" @click="activeTab = 'chat'"><span class="nav-left"><Icon icon="mdi:chat-outline" :width="18" class="nav-iconify" /><span class="nav-label">Chat</span></span></button>
+          <button data-nav="agents" class="nav-item" :class="{ 'is-active': activeTab === 'agents' }" @click="activeTab = 'agents'"><span class="nav-left"><Icon icon="mdi:robot-outline" :width="18" class="nav-iconify" /><span class="nav-label">Agents</span></span></button>
+          <button data-nav="manage" class="nav-item" :class="{ 'is-active': activeTab === 'manage' }" @click="activeTab = 'manage'"><span class="nav-left"><Icon icon="mdi:cog-outline" :width="18" class="nav-iconify" /><span class="nav-label">Manage Agents</span></span></button>
+          <button data-nav="logs" class="nav-item" :class="{ 'is-active': activeTab === 'logs' }" @click="activeTab = 'logs'"><span class="nav-left"><Icon icon="mdi:file-document-outline" :width="18" class="nav-iconify" /><span class="nav-label">Logs</span></span></button>
         </nav>
 
         <div class="sidebar-bottom">
@@ -122,8 +124,7 @@ function logout() {
           <div class="crumbs"><span>nanobot</span><span>/</span><strong>{{ activeTabLabel }}</strong><template v-if="breadcrumbInstance"><span>/</span><span>{{ breadcrumbInstance.name }}</span></template></div>
           <div class="top-actions">
             <span class="pill"><span class="dot success"></span>{{ onlineCount }} online</span>
-            <button class="button" data-testid="refresh-button" @click="login()">↻ Refresh</button>
-            <button class="button primary" data-testid="new-chat-button" @click="activeTab = 'chat'">+ New chat</button>
+            <button v-if="activeTab === 'overview'" class="button" data-testid="refresh-button" @click="login()">↻ Refresh</button>
             <button class="button" data-testid="logout-button" @click="logout">Log out</button>
           </div>
         </header>
@@ -131,7 +132,7 @@ function logout() {
         <div class="mobile-tabs" aria-label="Mobile navigation">
           <button class="pill" :class="{ 'is-active': activeTab === 'overview' }" @click="activeTab = 'overview'">Overview</button>
           <button class="pill" :class="{ 'is-active': activeTab === 'chat' }" @click="activeTab = 'chat'">Chat</button>
-          <button class="pill" :class="{ 'is-active': activeTab === 'instances' }" @click="activeTab = 'instances'">Instances</button>
+          <button class="pill" :class="{ 'is-active': activeTab === 'agents' }" @click="activeTab = 'agents'">Agents</button>
           <button class="pill" :class="{ 'is-active': activeTab === 'manage' }" @click="activeTab = 'manage'">Manage</button>
           <button class="pill" :class="{ 'is-active': activeTab === 'logs' }" @click="activeTab = 'logs'">Logs</button>
         </div>
@@ -140,7 +141,7 @@ function logout() {
           <p v-if="error" class="error" role="alert">{{ error }}</p>
           <OverviewPanel v-if="activeTab === 'overview'" :token="token" :instances="instances" />
           <ChatView v-else-if="activeTab === 'chat'" :token="token" :instances="instances" />
-          <InstancesPanel v-else-if="activeTab === 'instances'" :token="token" :instances="instances" />
+          <InstancesPanel v-else-if="activeTab === 'agents'" :token="token" :instances="instances" />
           <ManagePanel v-else-if="activeTab === 'manage'" :token="token" :instances="instances" />
           <section v-else-if="activeTab === 'logs'" class="logs-page">
             <div class="panel-heading">
@@ -158,12 +159,11 @@ function logout() {
     <div v-if="mobileMenuOpen" class="drawer-backdrop" @click="mobileMenuOpen = false"></div>
     <aside v-if="mobileMenuOpen" class="mobile-drawer" aria-label="Mobile navigation">
       <nav class="nav-section">
-        <div class="section-label">Workspace</div>
-        <button data-nav="overview" class="nav-item" :class="{ 'is-active': activeTab === 'overview' }" @click="activeTab = 'overview'; mobileMenuOpen = false"><span class="nav-left"><span class="nav-icon"></span><span class="nav-label">Overview</span></span></button>
-        <button data-nav="chat" class="nav-item" :class="{ 'is-active': activeTab === 'chat' }" @click="activeTab = 'chat'; mobileMenuOpen = false"><span class="nav-left"><span class="nav-icon"></span><span class="nav-label">Chat</span></span></button>
-        <button data-nav="instances" class="nav-item" :class="{ 'is-active': activeTab === 'instances' }" @click="activeTab = 'instances'; mobileMenuOpen = false"><span class="nav-left"><span class="nav-icon"></span><span class="nav-label">Instances</span></span></button>
-        <button data-nav="manage" class="nav-item" :class="{ 'is-active': activeTab === 'manage' }" @click="activeTab = 'manage'; mobileMenuOpen = false"><span class="nav-left"><span class="nav-icon"></span><span class="nav-label">Manage</span></span></button>
-        <button data-nav="logs" class="nav-item" :class="{ 'is-active': activeTab === 'logs' }" @click="activeTab = 'logs'; mobileMenuOpen = false"><span class="nav-left"><span class="nav-icon"></span><span class="nav-label">Logs</span></span></button>
+        <button data-nav="overview" class="nav-item" :class="{ 'is-active': activeTab === 'overview' }" @click="activeTab = 'overview'; mobileMenuOpen = false"><span class="nav-left"><Icon icon="mdi:view-dashboard-outline" :width="18" class="nav-iconify" /><span class="nav-label">Overview</span></span></button>
+        <button data-nav="chat" class="nav-item" :class="{ 'is-active': activeTab === 'chat' }" @click="activeTab = 'chat'; mobileMenuOpen = false"><span class="nav-left"><Icon icon="mdi:chat-outline" :width="18" class="nav-iconify" /><span class="nav-label">Chat</span></span></button>
+        <button data-nav="agents" class="nav-item" :class="{ 'is-active': activeTab === 'agents' }" @click="activeTab = 'agents'; mobileMenuOpen = false"><span class="nav-left"><Icon icon="mdi:robot-outline" :width="18" class="nav-iconify" /><span class="nav-label">Agents</span></span></button>
+        <button data-nav="manage" class="nav-item" :class="{ 'is-active': activeTab === 'manage' }" @click="activeTab = 'manage'; mobileMenuOpen = false"><span class="nav-left"><Icon icon="mdi:cog-outline" :width="18" class="nav-iconify" /><span class="nav-label">Manage Agents</span></span></button>
+        <button data-nav="logs" class="nav-item" :class="{ 'is-active': activeTab === 'logs' }" @click="activeTab = 'logs'; mobileMenuOpen = false"><span class="nav-left"><Icon icon="mdi:file-document-outline" :width="18" class="nav-iconify" /><span class="nav-label">Logs</span></span></button>
       </nav>
     </aside>
   </Teleport>
@@ -374,13 +374,22 @@ label {
 
 .sidebar.is-collapsed .nav-item {
   justify-content: center;
-  padding: 8px;
+  padding: 10px 8px;
   overflow: hidden;
+}
+
+.sidebar.is-collapsed .nav-iconify {
+  margin: 0;
 }
 
 .sidebar.is-collapsed .brand {
   justify-content: center;
   padding: 18px 8px 14px;
+}
+
+.sidebar.is-collapsed .logo {
+  width: 30px;
+  height: 30px;
 }
 
 .sidebar.is-collapsed .sidebar-bottom {
@@ -407,13 +416,11 @@ label {
   place-items: center;
   width: 30px;
   height: 30px;
+  min-width: 30px;
   border: 1px solid color-mix(in oklch, var(--accent), var(--border) 58%);
   border-radius: 9px;
   background: oklch(21% 0.05 255);
   color: var(--fg);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
 }
 
 .brand h1 {
@@ -444,15 +451,6 @@ label {
 
 .nav-section {
   padding: 10px;
-}
-
-.section-label {
-  margin: 10px 8px 7px;
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 650;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 
 .nav-item {
@@ -489,23 +487,13 @@ label {
   min-width: 0;
 }
 
-.nav-icon {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  border-radius: 999px;
-  background: var(--border);
-}
-
-.is-active .nav-icon {
-  background: var(--accent);
-}
-
-.count {
+.nav-iconify {
   color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.is-active .nav-iconify {
+  color: var(--accent);
 }
 
 .sidebar-bottom {

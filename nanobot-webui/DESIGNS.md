@@ -38,8 +38,30 @@ Dark-themed thin scrollbar:
 ### Shell
 - App grid: `268px sidebar | 1fr main` (collapsed: `64px | 1fr`)
 - Topbar: sticky, `min-height: 62px`, backdrop blur
+- Refresh button: only shown on Overview tab
+- No "New Chat" button in topbar (chat has its own sidebar)
 - Content: `max-width: 1440px`, `padding: 22px`
 - Chat content: `padding: 0`, `max-width: none` (fills available space)
+
+### Sidebar
+- Brand: logo icon (`mdi:robot-outline`) + "nanobot" title + "agents dashboard" subtitle
+- Collapse button: `mdi:chevron-left` / `mdi:chevron-right` (not ⌘)
+- No "Workspace" section label (removed — added no value)
+- No count badges on nav items (removed — added noise)
+- Collapsed state: logo icon stays 30×30px, only icons visible for nav items
+
+### Navigation Items
+| Tab key   | Label          | Icon                        |
+|-----------|----------------|-----------------------------|
+| overview  | Overview       | `mdi:view-dashboard-outline`|
+| chat      | Chat           | `mdi:chat-outline`          |
+| agents    | Agents         | `mdi:robot-outline`         |
+| manage    | Manage Agents  | `mdi:cog-outline`           |
+| logs      | Logs           | `mdi:file-document-outline` |
+
+- "Agents" replaces "Instances" — nanobot instances are called agents
+- "Manage Agents" replaces "Manage" — clarifies purpose (config/settings per agent)
+- Icons are critical: they serve as the sole identifier when sidebar is collapsed
 
 ### Chat Layout
 - ChatView: `height: calc(100vh - 62px)`, flex row
@@ -111,6 +133,11 @@ Dark-themed thin scrollbar:
 
 All icons use `@iconify/vue` (`Icon` component). Tree-shakable, 3000+ icon sets.
 Common icons:
+- `mdi:robot-outline` (logo, Agents nav)
+- `mdi:view-dashboard-outline` (Overview nav)
+- `mdi:chat-outline` (Chat nav)
+- `mdi:cog-outline` (Manage Agents nav)
+- `mdi:file-document-outline` (Logs nav)
 - `mdi:plus`, `mdi:plus-circle-outline`, `mdi:close`, `mdi:chevron-left`, `mdi:chevron-right`
 - `mdi:content-copy`, `mdi:check`, `mdi:download`, `mdi:arrow-up`, `mdi:stop-circle`
 - `mdi:magnify`, `mdi:message-text-outline`
