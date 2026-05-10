@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { fetchInstances, fetchStateTopics, type PublicInstance, type StateTopic } from './api'
+import { fetchInstances, type PublicInstance } from './api'
 import OverviewPanel from './components/OverviewPanel.vue'
-import ChatPanel from './components/ChatPanel.vue'
+import ChatView from './components/chat/ChatView.vue'
 import InstancesPanel from './components/InstancesPanel.vue'
 import LogsPanel from './components/LogsPanel.vue'
 import ManagePanel from './components/ManagePanel.vue'
@@ -15,22 +15,9 @@ const loading = ref(false)
 const activeTab = ref<'overview' | 'chat' | 'instances' | 'manage' | 'logs'>('overview')
 const sidebarCollapsed = ref(false)
 const mobileMenuOpen = ref(false)
-const pinnedTopics = ref<StateTopic[]>([])
-
-async function loadPinnedTopics() {
-  if (!token.value) return
-  try {
-    const topics = await fetchStateTopics(token.value)
-    pinnedTopics.value = Array.isArray(topics) ? topics : []
-  } catch { pinnedTopics.value = [] }
-}
-
-function openPinnedTopic() {
-  activeTab.value = 'chat'
-}
 
 const activeTabLabel = computed(() => {
-  const map: Record<string, string> = { overview: 'Overview', chat: 'Chat Topics', instances: 'Instances', manage: 'Manage', logs: 'Logs' }
+  const map: Record<string, string> = { overview: 'Overview', chat: 'Chat', instances: 'Instances', manage: 'Manage', logs: 'Logs' }
   return map[activeTab.value] ?? 'Overview'
 })
 
@@ -58,7 +45,6 @@ async function login() {
     instances.value = await fetchInstances(token.value)
     authenticated.value = true
     activeTab.value = 'overview'
-    loadPinnedTopics()
   } catch (err) {
     authenticated.value = false
     instances.value = []
@@ -107,17 +93,10 @@ function logout() {
         <nav class="nav-section" aria-label="Main">
           <div class="section-label">Workspace</div>
           <button data-nav="overview" class="nav-item" :class="{ 'is-active': activeTab === 'overview' }" @click="activeTab = 'overview'"><span class="nav-left"><span class="nav-icon"></span><span class="nav-label">Overview</span></span><span class="count">{{ instances.length.toString().padStart(2, '0') }}</span></button>
-          <button data-nav="chat" class="nav-item" :class="{ 'is-active': activeTab === 'chat' }" @click="activeTab = 'chat'"><span class="nav-left"><span class="nav-icon"></span><span class="nav-label">Chat Topics</span></span><span class="count">0</span></button>
+          <button data-nav="chat" class="nav-item" :class="{ 'is-active': activeTab === 'chat' }" @click="activeTab = 'chat'"><span class="nav-left"><span class="nav-icon"></span><span class="nav-label">Chat</span></span><span class="count">0</span></button>
           <button data-nav="instances" class="nav-item" :class="{ 'is-active': activeTab === 'instances' }" @click="activeTab = 'instances'"><span class="nav-left"><span class="nav-icon"></span><span class="nav-label">Instances</span></span><span class="count">{{ instances.length.toString().padStart(2, '0') }}</span></button>
           <button data-nav="manage" class="nav-item" :class="{ 'is-active': activeTab === 'manage' }" @click="activeTab = 'manage'"><span class="nav-left"><span class="nav-icon"></span><span class="nav-label">Manage</span></span><span class="count">{{ manageSectionCount }}</span></button>
           <button data-nav="logs" class="nav-item" :class="{ 'is-active': activeTab === 'logs' }" @click="activeTab = 'logs'"><span class="nav-left"><span class="nav-icon"></span><span class="nav-label">Logs</span></span><span class="count">live</span></button>
-        </nav>
-
-        <nav v-if="pinnedTopics.length > 0" class="nav-section" aria-label="Pinned chats">
-          <div class="section-label">Pinned chats</div>
-          <button v-for="topic in pinnedTopics" :key="topic.id" class="nav-item" @click="openPinnedTopic">
-            <span class="nav-left"><span class="nav-icon"></span><span class="nav-label">{{ topic.name }}</span></span>
-          </button>
         </nav>
 
         <div class="sidebar-bottom">
@@ -160,7 +139,7 @@ function logout() {
         <section class="content">
           <p v-if="error" class="error" role="alert">{{ error }}</p>
           <OverviewPanel v-if="activeTab === 'overview'" :token="token" :instances="instances" />
-          <ChatPanel v-else-if="activeTab === 'chat'" :token="token" :instances="instances" />
+          <ChatView v-else-if="activeTab === 'chat'" :token="token" :instances="instances" />
           <InstancesPanel v-else-if="activeTab === 'instances'" :token="token" :instances="instances" />
           <ManagePanel v-else-if="activeTab === 'manage'" :token="token" :instances="instances" />
           <section v-else-if="activeTab === 'logs'" class="logs-page">

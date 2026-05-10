@@ -1,4 +1,4 @@
-import { ref, computed } from 'vue'
+import { ref, computed, type Ref } from 'vue'
 import type { Conversation } from '../../api'
 
 export type DateGroup = {
@@ -8,7 +8,7 @@ export type DateGroup = {
 
 export type UseConversationsOptions = {
   loadConversationsApi: (token: string) => Promise<Conversation[]>
-  saveConversationsApi?: (token: string, conversations: Conversation[]) => Promise<Conversation[]>
+  saveConversationsApi: (token: string, conversations: Conversation[]) => Promise<Conversation[]>
 }
 
 function getToday(): Date {
@@ -70,11 +70,11 @@ function groupByDate(conversations: Conversation[]): DateGroup[] {
 }
 
 export function useConversations(options: UseConversationsOptions) {
-  const conversations = ref<Conversation[]>([]) as ref<Conversation[]>
+  const conversations: Ref<Conversation[]> = ref<Conversation[]>([])
   const activeConversationId = ref<string | null>(null)
 
   const activeConversation = computed(() => {
-    return conversations.value.find(c => c.id === activeConversationId.value) ?? null
+    return conversations.value.find((c: Conversation) => c.id === activeConversationId.value) ?? null
   })
 
   const dateGroups = computed(() => groupByDate(conversations.value))
@@ -101,14 +101,14 @@ export function useConversations(options: UseConversationsOptions) {
   }
 
   function deleteConversation(id: string) {
-    conversations.value = conversations.value.filter(c => c.id !== id)
+    conversations.value = conversations.value.filter((c: Conversation) => c.id !== id)
     if (activeConversationId.value === id) {
       activeConversationId.value = conversations.value.length > 0 ? conversations.value[0].id : null
     }
   }
 
   function renameConversation(id: string, newName: string) {
-    const conv = conversations.value.find(c => c.id === id)
+    const conv = conversations.value.find((c: Conversation) => c.id === id)
     if (conv) {
       conv.name = newName
     }
@@ -119,9 +119,7 @@ export function useConversations(options: UseConversationsOptions) {
   }
 
   async function persistConversations(token: string) {
-    if (options.saveConversationsApi) {
-      await options.saveConversationsApi(token, conversations.value)
-    }
+    await options.saveConversationsApi(token, conversations.value)
   }
 
   return {

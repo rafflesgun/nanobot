@@ -34,11 +34,11 @@ const emit = defineEmits<{
       @remove-member="emit('removeMember', $event)"
       @settings="emit('settings')"
     />
-    <MessageList :entries="props.entries" />
+    <MessageList :entries="props.entries" :instances="props.instances" />
     <ChatComposer
+      :disabled="!props.canSend"
       :is-generating="props.isGenerating"
-      :can-send="props.canSend"
-      @send="emit('send', $event[0], $event[1])"
+      @send="(text: string, media: ComposerMedia[]) => emit('send', text, media)"
       @stop="emit('stop')"
     />
   </div>

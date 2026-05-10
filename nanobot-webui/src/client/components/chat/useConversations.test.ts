@@ -39,7 +39,7 @@ describe('useConversations', () => {
   it('loads conversations from API', async () => {
     const mockConvs = [makeConversation({ id: 'a' }), makeConversation({ id: 'b' })]
     const loadApi = vi.fn().mockResolvedValue(mockConvs)
-    const { conversations, loadConversations } = useConversations({ loadConversationsApi: loadApi })
+    const { conversations, loadConversations } = useConversations({ loadConversationsApi: loadApi, saveConversationsApi: vi.fn() })
     await loadConversations('token123')
     expect(loadApi).toHaveBeenCalledWith('token123')
     expect(conversations.value).toEqual(mockConvs)
@@ -48,7 +48,7 @@ describe('useConversations', () => {
   it('sets first conversation as active after loading', async () => {
     const mockConvs = [makeConversation({ id: 'a' }), makeConversation({ id: 'b' })]
     const loadApi = vi.fn().mockResolvedValue(mockConvs)
-    const { activeConversationId, loadConversations } = useConversations({ loadConversationsApi: loadApi })
+    const { activeConversationId, loadConversations } = useConversations({ loadConversationsApi: loadApi, saveConversationsApi: vi.fn() })
     await loadConversations('tok')
     expect(activeConversationId.value).toBe('a')
   })
@@ -56,6 +56,7 @@ describe('useConversations', () => {
   it('creates a new conversation and selects it', () => {
     const { conversations, activeConversationId, createConversation } = useConversations({
       loadConversationsApi: vi.fn(),
+      saveConversationsApi: vi.fn(),
     })
     const conv = createConversation('New Chat', ['inst1'])
     expect(conv.name).toBe('New Chat')
@@ -68,6 +69,7 @@ describe('useConversations', () => {
   it('deletes a conversation', () => {
     const { conversations, activeConversationId, createConversation, deleteConversation } = useConversations({
       loadConversationsApi: vi.fn(),
+      saveConversationsApi: vi.fn(),
     })
     const c1 = createConversation('One', [])
     const c2 = createConversation('Two', [])
@@ -80,6 +82,7 @@ describe('useConversations', () => {
   it('re-selects first conversation if active one is deleted', () => {
     const { createConversation, activeConversationId, deleteConversation } = useConversations({
       loadConversationsApi: vi.fn(),
+      saveConversationsApi: vi.fn(),
     })
     const c1 = createConversation('One', [])
     const c2 = createConversation('Two', [])
@@ -91,15 +94,17 @@ describe('useConversations', () => {
   it('renames a conversation', () => {
     const { createConversation, renameConversation, conversations } = useConversations({
       loadConversationsApi: vi.fn(),
+      saveConversationsApi: vi.fn(),
     })
     const c = createConversation('Original', [])
     renameConversation(c.id, 'Renamed')
-    expect(conversations.value.find(x => x.id === c.id)!.name).toBe('Renamed')
+    expect(conversations.value.find((x: Conversation) => x.id === c.id)!.name).toBe('Renamed')
   })
 
   it('selects a conversation', () => {
     const { createConversation, selectConversation, activeConversationId } = useConversations({
       loadConversationsApi: vi.fn(),
+      saveConversationsApi: vi.fn(),
     })
     const c1 = createConversation('One', [])
     const c2 = createConversation('Two', [])
@@ -110,6 +115,7 @@ describe('useConversations', () => {
   it('activeConversation returns the full conversation object', () => {
     const { createConversation, activeConversation, selectConversation } = useConversations({
       loadConversationsApi: vi.fn(),
+      saveConversationsApi: vi.fn(),
     })
     const c1 = createConversation('One', [])
     createConversation('Two', [])
@@ -122,7 +128,7 @@ describe('useConversations', () => {
   it('groups conversations by date', async () => {
     const convs = makeDateGroupsSetup()
     const loadApi = vi.fn().mockResolvedValue(convs)
-    const { loadConversations, dateGroups } = useConversations({ loadConversationsApi: loadApi })
+    const { loadConversations, dateGroups } = useConversations({ loadConversationsApi: loadApi, saveConversationsApi: vi.fn() })
     await loadConversations('tok')
     const groupNames = dateGroups.value.map(g => g.label)
     expect(groupNames).toContain('Today')

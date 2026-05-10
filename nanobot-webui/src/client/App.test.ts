@@ -88,7 +88,7 @@ describe('App', () => {
     await wrapper.get('form').trigger('submit')
 
     await vi.waitFor(() => expect(wrapper.text()).toContain('Overview'))
-    expect(wrapper.text()).toContain('Chat Topics')
+    expect(wrapper.text()).toContain('Chat')
     expect(wrapper.text()).toContain('Instances')
     expect(wrapper.text()).toContain('Manage')
     expect(wrapper.find('[data-nav="logs"]').exists()).toBe(true)
@@ -246,30 +246,22 @@ describe('App', () => {
     expect(wrapper.find('[data-nav="chat"] .count').exists()).toBe(true)
   })
 
-  it('shows pinned chats section when topics exist', async () => {
-    const fetchMock = vi.fn((input: RequestInfo | URL) => {
-      const url = String(input)
-      if (url === '/api/instances') {
-        return Promise.resolve({
-          ok: true,
-          json: vi.fn().mockResolvedValue({ instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }] })
-        })
-      }
-      if (url === '/api/state/topics') {
-        return Promise.resolve({
-          ok: true,
-          json: vi.fn().mockResolvedValue({ topics: [{ id: 't1', name: 'Release checklist', selectedIds: [], transcript: { entries: [], debugEvents: [] } }] })
-        })
-      }
-      throw new Error(`unexpected: ${url}`)
-    })
-    vi.stubGlobal('fetch', fetchMock)
+  it('switches to Chat tab when Chat nav is clicked', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }] })
+      })
+    )
 
     const wrapper = mount(App)
     await wrapper.get('input').setValue('secret-token')
     await wrapper.get('form').trigger('submit')
-    await vi.waitFor(() => expect(wrapper.text()).toContain('Pinned chats'))
-    expect(wrapper.text()).toContain('Release checklist')
+    await vi.waitFor(() => expect(wrapper.text()).toContain('Overview'))
+
+    await wrapper.get('[data-nav="chat"]').trigger('click')
+    expect(wrapper.findComponent({ name: 'ChatView' }).exists()).toBe(true)
   })
 
   it('renders topbar action buttons and status pill', async () => {

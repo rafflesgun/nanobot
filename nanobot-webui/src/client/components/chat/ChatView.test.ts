@@ -123,9 +123,9 @@ describe('ChatView', () => {
     })
     await wrapper.vm.$nextTick()
 
-    expect(conv.chatMappings.alpha).toBeDefined()
-    expect(conv.chatMappings.alpha.chatId).toBe('chat-1')
-    expect(conv.chatMappings.alpha.status).toBe('attached')
+    expect(conv.chatMappings!.alpha).toBeDefined()
+    expect(conv.chatMappings!.alpha.chatId).toBe('chat-1')
+    expect(conv.chatMappings!.alpha.status).toBe('attached')
   })
 
   it('deletes a conversation', async () => {
@@ -168,10 +168,10 @@ describe('ChatView', () => {
 
     wrapper.vm.addMemberToActive('beta')
     await wrapper.vm.$nextTick()
-    expect(wrapper.vm.activeConversation.selectedIds).toContain('beta')
+    expect(wrapper.vm.activeConversation!.selectedIds).toContain('beta')
 
     wrapper.vm.removeMemberFromActive('beta')
     await wrapper.vm.$nextTick()
-    expect(wrapper.vm.activeConversation.selectedIds).not.toContain('beta')
+    expect(wrapper.vm.activeConversation!.selectedIds).not.toContain('beta')
   })
 })

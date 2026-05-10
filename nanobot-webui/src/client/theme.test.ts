@@ -2,7 +2,13 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 const dashboardFiles = [
-  'src/client/components/ChatPanel.vue',
+  'src/client/components/chat/ChatView.vue',
+  'src/client/components/chat/ConversationSidebar.vue',
+  'src/client/components/chat/ChatArea.vue',
+  'src/client/components/chat/MessageBubble.vue',
+  'src/client/components/chat/CodeBlock.vue',
+  'src/client/components/chat/ChatComposer.vue',
+  'src/client/components/chat/NewChatDialog.vue',
   'src/client/components/OverviewPanel.vue',
   'src/client/components/LogsPanel.vue',
   'src/client/components/SettingsPanel.vue',

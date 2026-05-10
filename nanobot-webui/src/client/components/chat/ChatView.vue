@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { fetchConversations, saveConversations, type ComposerMedia, type PublicInstance, type Conversation } from '../../api'
-import { appendOutboundMessage, applyChatEvent, type TranscriptEntry } from '../../chatTranscript'
+import { appendOutboundMessage, applyChatEvent, type TranscriptEntry, type TranscriptState } from '../../chatTranscript'
 import { createChatSocket, type ChatEvent, type ChatSocket } from '../../socket'
 import { useConversations } from './useConversations'
 import ConversationSidebar from './ConversationSidebar.vue'
@@ -47,7 +47,7 @@ const activeMembers = computed(() => {
 })
 
 const activeEntries = computed<TranscriptEntry[]>(() => {
-  return activeConversation.value?.transcript.entries ?? []
+  return (activeConversation.value?.transcript.entries ?? []) as TranscriptEntry[]
 })
 
 const canSend = computed(() => activeMembers.value.length > 0)
@@ -147,7 +147,7 @@ function sendMessage(text: string, media: ComposerMedia[]) {
     memberIds: activeConversation.value.selectedIds,
     chatMappings: activeConversation.value.chatMappings ?? {},
   })
-  appendOutboundMessage(activeConversation.value.transcript, text, media)
+  appendOutboundMessage(activeConversation.value.transcript as TranscriptState, text, media)
   isGenerating.value = true
   persistConversations(props.token)
 }
@@ -214,6 +214,21 @@ onMounted(() => {
 
 onUnmounted(() => {
   socket.disconnect()
+})
+
+defineExpose({
+  conversations,
+  activeConversationId,
+  activeConversation,
+  isGenerating,
+  handleCreateConversation,
+  handleDeleteConversation,
+  handleRenameConversation,
+  sendMessage,
+  stopGenerating,
+  addMemberToActive,
+  removeMemberFromActive,
+  toggleSidebar,
 })
 </script>
 
