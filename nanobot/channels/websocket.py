@@ -1265,10 +1265,20 @@ class WebSocketChannel(BaseChannel):
         # Mark intermediate agent breadcrumbs (tool-call hints, generic
         # progress strings) so WS clients can render them as subordinate
         # trace rows rather than conversational replies.
-        if msg.metadata.get("_tool_hint"):
+        if msg.metadata.get("_tool_hint") and "kind" not in payload:
             payload["kind"] = "tool_hint"
-        elif msg.metadata.get("_progress"):
+        elif msg.metadata.get("_progress") and "kind" not in payload:
             payload["kind"] = "progress"
+        meta = msg.metadata or {}
+        if meta.get("_event"):
+            payload["event"] = str(meta["_event"])
+        if meta.get("_stream_id") is not None:
+            payload["stream_id"] = meta["_stream_id"]
+        if meta.get("_turn_id") is not None:
+            payload["turn_id"] = meta["_turn_id"]
+        for key in ("kind", "name", "status", "detail", "tool_call_id", "subagent_name"):
+            if meta.get(key) is not None and key not in payload:
+                payload[key] = meta[key]
         raw = json.dumps(payload, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" ")
@@ -1286,13 +1296,19 @@ class WebSocketChannel(BaseChannel):
         if meta.get("_stream_end"):
             body: dict[str, Any] = {"event": "stream_end", "chat_id": chat_id}
         else:
+            event_name = str(meta.get("_event") or "delta")
             body = {
-                "event": "delta",
+                "event": event_name,
                 "chat_id": chat_id,
                 "text": delta,
             }
         if meta.get("_stream_id") is not None:
             body["stream_id"] = meta["_stream_id"]
+        if meta.get("_turn_id") is not None:
+            body["turn_id"] = meta["_turn_id"]
+        for key in ("kind", "name", "status", "detail", "tool_call_id", "subagent_name"):
+            if meta.get(key) is not None:
+                body[key] = meta[key]
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" stream ")
