@@ -74,6 +74,8 @@ export function publicStateInstance(instance: StateInstance) {
 }
 
 export function createStateStore(dataDir: string) {
+  let writeLock: Promise<void> = Promise.resolve()
+
   async function read(): Promise<WebuiState> {
     try {
       return normalizeState(JSON.parse(await readFile(statePath(dataDir), 'utf-8')) as Partial<WebuiState>)
@@ -85,17 +87,26 @@ export function createStateStore(dataDir: string) {
   }
 
   async function write(next: WebuiState) {
-    await mkdir(dataDir, { recursive: true })
-    await writeFile(statePath(dataDir), `${JSON.stringify(next, null, 2)}\n`)
+    await writeLock
+    let resolve: () => void
+    writeLock = new Promise<void>((r) => { resolve = r })
+    try {
+      await mkdir(dataDir, { recursive: true })
+      await writeFile(statePath(dataDir), `${JSON.stringify(next, null, 2)}\n`)
+    } finally {
+      resolve!()
+    }
   }
 
   return {
     read,
     async writeTopics(topics: StateTopic[]) {
-      await write({ ...(await read()), topics })
+      const current = await read()
+      await write({ ...current, topics })
     },
     async writeInstances(instances: StateInstance[]) {
-      await write({ ...(await read()), instances })
+      const current = await read()
+      await write({ ...current, instances })
     }
   }
 }
