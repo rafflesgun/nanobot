@@ -1,7 +1,7 @@
 import type { ChatEvent } from './socket'
 
 export type TranscriptRole = 'assistant' | 'system' | 'user'
-export type TranscriptKind = 'message' | 'tool' | 'reasoning'
+export type TranscriptKind = 'message' | 'tool' | 'reasoning' | 'subagent'
 
 export type ComposerMedia = {
   data_url: string
@@ -20,6 +20,10 @@ export type TranscriptEntry = {
   title?: string
   attachments?: ComposerMedia[]
   timestamp?: number
+  streamId?: string
+  turnId?: string
+  status?: string
+  name?: string
 }
 
 export type TranscriptState = {
@@ -27,12 +31,16 @@ export type TranscriptState = {
   debugEvents: ChatEvent[]
   nextEntryId: number
   streamingKeys: Set<string>
+  legacyParserByStream?: Record<string, { buffer: string; mode: 'message' | 'reasoning' }>
 }
 
 const HIDDEN_EVENTS = new Set(['stream_end', 'turn_end', 'chat.connecting', 'chat.connected', 'chat.disconnected', 'attached'])
 
+const THINK_OPEN = '\u003Cthink\u003E'
+const THINK_CLOSE = '\u003C/think\u003E'
+
 export function createTranscriptState(): TranscriptState {
-  return { entries: [], debugEvents: [], nextEntryId: 1, streamingKeys: new Set() }
+  return { entries: [], debugEvents: [], nextEntryId: 1, streamingKeys: new Set(), legacyParserByStream: {} }
 }
 
 function streamingKey(instanceId: string, chatId: string): string {
@@ -70,7 +78,135 @@ export function normalizeTranscriptState(state: TranscriptState): TranscriptStat
   if (!Array.isArray(state.debugEvents)) state.debugEvents = []
   if (typeof state.nextEntryId !== 'number') state.nextEntryId = 1
   ensureStreamingKeys(state)
+  if (!state.legacyParserByStream || typeof state.legacyParserByStream !== 'object') state.legacyParserByStream = {}
   return state
+}
+
+function eventKind(event: ChatEvent): TranscriptKind {
+  const name = event.event.toLowerCase()
+  if (event.kind === 'tool' || event.tool || event.tool_call || name.includes('tool')) return 'tool'
+  if (event.kind === 'subagent' || name.includes('subagent')) return 'subagent'
+  if (event.kind === 'reasoning' || event.reasoning || name.includes('reasoning')) return 'reasoning'
+  return 'message'
+}
+
+function eventStreamId(event: ChatEvent, kind: TranscriptKind): string {
+  return event.stream_id ?? `${event.instanceId}\0${event.chatId}\0${kind}`
+}
+
+function findLastStreamEntry(state: TranscriptState, event: ChatEvent, kind: TranscriptKind): TranscriptEntry | undefined {
+  const streamId = eventStreamId(event, kind)
+  return [...state.entries].reverse().find((entry) =>
+    entry.instanceId === event.instanceId &&
+    entry.chatId === event.chatId &&
+    entry.kind === kind &&
+    entry.streamId === streamId
+  )
+}
+
+function textFromEvent(event: ChatEvent) {
+  return event.text ?? event.detail ?? event.reasoning ?? event.tool_call ?? ''
+}
+
+function toolTitle(event: ChatEvent) {
+  const n = event.name ?? event.tool
+  return n ? `Tool: ${n}` : 'Tool call'
+}
+
+function subagentTitle(event: ChatEvent) {
+  const n = event.subagent_name ?? event.name
+  return n ? `Sub-agent: ${n}` : 'Sub-agent'
+}
+
+function appendStreamSegment(state: TranscriptState, event: ChatEvent, label: string, kind: TranscriptKind, text: string, eventName: string) {
+  if (!text) return
+  const streamId = eventStreamId(event, kind)
+  const legacyKey = !event.stream_id ? streamingKey(event.instanceId, event.chatId) + '\0' + kind : ''
+  const keys = ensureStreamingKeys(state)
+  const hasActiveStream = legacyKey ? keys.has(legacyKey) : true
+  const existing = hasActiveStream ? [...state.entries].reverse().find((entry) =>
+    entry.instanceId === event.instanceId &&
+    entry.chatId === event.chatId &&
+    entry.kind === kind &&
+    entry.streamId === streamId &&
+    entry.event === eventName
+  ) : undefined
+  if (existing) {
+    if (kind === 'tool' || kind === 'subagent') {
+      existing.text += `${existing.text && text ? '\n' : ''}${text}`
+    } else {
+      existing.text += text
+    }
+    return
+  }
+  if (legacyKey) keys.add(legacyKey)
+  state.entries.push({
+    id: state.nextEntryId++,
+    instanceId: event.instanceId,
+    chatId: event.chatId,
+    label,
+    role: kind === 'tool' ? 'system' : 'assistant',
+    kind,
+    event: eventName,
+    text,
+    title: kind === 'reasoning' ? 'Thinking' : kind === 'tool' ? toolTitle(event) : kind === 'subagent' ? subagentTitle(event) : undefined,
+    timestamp: Date.now(),
+    streamId,
+    turnId: event.turn_id,
+    status: event.status,
+    name: event.name ?? event.subagent_name,
+  })
+}
+
+type LegacySegment = { kind: TranscriptKind; text: string }
+
+function longestSuffixPrefix(text: string, target: string): string {
+  const max = Math.min(text.length, target.length - 1)
+  for (let len = max; len > 0; len--) {
+    const suffix = text.slice(-len)
+    if (target.startsWith(suffix)) return suffix
+  }
+  return ''
+}
+
+function parseLegacyThinkSegments(state: TranscriptState, event: ChatEvent): LegacySegment[] {
+  const key = event.stream_id ?? `${event.instanceId}\0${event.chatId}\0legacy`
+  const parsers = state.legacyParserByStream ?? (state.legacyParserByStream = {})
+  const parser = parsers[key] ?? (parsers[key] = { buffer: '', mode: 'message' as const })
+  parser.buffer += event.text ?? ''
+
+  const segments: LegacySegment[] = []
+  while (parser.buffer.length > 0) {
+    if (parser.mode === 'message') {
+      const start = parser.buffer.indexOf(THINK_OPEN)
+      if (start < 0) {
+        const partial = longestSuffixPrefix(parser.buffer, THINK_OPEN)
+        const emitText = parser.buffer.slice(0, parser.buffer.length - partial.length)
+        if (emitText) segments.push({ kind: 'message', text: emitText })
+        parser.buffer = partial
+        break
+      }
+      const before = parser.buffer.slice(0, start)
+      if (before) segments.push({ kind: 'message', text: before })
+      parser.buffer = parser.buffer.slice(start + THINK_OPEN.length)
+      parser.mode = 'reasoning'
+      continue
+    }
+
+    const end = parser.buffer.indexOf(THINK_CLOSE)
+    if (end < 0) {
+      const partial = longestSuffixPrefix(parser.buffer, THINK_CLOSE)
+      const emitText = parser.buffer.slice(0, parser.buffer.length - partial.length)
+      if (emitText) segments.push({ kind: 'reasoning', text: emitText })
+      parser.buffer = partial
+      break
+    }
+    const thought = parser.buffer.slice(0, end)
+    if (thought) segments.push({ kind: 'reasoning', text: thought })
+    parser.buffer = parser.buffer.slice(end + THINK_CLOSE.length)
+    parser.mode = 'message'
+  }
+  return segments
 }
 
 export function applyChatEvent(state: TranscriptState, event: ChatEvent, label: string) {
@@ -78,13 +214,88 @@ export function applyChatEvent(state: TranscriptState, event: ChatEvent, label: 
   state.debugEvents.push(event)
 
   if (event.event === 'stream_end' || event.event === 'turn_end') {
+    const keys = ensureStreamingKeys(state)
+    const base = streamingKey(event.instanceId, event.chatId)
+    keys.delete(base)
+    const toDelete = [...keys].filter(k => k.startsWith(base))
+    for (const k of toDelete) keys.delete(k)
     ensureStreamingKeys(state).delete(streamingKey(event.instanceId, event.chatId))
     return
   }
 
   if (HIDDEN_EVENTS.has(event.event)) return
 
-  const kind = classifyEvent(event)
+  if (event.event.endsWith('.start') || event.event.endsWith('.end')) {
+    const kind = eventKind(event)
+    const text = textFromEvent(event)
+    const streamId = eventStreamId(event, kind)
+    const existing = findLastStreamEntry(state, event, kind)
+    if (existing) {
+      if (text) existing.text += `${existing.text ? '\n' : ''}${text}`
+      existing.status = event.status ?? existing.status
+      existing.event = event.event
+      return
+    }
+    state.entries.push({
+      id: state.nextEntryId++,
+      instanceId: event.instanceId,
+      chatId: event.chatId,
+      label,
+      role: kind === 'tool' ? 'system' : 'assistant',
+      kind,
+      event: event.event,
+      text,
+      title: kind === 'reasoning' ? 'Thinking' : kind === 'tool' ? toolTitle(event) : kind === 'subagent' ? subagentTitle(event) : undefined,
+      timestamp: Date.now(),
+      streamId,
+      turnId: event.turn_id,
+      status: event.status,
+      name: event.name ?? event.subagent_name,
+    })
+    return
+  }
+
+  if (event.event.endsWith('.delta')) {
+    const kind = eventKind(event)
+    const existing = findLastStreamEntry(state, event, kind)
+    if (existing) {
+      const nextText = textFromEvent(event)
+      if (kind === 'tool' || kind === 'subagent') {
+        existing.text += `${existing.text && nextText ? '\n' : ''}${nextText}`
+      } else {
+        existing.text += nextText
+      }
+      existing.status = event.status ?? existing.status
+      return
+    }
+    state.entries.push({
+      id: state.nextEntryId++,
+      instanceId: event.instanceId,
+      chatId: event.chatId,
+      label,
+      role: kind === 'tool' ? 'system' : 'assistant',
+      kind,
+      event: event.event,
+      text: textFromEvent(event),
+      title: kind === 'reasoning' ? 'Thinking' : kind === 'tool' ? toolTitle(event) : kind === 'subagent' ? subagentTitle(event) : undefined,
+      timestamp: Date.now(),
+      streamId: eventStreamId(event, kind),
+      turnId: event.turn_id,
+      status: event.status,
+      name: event.name ?? event.subagent_name,
+    })
+    return
+  }
+
+  if (event.event === 'delta') {
+    const segments = parseLegacyThinkSegments(state, event)
+    for (const segment of segments) {
+      appendStreamSegment(state, event, label, segment.kind, segment.text, event.event)
+    }
+    return
+  }
+
+  const kind = classifyLegacyEvent(event)
   if (kind !== 'message') {
     state.entries.push({
       id: state.nextEntryId++,
@@ -95,33 +306,7 @@ export function applyChatEvent(state: TranscriptState, event: ChatEvent, label: 
       kind,
       event: event.event,
       text: textFromEvent(event),
-      title: kind === 'tool' ? toolTitle(event) : 'Reasoning',
-      timestamp: Date.now(),
-    })
-    return
-  }
-
-  if (event.event === 'delta') {
-    const key = streamingKey(event.instanceId, event.chatId)
-    const keys = ensureStreamingKeys(state)
-    if (keys.has(key)) {
-      const existing = [...state.entries].reverse().find(
-        (entry) => entry.role === 'assistant' && entry.instanceId === event.instanceId && entry.chatId === event.chatId && entry.event === 'delta'
-      )
-      if (existing) {
-        existing.text += event.text ?? ''
-        return
-      }
-    }
-    keys.add(key)
-    state.entries.push({
-      id: state.nextEntryId++,
-      instanceId: event.instanceId,
-      chatId: event.chatId,
-      label,
-      role: 'assistant',
-      event: event.event,
-      text: event.text ?? '',
+      title: kind === 'tool' ? toolTitle(event) : 'Thinking',
       timestamp: Date.now(),
     })
     return
@@ -139,17 +324,9 @@ export function applyChatEvent(state: TranscriptState, event: ChatEvent, label: 
   })
 }
 
-function classifyEvent(event: ChatEvent): TranscriptKind {
+function classifyLegacyEvent(event: ChatEvent): TranscriptKind {
   const name = event.event.toLowerCase()
   if (event.tool || event.tool_call || name.includes('tool')) return 'tool'
   if (event.reasoning || name.includes('reasoning')) return 'reasoning'
   return 'message'
-}
-
-function textFromEvent(event: ChatEvent) {
-  return event.text ?? event.detail ?? event.reasoning ?? event.tool_call ?? ''
-}
-
-function toolTitle(event: ChatEvent) {
-  return event.tool ? `Tool: ${event.tool}` : 'Tool call'
 }
