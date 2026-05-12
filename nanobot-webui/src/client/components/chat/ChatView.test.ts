@@ -184,6 +184,14 @@ describe('ChatView', () => {
     socket.emit('chat_event', {
       topicId: conv.id,
       instanceId: 'alpha',
+      event: 'turn_end',
+      chatId: 'chat-1'
+    })
+    await wrapper.vm.$nextTick()
+
+    socket.emit('chat_event', {
+      topicId: conv.id,
+      instanceId: 'alpha',
       event: 'delta',
       chatId: 'chat-1',
       text: 'second turn'
@@ -195,6 +203,47 @@ describe('ChatView', () => {
     expect(assistantEntries).toHaveLength(2)
     expect(assistantEntries[0].text).toBe('first')
     expect(assistantEntries[1].text).toBe('second turn')
+  })
+
+  it('filters message event after streaming (duplicate of delta text)', async () => {
+    const socket = new FakeSocket()
+    const wrapper = mountChatView(socket)
+    await vi.waitFor(() => expect(wrapper.vm.conversations).toBeDefined())
+
+    wrapper.vm.handleCreateConversation('Dedup', ['alpha'])
+    await wrapper.vm.$nextTick()
+
+    const conv = wrapper.vm.conversations[0]
+    socket.emit('chat_event', {
+      topicId: conv.id,
+      instanceId: 'alpha',
+      event: 'delta',
+      chatId: 'chat-1',
+      text: 'streamed text'
+    })
+    await wrapper.vm.$nextTick()
+
+    socket.emit('chat_event', {
+      topicId: conv.id,
+      instanceId: 'alpha',
+      event: 'stream_end',
+      chatId: 'chat-1'
+    })
+    await wrapper.vm.$nextTick()
+
+    socket.emit('chat_event', {
+      topicId: conv.id,
+      instanceId: 'alpha',
+      event: 'message',
+      chatId: 'chat-1',
+      text: 'streamed text'
+    })
+    await wrapper.vm.$nextTick()
+
+    const entries = conv.transcript.entries as any[]
+    const assistantEntries = entries.filter((e: any) => e.role === 'assistant')
+    expect(assistantEntries).toHaveLength(1)
+    expect(assistantEntries[0].text).toBe('streamed text')
   })
 
   it('routes attached events to correct conversation chatMappings', async () => {

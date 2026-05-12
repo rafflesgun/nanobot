@@ -53,11 +53,26 @@ export function appendOutboundMessage(state: TranscriptState, text: string, atta
   })
 }
 
+function ensureStreamingKeys(state: TranscriptState): Set<string> {
+  if (state.streamingKeys instanceof Set) return state.streamingKeys
+  state.streamingKeys = new Set()
+  return state.streamingKeys
+}
+
+export function normalizeTranscriptState(state: TranscriptState): TranscriptState {
+  if (!Array.isArray(state.entries)) state.entries = []
+  if (!Array.isArray(state.debugEvents)) state.debugEvents = []
+  if (typeof state.nextEntryId !== 'number') state.nextEntryId = 1
+  ensureStreamingKeys(state)
+  return state
+}
+
 export function applyChatEvent(state: TranscriptState, event: ChatEvent, label: string) {
+  if (!Array.isArray(state.debugEvents)) state.debugEvents = []
   state.debugEvents.push(event)
 
   if (event.event === 'stream_end' || event.event === 'turn_end') {
-    ;(state.streamingKeys ?? (state.streamingKeys = new Set())).delete(streamingKey(event.instanceId, event.chatId))
+    ensureStreamingKeys(state).delete(streamingKey(event.instanceId, event.chatId))
     return
   }
 
@@ -82,7 +97,7 @@ export function applyChatEvent(state: TranscriptState, event: ChatEvent, label: 
 
   if (event.event === 'delta') {
     const key = streamingKey(event.instanceId, event.chatId)
-    const keys = state.streamingKeys ?? (state.streamingKeys = new Set())
+    const keys = ensureStreamingKeys(state)
     if (keys.has(key)) {
       const existing = state.entries.find(
         (entry) => entry.role === 'assistant' && entry.instanceId === event.instanceId && entry.chatId === event.chatId && entry.event === 'delta'
@@ -92,7 +107,7 @@ export function applyChatEvent(state: TranscriptState, event: ChatEvent, label: 
         return
       }
     }
-    state.streamingKeys.add(key)
+    keys.add(key)
     state.entries.push({
       id: state.nextEntryId++,
       instanceId: event.instanceId,

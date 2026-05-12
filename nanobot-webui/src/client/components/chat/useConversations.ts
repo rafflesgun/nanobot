@@ -1,5 +1,6 @@
 import { ref, computed, type Ref } from 'vue'
 import type { Conversation } from '../../api'
+import { normalizeTranscriptState } from '../../chatTranscript'
 
 export type DateGroup = {
   label: string
@@ -91,7 +92,11 @@ export function useConversations(options: UseConversationsOptions) {
   const dateGroups = computed(() => groupByDate(conversations.value))
 
   async function loadConversations(token: string) {
-    conversations.value = await options.loadConversationsApi(token)
+    const loaded = await options.loadConversationsApi(token)
+    for (const conv of loaded) {
+      if (conv.transcript) normalizeTranscriptState(conv.transcript as any)
+    }
+    conversations.value = loaded
     if (conversations.value.length > 0) {
       activeConversationId.value = conversations.value[0].id
     } else {
@@ -104,7 +109,7 @@ export function useConversations(options: UseConversationsOptions) {
       id: generateId(),
       name,
       selectedIds: memberIds,
-      transcript: { entries: [], debugEvents: [] },
+      transcript: { entries: [], debugEvents: [], nextEntryId: 1 },
     }
     conversations.value = [conv, ...conversations.value]
     activeConversationId.value = conv.id

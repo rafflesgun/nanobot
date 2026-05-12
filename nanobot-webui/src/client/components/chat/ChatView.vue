@@ -30,6 +30,7 @@ const showAddMemberDialog = ref(false)
 const statuses = ref<Record<string, ConnectionStatus>>({})
 const isGenerating = ref(false)
 const activeGeneratingIds = ref<Set<string>>(new Set())
+const completedStreamKeys = new Set<string>()
 let generatingTimer: ReturnType<typeof setTimeout> | null = null
 const GENERATING_TIMEOUT_MS = 120_000
 
@@ -152,7 +153,25 @@ function handleChatEvent(event: ChatEvent) {
     activeGeneratingIds.value.add(event.instanceId)
     setGenerating(true)
   }
-  if (event.event === 'stream_end' || event.event === 'turn_end' || event.event === 'message') {
+  if (event.event === 'stream_end') {
+    const key = `${event.instanceId}\0${event.chatId}`
+    completedStreamKeys.add(key)
+    activeGeneratingIds.value.delete(event.instanceId)
+    if (activeGeneratingIds.value.size === 0) {
+      setGenerating(false)
+    }
+  }
+  if (event.event === 'turn_end') {
+    const key = `${event.instanceId}\0${event.chatId}`
+    completedStreamKeys.delete(key)
+    activeGeneratingIds.value.delete(event.instanceId)
+    if (activeGeneratingIds.value.size === 0) {
+      setGenerating(false)
+    }
+  }
+  if (event.event === 'message') {
+    const key = `${event.instanceId}\0${event.chatId}`
+    completedStreamKeys.delete(key)
     activeGeneratingIds.value.delete(event.instanceId)
     if (activeGeneratingIds.value.size === 0) {
       setGenerating(false)
@@ -163,17 +182,9 @@ function handleChatEvent(event: ChatEvent) {
 }
 
 function isDuplicateEvent(conv: Conversation, event: ChatEvent): boolean {
-  if (event.event === 'delta') {
-    const keys = (conv.transcript as any).streamingKeys as Set<string> | undefined
-    const key = `${event.instanceId}\0${event.chatId}`
-    if (keys?.has(key)) return false
-    return false
-  }
   if (event.event === 'message') {
-    const keys = (conv.transcript as any).streamingKeys as Set<string> | undefined
     const key = `${event.instanceId}\0${event.chatId}`
-    if (keys?.has(key)) return true
-    return false
+    return completedStreamKeys.has(key)
   }
   return false
 }
@@ -195,6 +206,7 @@ function sendMessage(text: string, media: ComposerMedia[]) {
 function stopGenerating() {
   setGenerating(false)
   activeGeneratingIds.value.clear()
+  completedStreamKeys.clear()
 }
 
 async function handleCreateConversation(name: string, memberIds: string[]) {
@@ -255,6 +267,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (generatingTimer) clearTimeout(generatingTimer)
+  completedStreamKeys.clear()
   socket.disconnect()
 })
 

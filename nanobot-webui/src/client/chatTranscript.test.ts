@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { appendOutboundMessage, applyChatEvent, createTranscriptState } from './chatTranscript'
+import { appendOutboundMessage, applyChatEvent, createTranscriptState, normalizeTranscriptState } from './chatTranscript'
 
 describe('chatTranscript', () => {
   it('merges delta chunks into one assistant entry per instance and chat', () => {
@@ -93,6 +93,16 @@ describe('chatTranscript', () => {
         title: 'Reasoning',
         timestamp: expect.any(Number)
       }
+    ])
+  })
+
+  it('handles deserialized state where streamingKeys is not a Set', () => {
+    const state = normalizeTranscriptState({ entries: [], debugEvents: [], nextEntryId: 1, streamingKeys: {} as any } as any)
+    expect(state.streamingKeys instanceof Set).toBe(true)
+
+    applyChatEvent(state, { instanceId: 'alpha', event: 'delta', chatId: 'c1', text: 'works' }, 'Alpha')
+    expect(state.entries).toEqual([
+      { id: 1, instanceId: 'alpha', chatId: 'c1', label: 'Alpha', role: 'assistant', event: 'delta', text: 'works', timestamp: expect.any(Number) }
     ])
   })
 })
