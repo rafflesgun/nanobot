@@ -165,10 +165,10 @@ function stopGenerating() {
   activeGeneratingIds.value.clear()
 }
 
-function handleCreateConversation(name: string, memberIds: string[]) {
+async function handleCreateConversation(name: string, memberIds: string[]) {
   const conv = createConversation(name, memberIds)
   ensureConnections(conv)
-  persistConversations(props.token)
+  await persistConversations(props.token)
   showNewChatDialog.value = false
 }
 

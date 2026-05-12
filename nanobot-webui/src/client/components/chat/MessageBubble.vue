@@ -17,6 +17,8 @@ const copied = ref(false)
 const isUser = computed(() => props.entry.role === 'user')
 const isTool = computed(() => props.entry.kind === 'tool')
 const isReasoning = computed(() => props.entry.kind === 'reasoning')
+const isSystem = computed(() => props.entry.role === 'system' && !isTool.value && !isReasoning.value)
+const isEmpty = computed(() => !props.entry.text.trim())
 
 function isStreaming(): boolean {
   return props.entry.text.endsWith('▍')
@@ -90,8 +92,12 @@ function parsedBlocks(): Array<{ type: 'html' | 'code'; content: string; languag
 </script>
 
 <template>
-  <div class="message" :class="{ 'is-user': isUser }">
+  <div v-if="!isEmpty" class="message" :class="{ 'is-user': isUser }">
     <div v-if="isUser" class="user-bubble">
+      <div class="bubble-header">
+        <div class="user-avatar">Y</div>
+        <span class="bubble-name">You</span>
+      </div>
       <div class="bubble-content">{{ displayText() }}</div>
       <div v-if="entry.attachments?.length" class="attachments">
         <span v-for="(att, i) in entry.attachments" :key="i" class="attachment-chip">
@@ -104,10 +110,17 @@ function parsedBlocks(): Array<{ type: 'html' | 'code'; content: string; languag
       <ToolCallBlock :title="entry.title ?? (isTool ? 'Tool call' : 'Reasoning')" :text="entry.text" />
     </div>
 
-    <div v-else class="bot-message">
-      <div class="bot-avatar" :style="{ background: avatarColor() }">{{ avatarLabel() }}</div>
-      <div class="bot-content">
-        <div class="bot-name">{{ instance?.name ?? entry.label }}</div>
+    <div v-else-if="isSystem" class="system-message">
+      <Icon icon="mdi:information-outline" :width="14" />
+      <span>{{ displayText() }}</span>
+    </div>
+
+    <div v-else class="bot-bubble">
+      <div class="bubble-header">
+        <div class="bot-avatar" :style="{ background: avatarColor() }">{{ avatarLabel() }}</div>
+        <span class="bubble-name">{{ instance?.name ?? entry.label }}</span>
+      </div>
+      <div class="bubble-content">
         <div class="markdown-body">
           <template v-for="(block, i) in parsedBlocks()" :key="i">
             <div v-if="block.type === 'html'" v-html="block.content" />
@@ -115,13 +128,10 @@ function parsedBlocks(): Array<{ type: 'html' | 'code'; content: string; languag
           </template>
           <span v-if="isStreaming()" class="streaming-cursor">▍</span>
         </div>
-        <div class="message-actions">
-          <button class="action-btn" @click="copyMarkdown">
-            <Icon :icon="copied ? 'mdi:check' : 'mdi:content-copy'" :width="14" />
-            <span>{{ copied ? 'Copied' : 'Copy' }}</span>
-          </button>
-        </div>
       </div>
+      <button class="copy-btn" @click="copyMarkdown">
+        <Icon :icon="copied ? 'mdi:check' : 'mdi:content-copy'" :width="14" />
+      </button>
     </div>
   </div>
 </template>
@@ -136,16 +146,102 @@ function parsedBlocks(): Array<{ type: 'html' | 'code'; content: string; languag
   justify-content: flex-end;
 }
 
-.user-bubble {
+.user-bubble,
+.bot-bubble {
   max-width: 70%;
+  min-width: 80px;
 }
 
-.bubble-content {
+.bubble-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.bubble-name {
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.user-bubble .bubble-name {
+  color: var(--accent);
+}
+
+.bot-bubble .bubble-name {
+  color: var(--accent);
+}
+
+.user-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  background: oklch(64% 0.18 255);
+}
+
+.user-bubble .bubble-content {
   background: oklch(64% 0.18 255 / 0.18);
   border-radius: 1rem 1rem 0.25rem 1rem;
   padding: 0.65rem 0.9rem;
   white-space: pre-wrap;
   font-size: 0.88rem;
+}
+
+.bot-bubble .bubble-content {
+  background: oklch(23% 0.014 255);
+  border-radius: 1rem 1rem 1rem 0.25rem;
+  padding: 0.65rem 0.9rem;
+  font-size: 0.88rem;
+  position: relative;
+}
+
+.bot-bubble {
+  position: relative;
+}
+
+.bot-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.15s;
+}
+
+.bot-bubble:hover .copy-btn {
+  opacity: 1;
+}
+
+.copy-btn:hover {
+  color: var(--fg);
+  background: var(--surface-2);
 }
 
 .attachments {
@@ -164,40 +260,20 @@ function parsedBlocks(): Array<{ type: 'html' | 'code'; content: string; languag
 }
 
 .tool-wrapper {
-  padding-left: 38px;
+  padding-left: 32px;
 }
 
-.bot-message {
+.system-message {
   display: flex;
-  gap: 10px;
-  max-width: 90%;
-}
-
-.bot-avatar {
-  width: 28px;
-  height: 28px;
-  border-radius: 4px;
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-  color: #fff;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.bot-content {
-  min-width: 0;
-}
-
-.bot-name {
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: var(--accent);
-  margin-bottom: 2px;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  max-width: 70%;
 }
 
 .markdown-body {
-  font-size: 0.88rem;
   line-height: 1.6;
 }
 
@@ -223,36 +299,6 @@ function parsedBlocks(): Array<{ type: 'html' | 'code'; content: string; languag
 .streaming-cursor {
   animation: blink 1s step-end infinite;
   color: var(--accent);
-}
-
-.message-actions {
-  display: flex;
-  gap: 4px;
-  margin-top: 6px;
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-
-.bot-message:hover .message-actions {
-  opacity: 1;
-}
-
-.action-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--muted);
-  font-size: 0.72rem;
-  cursor: pointer;
-}
-
-.action-btn:hover {
-  color: var(--fg);
-  background: var(--surface-2);
 }
 
 @keyframes blink {

@@ -27,7 +27,7 @@ export type TranscriptState = {
   nextEntryId: number
 }
 
-const HIDDEN_EVENTS = new Set(['stream_end', 'turn_end', 'chat.connecting', 'chat.connected', 'chat.disconnected'])
+const HIDDEN_EVENTS = new Set(['stream_end', 'turn_end', 'chat.connecting', 'chat.connected', 'chat.disconnected', 'attached'])
 
 export function createTranscriptState(): TranscriptState {
   return { entries: [], debugEvents: [], nextEntryId: 1 }

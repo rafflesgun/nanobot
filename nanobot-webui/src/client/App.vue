@@ -115,6 +115,9 @@ function logout() {
               </span>
             </div>
           </div>
+          <button class="collapse-expand-btn" aria-label="Expand sidebar" @click="sidebarCollapsed = !sidebarCollapsed">
+            <Icon :icon="sidebarCollapsed ? 'mdi:chevron-right' : 'mdi:chevron-left'" :width="16" />
+          </button>
         </div>
       </aside>
 
@@ -361,6 +364,7 @@ label {
 
 .sidebar.is-collapsed {
   overflow: hidden;
+  align-items: center;
 }
 
 .sidebar.is-collapsed .brand-text,
@@ -368,7 +372,8 @@ label {
 .sidebar.is-collapsed .nav-label,
 .sidebar.is-collapsed .count,
 .sidebar.is-collapsed .connection-card,
-.sidebar.is-collapsed .sidebar-bottom .connection-instances {
+.sidebar.is-collapsed .sidebar-bottom .connection-instances,
+.sidebar.is-collapsed .brand .icon-button {
   display: none;
 }
 
@@ -394,6 +399,10 @@ label {
 
 .sidebar.is-collapsed .sidebar-bottom {
   padding: 12px 8px;
+}
+
+.sidebar.is-collapsed .collapse-expand-btn {
+  display: grid;
 }
 
 .brand {
@@ -500,6 +509,26 @@ label {
   margin-block-start: auto;
   padding: 12px 10px;
   border-block-start: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.collapse-expand-btn {
+  display: none;
+  width: 100%;
+  height: 32px;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.collapse-expand-btn:hover {
+  color: var(--fg);
+  background: var(--surface);
 }
 
 .connection-card {

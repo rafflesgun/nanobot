@@ -96,46 +96,44 @@ function onPaste(e: ClipboardEvent) {
       </span>
     </div>
     <div class="composer-input" :class="{ multiline: isMultiline }">
+      <label class="attach-button">
+        <Icon icon="mdi:plus-circle-outline" :width="22" />
+        <input
+          type="file"
+          multiple
+          data-testid="attachment-input"
+          @change="onFileSelect"
+        />
+      </label>
       <textarea
         ref="textarea"
         v-model="message"
         class="chat-textarea"
         rows="1"
-        :placeholder="disabled ? 'Add at least one bot to start chatting' : 'Message... (Enter to send, Shift+Enter for new line)'"
+        :placeholder="disabled ? 'Add at least one bot to start chatting' : 'Message...'"
         :disabled="disabled"
         data-testid="chat-input"
         @keydown="handleKeydown"
         @paste="onPaste"
       />
-      <div class="composer-actions">
-        <label class="attach-button">
-          <Icon icon="mdi:plus-circle-outline" :width="22" />
-          <input
-            type="file"
-            multiple
-            data-testid="attachment-input"
-            @change="onFileSelect"
-          />
-        </label>
-        <button
-          v-if="isGenerating"
-          class="send-button stop"
-          data-testid="stop-button"
-          @click="emit('stop')"
-        >
-          <Icon icon="mdi:stop-circle" :width="22" />
-        </button>
-        <button
-          v-else
-          class="send-button"
-          :class="{ disabled: disabled || (!message.trim() && !pendingAttachments.length) }"
-          data-testid="send-button"
-          :disabled="disabled"
-          @click="send"
-        >
-          <Icon icon="mdi:arrow-up" :width="20" />
-        </button>
-      </div>
+      <button
+        v-if="isGenerating"
+        class="send-button stop"
+        data-testid="stop-button"
+        @click="emit('stop')"
+      >
+        <Icon icon="mdi:stop-circle" :width="20" />
+      </button>
+      <button
+        v-else
+        class="send-button"
+        :class="{ disabled: disabled || (!message.trim() && !pendingAttachments.length) }"
+        data-testid="send-button"
+        :disabled="disabled"
+        @click="send"
+      >
+        <Icon icon="mdi:arrow-up" :width="18" />
+      </button>
     </div>
   </div>
 </template>
@@ -171,11 +169,11 @@ function onPaste(e: ClipboardEvent) {
 .composer-input {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 0;
   border: 2px solid var(--border);
   border-radius: 24px;
   background: oklch(19% 0.014 255 / 0.88);
-  padding: 6px 8px 6px 4px;
+  padding: 4px 6px 4px 4px;
   transition: border-color 150ms;
 }
 
@@ -196,7 +194,7 @@ function onPaste(e: ClipboardEvent) {
   font-family: inherit;
   font-size: 0.88rem;
   line-height: 1.5;
-  padding: 6px 4px 6px 12px;
+  padding: 8px 8px;
   resize: none;
   outline: none;
   min-height: 24px;
@@ -207,18 +205,12 @@ function onPaste(e: ClipboardEvent) {
   color: var(--muted);
 }
 
-.composer-actions {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  flex-shrink: 0;
-}
-
 .attach-button {
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
   border-radius: 50%;
   color: var(--muted);
   cursor: pointer;
@@ -237,11 +229,13 @@ function onPaste(e: ClipboardEvent) {
   place-items: center;
   width: 32px;
   height: 32px;
+  flex-shrink: 0;
   border: none;
   border-radius: 50%;
   background: var(--accent);
   color: oklch(99% 0 0);
   cursor: pointer;
+  margin-left: 4px;
 }
 
 .send-button.disabled {
