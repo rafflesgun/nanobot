@@ -30,6 +30,20 @@ const showAddMemberDialog = ref(false)
 const statuses = ref<Record<string, ConnectionStatus>>({})
 const isGenerating = ref(false)
 const activeGeneratingIds = ref<Set<string>>(new Set())
+let generatingTimer: ReturnType<typeof setTimeout> | null = null
+const GENERATING_TIMEOUT_MS = 120_000
+
+function setGenerating(value: boolean) {
+  isGenerating.value = value
+  if (generatingTimer) { clearTimeout(generatingTimer); generatingTimer = null }
+  if (value) {
+    generatingTimer = setTimeout(() => {
+      isGenerating.value = false
+      activeGeneratingIds.value.clear()
+      generatingTimer = null
+    }, GENERATING_TIMEOUT_MS)
+  }
+}
 
 const {
   conversations, activeConversationId, activeConversation, dateGroups,
@@ -136,12 +150,12 @@ function handleChatEvent(event: ChatEvent) {
 
   if (event.event === 'delta') {
     activeGeneratingIds.value.add(event.instanceId)
-    isGenerating.value = true
+    setGenerating(true)
   }
-  if (event.event === 'stream_end' || event.event === 'turn_end') {
+  if (event.event === 'stream_end' || event.event === 'turn_end' || event.event === 'message') {
     activeGeneratingIds.value.delete(event.instanceId)
     if (activeGeneratingIds.value.size === 0) {
-      isGenerating.value = false
+      setGenerating(false)
     }
   }
 
@@ -153,18 +167,13 @@ function isDuplicateEvent(conv: Conversation, event: ChatEvent): boolean {
     const keys = (conv.transcript as any).streamingKeys as Set<string> | undefined
     const key = `${event.instanceId}\0${event.chatId}`
     if (keys?.has(key)) return false
-    const entries = conv.transcript.entries
-    const last = entries[entries.length - 1]
-    if (last && last.role === 'assistant' && last.instanceId === event.instanceId && last.chatId === event.chatId && last.event === 'delta') {
-      return true
-    }
     return false
   }
   if (event.event === 'message') {
-    const text = event.text ?? ''
-    if (!text) return false
-    const entries = conv.transcript.entries
-    return entries.some(e => e.role === 'assistant' && e.instanceId === event.instanceId && e.chatId === event.chatId && e.text === text)
+    const keys = (conv.transcript as any).streamingKeys as Set<string> | undefined
+    const key = `${event.instanceId}\0${event.chatId}`
+    if (keys?.has(key)) return true
+    return false
   }
   return false
 }
@@ -179,12 +188,12 @@ function sendMessage(text: string, media: ComposerMedia[]) {
     chatMappings: activeConversation.value.chatMappings ?? {},
   })
   appendOutboundMessage(activeConversation.value.transcript as TranscriptState, text, media)
-  isGenerating.value = true
+  setGenerating(true)
   persistConversations(props.token)
 }
 
 function stopGenerating() {
-  isGenerating.value = false
+  setGenerating(false)
   activeGeneratingIds.value.clear()
 }
 
@@ -245,6 +254,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (generatingTimer) clearTimeout(generatingTimer)
   socket.disconnect()
 })
 

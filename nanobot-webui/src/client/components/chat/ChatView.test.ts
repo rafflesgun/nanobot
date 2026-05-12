@@ -128,6 +128,75 @@ describe('ChatView', () => {
     expect(wrapper.vm.isGenerating).toBe(false)
   })
 
+  it('clears isGenerating on message event (non-streaming response)', async () => {
+    const socket = new FakeSocket()
+    const wrapper = mountChatView(socket)
+    await vi.waitFor(() => expect(wrapper.vm.conversations).toBeDefined())
+
+    wrapper.vm.handleCreateConversation('NonStream', ['alpha'])
+    await wrapper.vm.$nextTick()
+
+    const conv = wrapper.vm.conversations[0]
+    conv.chatMappings = { alpha: { chatId: 'chat-1', status: 'attached' } }
+    await wrapper.vm.$nextTick()
+
+    wrapper.vm.sendMessage('hello', [])
+    await wrapper.vm.$nextTick()
+    expect(wrapper.vm.isGenerating).toBe(true)
+
+    socket.emit('chat_event', {
+      topicId: conv.id,
+      instanceId: 'alpha',
+      event: 'message',
+      chatId: 'chat-1',
+      text: 'response'
+    })
+    await wrapper.vm.$nextTick()
+    expect(wrapper.vm.isGenerating).toBe(false)
+  })
+
+  it('accepts delta events for a new turn after stream_end', async () => {
+    const socket = new FakeSocket()
+    const wrapper = mountChatView(socket)
+    await vi.waitFor(() => expect(wrapper.vm.conversations).toBeDefined())
+
+    wrapper.vm.handleCreateConversation('Multi', ['alpha'])
+    await wrapper.vm.$nextTick()
+
+    const conv = wrapper.vm.conversations[0]
+    socket.emit('chat_event', {
+      topicId: conv.id,
+      instanceId: 'alpha',
+      event: 'delta',
+      chatId: 'chat-1',
+      text: 'first'
+    })
+    await wrapper.vm.$nextTick()
+
+    socket.emit('chat_event', {
+      topicId: conv.id,
+      instanceId: 'alpha',
+      event: 'stream_end',
+      chatId: 'chat-1'
+    })
+    await wrapper.vm.$nextTick()
+
+    socket.emit('chat_event', {
+      topicId: conv.id,
+      instanceId: 'alpha',
+      event: 'delta',
+      chatId: 'chat-1',
+      text: 'second turn'
+    })
+    await wrapper.vm.$nextTick()
+
+    const entries = conv.transcript.entries as any[]
+    const assistantEntries = entries.filter((e: any) => e.role === 'assistant')
+    expect(assistantEntries).toHaveLength(2)
+    expect(assistantEntries[0].text).toBe('first')
+    expect(assistantEntries[1].text).toBe('second turn')
+  })
+
   it('routes attached events to correct conversation chatMappings', async () => {
     const socket = new FakeSocket()
     const wrapper = mountChatView(socket)
