@@ -53,8 +53,14 @@ export function appendOutboundMessage(state: TranscriptState, text: string, atta
   })
 }
 
+function isSetLike(value: unknown): value is Set<string> {
+  if (value instanceof Set) return true
+  if (value && typeof value === 'object' && typeof (value as any).has === 'function' && typeof (value as any).add === 'function' && typeof (value as any).delete === 'function') return true
+  return false
+}
+
 function ensureStreamingKeys(state: TranscriptState): Set<string> {
-  if (state.streamingKeys instanceof Set) return state.streamingKeys
+  if (isSetLike(state.streamingKeys)) return state.streamingKeys
   state.streamingKeys = new Set()
   return state.streamingKeys
 }
@@ -99,7 +105,7 @@ export function applyChatEvent(state: TranscriptState, event: ChatEvent, label: 
     const key = streamingKey(event.instanceId, event.chatId)
     const keys = ensureStreamingKeys(state)
     if (keys.has(key)) {
-      const existing = state.entries.find(
+      const existing = [...state.entries].reverse().find(
         (entry) => entry.role === 'assistant' && entry.instanceId === event.instanceId && entry.chatId === event.chatId && entry.event === 'delta'
       )
       if (existing) {

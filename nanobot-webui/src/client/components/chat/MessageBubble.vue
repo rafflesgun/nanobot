@@ -13,6 +13,7 @@ const props = defineProps<{
 }>()
 
 const copied = ref(false)
+const reasoningExpanded = ref(false)
 
 const isUser = computed(() => props.entry.role === 'user')
 const isTool = computed(() => props.entry.kind === 'tool')
@@ -116,8 +117,19 @@ function parsedBlocks(): Array<{ type: 'html' | 'code'; content: string; languag
       </div>
     </div>
 
-    <div v-else-if="isTool || isReasoning" class="tool-wrapper">
-      <ToolCallBlock :title="entry.title ?? (isTool ? 'Tool call' : 'Reasoning')" :text="entry.text" />
+    <div v-else-if="isReasoning" class="reasoning-wrapper">
+      <button class="reasoning-header" @click="reasoningExpanded = !reasoningExpanded">
+        <Icon icon="mdi:lightbulb-outline" :width="14" class="icon-reasoning" />
+        <span class="reasoning-title">Thinking</span>
+        <Icon :icon="reasoningExpanded ? 'mdi:chevron-up' : 'mdi:chevron-down'" :width="14" />
+      </button>
+      <div v-if="reasoningExpanded" class="reasoning-body">
+        <pre>{{ entry.text }}</pre>
+      </div>
+    </div>
+
+    <div v-else-if="isTool" class="tool-wrapper">
+      <ToolCallBlock :title="entry.title ?? 'Tool call'" :text="entry.text" />
     </div>
 
     <div v-else-if="isSystem" class="system-message">
@@ -295,6 +307,53 @@ function parsedBlocks(): Array<{ type: 'html' | 'code'; content: string; languag
 
 .tool-wrapper {
   padding-left: 32px;
+}
+
+.reasoning-wrapper {
+  margin: 0.25rem 0;
+  padding-left: 32px;
+}
+
+.reasoning-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border: none;
+  background: transparent;
+  color: oklch(56% 0.02 255);
+  font-size: 0.76rem;
+  cursor: pointer;
+  padding: 3px 0;
+}
+
+.reasoning-header:hover {
+  color: oklch(66% 0.02 255);
+}
+
+.icon-reasoning {
+  opacity: 0.5;
+}
+
+.reasoning-title {
+  font-style: italic;
+}
+
+.reasoning-body {
+  padding: 6px 10px;
+  margin-top: 2px;
+  border-left: 2px solid oklch(30% 0.01 255);
+  border-radius: 0 4px 4px 0;
+  background: oklch(17% 0.008 255 / 0.5);
+}
+
+.reasoning-body pre {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: oklch(56% 0.02 255);
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
 }
 
 .system-message {

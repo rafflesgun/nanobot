@@ -4,6 +4,7 @@ import App from './App.vue'
 
 describe('App', () => {
   afterEach(() => {
+    sessionStorage.clear()
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
   })

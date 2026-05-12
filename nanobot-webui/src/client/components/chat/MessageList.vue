@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue'
+import { ref, watch, nextTick, onMounted } from 'vue'
 import MessageBubble from './MessageBubble.vue'
 import type { TranscriptEntry } from '../../chatTranscript'
 import type { PublicInstance } from '../../api'
@@ -34,6 +34,10 @@ watch(
     }
   }
 )
+
+onMounted(() => {
+  nextTick(scrollToBottom)
+})
 </script>
 
 <template>

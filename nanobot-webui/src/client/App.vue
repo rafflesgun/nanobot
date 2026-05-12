@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { Icon } from '@iconify/vue'
 import { fetchInstances, type PublicInstance } from './api'
 import OverviewPanel from './components/OverviewPanel.vue'
@@ -8,7 +8,7 @@ import InstancesPanel from './components/InstancesPanel.vue'
 import LogsPanel from './components/LogsPanel.vue'
 import ManagePanel from './components/ManagePanel.vue'
 
-const token = ref('')
+const token = ref(sessionStorage.getItem('nb_token') ?? '')
 const instances = ref<PublicInstance[]>([])
 const error = ref('')
 const authenticated = ref(false)
@@ -43,7 +43,7 @@ async function login() {
   try {
     instances.value = await fetchInstances(token.value)
     authenticated.value = true
-    activeTab.value = 'overview'
+    sessionStorage.setItem('nb_token', token.value)
   } catch (err) {
     authenticated.value = false
     instances.value = []
@@ -59,7 +59,33 @@ function logout() {
   error.value = ''
   authenticated.value = false
   activeTab.value = 'overview'
+  sessionStorage.removeItem('nb_token')
+  sessionStorage.removeItem('nb_tab')
 }
+
+watch(activeTab, (tab) => {
+  sessionStorage.setItem('nb_tab', tab)
+})
+
+onMounted(async () => {
+  const savedToken = sessionStorage.getItem('nb_token')
+  const savedTab = sessionStorage.getItem('nb_tab')
+  if (savedToken) {
+    token.value = savedToken
+    loading.value = true
+    try {
+      instances.value = await fetchInstances(savedToken)
+      authenticated.value = true
+      if (savedTab) activeTab.value = savedTab as any
+    } catch {
+      sessionStorage.removeItem('nb_token')
+      sessionStorage.removeItem('nb_tab')
+      token.value = ''
+    } finally {
+      loading.value = false
+    }
+  }
+})
 </script>
 
 <template>

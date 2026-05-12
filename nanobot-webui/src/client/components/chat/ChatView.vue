@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { fetchConversations, saveConversations, type ComposerMedia, type PublicInstance, type Conversation } from '../../api'
 import { appendOutboundMessage, applyChatEvent, type TranscriptEntry, type TranscriptState } from '../../chatTranscript'
 import { createChatSocket, type ChatEvent, type ChatSocket } from '../../socket'
@@ -263,6 +263,12 @@ onMounted(() => {
       ensureConnections(activeConversation.value)
     }
   })
+})
+
+watch(() => props.instances.length, (newLen, oldLen) => {
+  if (newLen > 0 && oldLen === 0 && activeConversation.value) {
+    ensureConnections(activeConversation.value)
+  }
 })
 
 onUnmounted(() => {
