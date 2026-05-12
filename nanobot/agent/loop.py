@@ -1302,7 +1302,8 @@ class AgentLoop:
                 try:
                     on_stream = on_stream_end = None
                     if msg.metadata.get("_wants_stream"):
-                        stream_base_id = f"{msg.session_key}:{time.time_ns()}"
+                        turn_id = f"{msg.session_key}:{time.time_ns()}"
+                        stream_base_id = turn_id
                         stream_segment = 0
 
                         def _current_stream_id() -> str:
@@ -1312,6 +1313,9 @@ class AgentLoop:
                             meta = dict(msg.metadata or {})
                             meta["_stream_delta"] = True
                             meta["_stream_id"] = _current_stream_id()
+                            meta["_turn_id"] = turn_id
+                            meta["_event"] = "message.delta"
+                            meta["kind"] = "message"
                             await self.bus.publish_outbound(
                                 OutboundMessage(
                                     channel=msg.channel,
@@ -1327,6 +1331,7 @@ class AgentLoop:
                             meta["_stream_end"] = True
                             meta["_resuming"] = resuming
                             meta["_stream_id"] = _current_stream_id()
+                            meta["_turn_id"] = turn_id
                             await self.bus.publish_outbound(
                                 OutboundMessage(
                                     channel=msg.channel,
