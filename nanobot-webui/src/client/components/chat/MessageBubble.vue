@@ -185,6 +185,10 @@ function parsedBlocks(): Array<{ type: 'html' | 'code'; content: string; languag
   background: oklch(64% 0.18 255);
 }
 
+.user-bubble .bubble-header {
+  flex-direction: row-reverse;
+}
+
 .user-bubble .bubble-content {
   background: oklch(64% 0.18 255 / 0.18);
   border-radius: 1rem 1rem 0.25rem 1rem;
