@@ -42,6 +42,12 @@ function avatarColor(): string {
   return colors[sum % colors.length]
 }
 
+function formatTime(ts?: number): string {
+  if (!ts) return ''
+  const d = new Date(ts)
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
 async function copyToClipboard(text: string) {
   try {
     await navigator.clipboard.writeText(text)
@@ -104,6 +110,10 @@ function parsedBlocks(): Array<{ type: 'html' | 'code'; content: string; languag
           {{ att.name ?? 'attachment' }}
         </span>
       </div>
+      <div class="bubble-footer">
+        <span></span>
+        <span v-if="entry.timestamp" class="timestamp">{{ formatTime(entry.timestamp) }}</span>
+      </div>
     </div>
 
     <div v-else-if="isTool || isReasoning" class="tool-wrapper">
@@ -128,10 +138,13 @@ function parsedBlocks(): Array<{ type: 'html' | 'code'; content: string; languag
           </template>
           <span v-if="isStreaming()" class="streaming-cursor">▍</span>
         </div>
-        <div class="message-actions">
-          <button class="copy-btn" @click="copyMarkdown">
-            <Icon :icon="copied ? 'mdi:check' : 'mdi:content-copy'" :width="14" />
-          </button>
+        <div class="bubble-footer">
+          <div class="message-actions">
+            <button class="copy-btn" @click="copyMarkdown">
+              <Icon :icon="copied ? 'mdi:check' : 'mdi:content-copy'" :width="14" />
+            </button>
+          </div>
+          <span v-if="entry.timestamp" class="timestamp">{{ formatTime(entry.timestamp) }}</span>
         </div>
       </div>
     </div>
@@ -250,6 +263,19 @@ function parsedBlocks(): Array<{ type: 'html' | 'code'; content: string; languag
 .copy-btn:hover {
   color: var(--fg);
   background: var(--surface);
+}
+
+.bubble-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+
+.timestamp {
+  font-size: 0.68rem;
+  color: var(--muted);
+  opacity: 0.6;
 }
 
 .attachments {

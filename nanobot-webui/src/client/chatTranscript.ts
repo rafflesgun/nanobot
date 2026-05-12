@@ -19,6 +19,7 @@ export type TranscriptEntry = {
   text: string
   title?: string
   attachments?: ComposerMedia[]
+  timestamp?: number
 }
 
 export type TranscriptState = {
@@ -47,6 +48,7 @@ export function appendOutboundMessage(state: TranscriptState, text: string, atta
     role: 'user',
     event: 'outbound',
     text,
+    timestamp: Date.now(),
     ...(attachments.length > 0 ? { attachments: [...attachments] } : {})
   })
 }
@@ -72,7 +74,8 @@ export function applyChatEvent(state: TranscriptState, event: ChatEvent, label: 
       kind,
       event: event.event,
       text: textFromEvent(event),
-      title: kind === 'tool' ? toolTitle(event) : 'Reasoning'
+      title: kind === 'tool' ? toolTitle(event) : 'Reasoning',
+      timestamp: Date.now(),
     })
     return
   }
@@ -97,7 +100,8 @@ export function applyChatEvent(state: TranscriptState, event: ChatEvent, label: 
       label,
       role: 'assistant',
       event: event.event,
-      text: event.text ?? ''
+      text: event.text ?? '',
+      timestamp: Date.now(),
     })
     return
   }
@@ -109,7 +113,8 @@ export function applyChatEvent(state: TranscriptState, event: ChatEvent, label: 
     label,
     role: event.event === 'error' || event.detail ? 'system' : 'assistant',
     event: event.event,
-    text: textFromEvent(event)
+    text: textFromEvent(event),
+    timestamp: Date.now(),
   })
 }
 

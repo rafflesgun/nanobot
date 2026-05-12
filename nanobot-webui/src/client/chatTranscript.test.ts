@@ -9,7 +9,7 @@ describe('chatTranscript', () => {
     applyChatEvent(state, { instanceId: 'alpha', event: 'delta', chatId: 'c1', text: 'world' }, 'Alpha')
 
     expect(state.entries).toEqual([
-      { id: 1, instanceId: 'alpha', chatId: 'c1', label: 'Alpha', role: 'assistant', event: 'delta', text: 'hello world' }
+      { id: 1, instanceId: 'alpha', chatId: 'c1', label: 'Alpha', role: 'assistant', event: 'delta', text: 'hello world', timestamp: expect.any(Number) }
     ])
   })
 
@@ -33,8 +33,8 @@ describe('chatTranscript', () => {
     appendOutboundMessage(state, 'hello bots')
 
     expect(state.entries).toEqual([
-      { id: 1, instanceId: 'alpha', chatId: '', label: 'Alpha', role: 'system', event: 'error', text: 'bad frame' },
-      { id: 2, instanceId: 'local', chatId: '', label: 'You', role: 'user', event: 'outbound', text: 'hello bots' }
+      { id: 1, instanceId: 'alpha', chatId: '', label: 'Alpha', role: 'system', event: 'error', text: 'bad frame', timestamp: expect.any(Number) },
+      { id: 2, instanceId: 'local', chatId: '', label: 'You', role: 'user', event: 'outbound', text: 'hello bots', timestamp: expect.any(Number) }
     ])
   })
 
@@ -69,7 +69,8 @@ describe('chatTranscript', () => {
         event: 'tool_call.delta',
         kind: 'tool',
         text: 'looking up docs',
-        title: 'Tool: search'
+        title: 'Tool: search',
+        timestamp: expect.any(Number)
       }
     ])
   })
@@ -89,7 +90,8 @@ describe('chatTranscript', () => {
         event: 'reasoning.delta',
         kind: 'reasoning',
         text: 'checking facts',
-        title: 'Reasoning'
+        title: 'Reasoning',
+        timestamp: expect.any(Number)
       }
     ])
   })

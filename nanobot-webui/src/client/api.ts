@@ -33,6 +33,7 @@ export type StateTopic = {
       kind?: string
       title?: string
       attachments?: ComposerMedia[]
+      timestamp?: number
     }>
     debugEvents: unknown[]
     nextEntryId?: number
