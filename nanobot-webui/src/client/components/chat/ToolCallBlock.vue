@@ -2,19 +2,26 @@
 import { ref } from 'vue'
 import { Icon } from '@iconify/vue'
 
-defineProps<{
+const props = withDefaults(defineProps<{
   title: string
   text: string
-}>()
+  status?: string
+  icon?: string
+  expandedByDefault?: boolean
+}>(), {
+  icon: 'mdi:lightning-bolt',
+  expandedByDefault: false,
+})
 
-const expanded = ref(false)
+const expanded = ref(props.expandedByDefault)
 </script>
 
 <template>
   <div class="tool-call-block">
     <button class="tool-call-header" @click="expanded = !expanded">
-      <Icon icon="mdi:lightning-bolt" class="icon-lightning" />
+      <Icon :icon="icon" class="icon-lightning" />
       <span class="title">{{ title }}</span>
+      <span v-if="status" class="status-chip">{{ status }}</span>
       <Icon :icon="expanded ? 'mdi:chevron-up' : 'mdi:chevron-down'" />
     </button>
     <div v-if="expanded" class="tool-call-body">
@@ -60,6 +67,14 @@ const expanded = ref(false)
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.status-chip {
+  font-size: 0.68rem;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 6px;
 }
 
 .tool-call-body {

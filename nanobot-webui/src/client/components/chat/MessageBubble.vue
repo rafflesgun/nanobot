@@ -13,12 +13,13 @@ const props = defineProps<{
 }>()
 
 const copied = ref(false)
-const reasoningExpanded = ref(false)
+const reasoningExpanded = ref(true)
 
 const isUser = computed(() => props.entry.role === 'user')
 const isTool = computed(() => props.entry.kind === 'tool')
 const isReasoning = computed(() => props.entry.kind === 'reasoning')
-const isSystem = computed(() => props.entry.role === 'system' && !isTool.value && !isReasoning.value)
+const isSubagent = computed(() => props.entry.kind === 'subagent')
+const isSystem = computed(() => props.entry.role === 'system' && !isTool.value && !isReasoning.value && !isSubagent.value)
 const isEmpty = computed(() => !props.entry.text.trim())
 
 function isStreaming(): boolean {
@@ -129,7 +130,11 @@ function parsedBlocks(): Array<{ type: 'html' | 'code'; content: string; languag
     </div>
 
     <div v-else-if="isTool" class="tool-wrapper">
-      <ToolCallBlock :title="entry.title ?? 'Tool call'" :text="entry.text" />
+      <ToolCallBlock :title="entry.title ?? 'Tool call'" :text="entry.text" :status="entry.status" />
+    </div>
+
+    <div v-else-if="isSubagent" class="tool-wrapper">
+      <ToolCallBlock :title="entry.title ?? 'Sub-agent'" :text="entry.text" :status="entry.status" icon="mdi:account-supervisor-outline" :expanded-by-default="true" />
     </div>
 
     <div v-else-if="isSystem" class="system-message">
