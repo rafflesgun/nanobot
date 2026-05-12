@@ -410,7 +410,8 @@ class AgentRunner:
                 )
 
             clean = hook.finalize_content(context, response.content)
-            if response.finish_reason != "error" and is_blank_text(clean):
+            has_reasoning = bool(response.reasoning_content or response.thinking_blocks)
+            if response.finish_reason != "error" and is_blank_text(clean) and not has_reasoning:
                 empty_content_retries += 1
                 if empty_content_retries < _MAX_EMPTY_RETRIES:
                     logger.warning(
@@ -440,6 +441,16 @@ class AgentRunner:
                 context.usage = dict(raw_usage)
                 context.tool_calls = list(response.tool_calls)
                 clean = hook.finalize_content(context, response.content)
+                has_reasoning = bool(response.reasoning_content or response.thinking_blocks)
+
+            if is_blank_text(clean) and has_reasoning:
+                logger.info(
+                    "Content blank after strip_think but reasoning present for {}; using reasoning as content",
+                    spec.session_key or "default",
+                )
+                clean = response.reasoning_content or ""
+                for tb in (response.thinking_blocks or []):
+                    clean += tb.get("text", "")
 
             if response.finish_reason == "length" and not is_blank_text(clean):
                 length_recovery_count += 1
