@@ -127,6 +127,8 @@ function handleChatEvent(event: ChatEvent) {
     }
   }
 
+  if (isDuplicateEvent(conv, event)) return
+
   const instance = props.instances.find(i => i.id === event.instanceId)
   const instanceLabel = instance?.name ?? event.instanceId
 
@@ -144,6 +146,27 @@ function handleChatEvent(event: ChatEvent) {
   }
 
   persistConversations(props.token)
+}
+
+function isDuplicateEvent(conv: Conversation, event: ChatEvent): boolean {
+  if (event.event === 'delta') {
+    const keys = (conv.transcript as any).streamingKeys as Set<string> | undefined
+    const key = `${event.instanceId}\0${event.chatId}`
+    if (keys?.has(key)) return false
+    const entries = conv.transcript.entries
+    const last = entries[entries.length - 1]
+    if (last && last.role === 'assistant' && last.instanceId === event.instanceId && last.chatId === event.chatId && last.event === 'delta') {
+      return true
+    }
+    return false
+  }
+  if (event.event === 'message') {
+    const text = event.text ?? ''
+    if (!text) return false
+    const entries = conv.transcript.entries
+    return entries.some(e => e.role === 'assistant' && e.instanceId === event.instanceId && e.chatId === event.chatId && e.text === text)
+  }
+  return false
 }
 
 function sendMessage(text: string, media: ComposerMedia[]) {

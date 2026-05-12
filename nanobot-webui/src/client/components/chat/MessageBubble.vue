@@ -128,10 +128,12 @@ function parsedBlocks(): Array<{ type: 'html' | 'code'; content: string; languag
           </template>
           <span v-if="isStreaming()" class="streaming-cursor">▍</span>
         </div>
+        <div class="message-actions">
+          <button class="copy-btn" @click="copyMarkdown">
+            <Icon :icon="copied ? 'mdi:check' : 'mdi:content-copy'" :width="14" />
+          </button>
+        </div>
       </div>
-      <button class="copy-btn" @click="copyMarkdown">
-        <Icon :icon="copied ? 'mdi:check' : 'mdi:content-copy'" :width="14" />
-      </button>
     </div>
   </div>
 </template>
@@ -200,9 +202,8 @@ function parsedBlocks(): Array<{ type: 'html' | 'code'; content: string; languag
 .bot-bubble .bubble-content {
   background: oklch(23% 0.014 255);
   border-radius: 1rem 1rem 1rem 0.25rem;
-  padding: 0.65rem 0.9rem;
+  padding: 0.65rem 0.9rem 0.35rem;
   font-size: 0.88rem;
-  position: relative;
 }
 
 .bot-bubble {
@@ -221,21 +222,24 @@ function parsedBlocks(): Array<{ type: 'html' | 'code'; content: string; languag
   font-weight: 700;
 }
 
+.message-actions {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 4px;
+}
+
 .copy-btn {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 28px;
-  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--surface);
+  width: 28px;
+  height: 28px;
+  background: transparent;
   border: 1px solid var(--border);
   border-radius: 6px;
   color: var(--muted);
   cursor: pointer;
-  opacity: 0.5;
+  opacity: 0.4;
   transition: opacity 0.15s;
 }
 
@@ -245,7 +249,7 @@ function parsedBlocks(): Array<{ type: 'html' | 'code'; content: string; languag
 
 .copy-btn:hover {
   color: var(--fg);
-  background: var(--surface-2);
+  background: var(--surface);
 }
 
 .attachments {
