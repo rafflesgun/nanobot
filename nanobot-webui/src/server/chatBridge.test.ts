@@ -110,6 +110,65 @@ describe('normalizeNanobotEvent', () => {
       chatId: 'c1'
     })
   })
+
+  it('preserves typed streaming metadata from upstream websocket frames', () => {
+    expect(normalizeNanobotEvent('alpha', JSON.stringify({
+      event: 'reasoning.delta',
+      chat_id: 'c1',
+      stream_id: 'turn-1:0',
+      turn_id: 'turn-1',
+      kind: 'reasoning',
+      text: 'thinking out loud',
+      status: 'running'
+    }))).toEqual({
+      instanceId: 'alpha',
+      event: 'reasoning.delta',
+      chatId: 'c1',
+      stream_id: 'turn-1:0',
+      turn_id: 'turn-1',
+      kind: 'reasoning',
+      text: 'thinking out loud',
+      status: 'running'
+    })
+  })
+
+  it('preserves tool and subagent lifecycle fields', () => {
+    expect(normalizeNanobotEvent('alpha', JSON.stringify({
+      event: 'tool_call.start',
+      chat_id: 'c1',
+      stream_id: 'turn-1:tool:search',
+      kind: 'tool',
+      name: 'search',
+      tool_call_id: 'call-1',
+      detail: 'query docs'
+    }))).toEqual({
+      instanceId: 'alpha',
+      event: 'tool_call.start',
+      chatId: 'c1',
+      stream_id: 'turn-1:tool:search',
+      kind: 'tool',
+      name: 'search',
+      tool_call_id: 'call-1',
+      detail: 'query docs'
+    })
+
+    expect(normalizeNanobotEvent('alpha', JSON.stringify({
+      event: 'subagent.delta',
+      chat_id: 'c1',
+      stream_id: 'turn-1:subagent:critic',
+      kind: 'subagent',
+      subagent_name: 'critic',
+      text: 'reviewing diff'
+    }))).toEqual({
+      instanceId: 'alpha',
+      event: 'subagent.delta',
+      chatId: 'c1',
+      stream_id: 'turn-1:subagent:critic',
+      kind: 'subagent',
+      subagent_name: 'critic',
+      text: 'reviewing diff'
+    })
+  })
 })
 
 describe('registerChatBridge', () => {

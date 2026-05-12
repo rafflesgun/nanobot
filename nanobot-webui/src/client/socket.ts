@@ -11,6 +11,13 @@ export type ChatEvent = {
   reasoning?: string
   tool?: string
   tool_call?: string
+  kind?: 'message' | 'reasoning' | 'tool' | 'subagent' | 'progress' | string
+  stream_id?: string
+  turn_id?: string
+  name?: string
+  status?: string
+  tool_call_id?: string
+  subagent_name?: string
 }
 
 export type EnsureTopicConnectionsPayload = {
