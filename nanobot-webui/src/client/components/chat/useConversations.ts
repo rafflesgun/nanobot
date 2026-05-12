@@ -11,6 +11,17 @@ export type UseConversationsOptions = {
   saveConversationsApi: (token: string, conversations: Conversation[]) => Promise<Conversation[]>
 }
 
+function generateId(): string {
+  try {
+    return crypto.randomUUID()
+  } catch {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+      const r = Math.random() * 16 | 0
+      return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16)
+    })
+  }
+}
+
 function getToday(): Date {
   const d = new Date()
   d.setHours(0, 0, 0, 0)
@@ -90,7 +101,7 @@ export function useConversations(options: UseConversationsOptions) {
 
   function createConversation(name: string, memberIds: string[]): Conversation {
     const conv: Conversation = {
-      id: crypto.randomUUID(),
+      id: generateId(),
       name,
       selectedIds: memberIds,
       transcript: { entries: [], debugEvents: [] },

@@ -102,7 +102,11 @@ export function createApp(config: WebuiConfig, deps: CreateAppDeps = {}) {
   })
 
   router.get('/api/state/topics', async (ctx) => {
-    ctx.body = { topics: (await stateStore.read()).topics }
+    try {
+      ctx.body = { topics: (await stateStore.read()).topics }
+    } catch {
+      ctx.body = { topics: [] }
+    }
   })
 
   router.put('/api/state/topics', async (ctx) => {
@@ -113,8 +117,12 @@ export function createApp(config: WebuiConfig, deps: CreateAppDeps = {}) {
   })
 
   router.get('/api/state/instances', async (ctx) => {
-    const state = await stateStore.read()
-    ctx.body = { instances: state.instances.map(publicStateInstance) }
+    try {
+      const state = await stateStore.read()
+      ctx.body = { instances: state.instances.map(publicStateInstance) }
+    } catch {
+      ctx.body = { instances: [] }
+    }
   })
 
   router.put('/api/state/instances', async (ctx) => {

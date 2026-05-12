@@ -79,7 +79,8 @@ export function createStateStore(dataDir: string) {
       return normalizeState(JSON.parse(await readFile(statePath(dataDir), 'utf-8')) as Partial<WebuiState>)
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { ...defaultState }
-      throw error
+      console.error(`stateStore: failed to parse ${statePath(dataDir)}, resetting to default:`, (error as Error).message)
+      return { ...defaultState }
     }
   }
 
