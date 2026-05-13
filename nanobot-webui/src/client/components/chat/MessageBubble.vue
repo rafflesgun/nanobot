@@ -178,9 +178,13 @@ function parsedBlocks(): Array<{ type: 'html' | 'code'; content: string; languag
   justify-content: flex-end;
 }
 
-.user-bubble,
+.user-bubble {
+  max-width: 90%;
+  min-width: 80px;
+}
+
 .bot-bubble {
-  max-width: 70%;
+  max-width: 92%;
   min-width: 80px;
 }
 
@@ -368,7 +372,7 @@ function parsedBlocks(): Array<{ type: 'html' | 'code'; content: string; languag
   padding: 6px 12px;
   color: var(--muted);
   font-size: 0.82rem;
-  max-width: 70%;
+  max-width: 92%;
 }
 
 .markdown-body {
@@ -392,6 +396,16 @@ function parsedBlocks(): Array<{ type: 'html' | 'code'; content: string; languag
 .markdown-body :deep(table) {
   border-collapse: collapse;
   width: 100%;
+}
+
+.markdown-body :deep(a) {
+  color: oklch(72% 0.13 250);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.markdown-body :deep(a:hover) {
+  color: oklch(80% 0.14 250);
 }
 
 .streaming-cursor {
