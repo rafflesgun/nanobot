@@ -2,6 +2,15 @@ import { mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import SubagentsPanel from './SubagentsPanel.vue'
 
+vi.mock('./CodeEditor.vue', () => ({
+  default: {
+    name: 'CodeEditor',
+    props: ['modelValue', 'language', 'readOnly', 'placeholder'],
+    template: '<textarea class="code-editor-stub" :data-language="language" :readonly="readOnly" @input="$emit(\'update:modelValue\', $event.target.value)" />',
+    emits: ['update:modelValue']
+  }
+}))
+
 describe('SubagentsPanel', () => {
   afterEach(() => vi.unstubAllGlobals())
 

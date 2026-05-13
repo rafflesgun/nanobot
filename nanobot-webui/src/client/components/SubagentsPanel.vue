@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { deleteSubagent, fetchSubagent, fetchSubagents, saveSubagent, type PublicInstance, type SubagentDetail, type SubagentSummary } from '../api'
+import CodeEditor from './CodeEditor.vue'
 
 const props = defineProps<{ token: string; instance: PublicInstance | undefined }>()
 
@@ -121,12 +122,13 @@ watch(() => props.token, loadSubagents)
             <strong>{{ selected?.name || 'Select a subagent' }}</strong>
             <span v-if="selected">{{ selected.editable ? 'workspace editable' : 'built-in read-only' }}</span>
           </div>
-          <textarea
+          <CodeEditor
             v-model="markdown"
             data-testid="subagent-markdown"
-            :readonly="selected ? !selected.editable : false"
+            language="markdown"
+            :readOnly="selected ? !selected.editable : false"
             placeholder="Open a subagent or create a new one to edit Markdown."
-          ></textarea>
+          />
           <button type="button" data-testid="save-subagent" :disabled="!selected || !canEdit" @click="saveCurrent">Save Markdown</button>
         </div>
       </div>
@@ -153,7 +155,6 @@ watch(() => props.token, loadSubagents)
 .editor-panel { display: grid; gap: 0.75rem; }
 .editor-heading { align-items: center; display: flex; justify-content: space-between; gap: 1rem; }
 .editor-heading span { color: var(--muted); font-size: 0.8rem; }
-textarea { background: oklch(12% 0.012 255); border: 1px solid var(--border); border-radius: 0.75rem; color: var(--fg); font: 0.9rem/1.55 var(--font-mono); min-height: 20rem; padding: 0.85rem; resize: vertical; width: 100%; }
 .error-text { color: var(--warn); margin: 0; }
 @media (max-width: 960px) { .subagents-layout { grid-template-columns: 1fr; } .subagents-header { flex-direction: column; } }
 </style>
