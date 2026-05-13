@@ -1279,6 +1279,8 @@ class WebSocketChannel(BaseChannel):
         for key in ("kind", "name", "status", "detail", "tool_call_id", "subagent_name"):
             if meta.get(key) is not None and key not in payload:
                 payload[key] = meta[key]
+        if meta.get("_tool_events") is not None and "tool_events" not in payload:
+            payload["tool_events"] = meta["_tool_events"]
         raw = json.dumps(payload, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" ")
