@@ -312,16 +312,60 @@ export function applyChatEvent(state: TranscriptState, event: ChatEvent, label: 
     return
   }
 
-  state.entries.push({
-    id: state.nextEntryId++,
-    instanceId: event.instanceId,
-    chatId: event.chatId,
-    label,
-    role: event.event === 'error' || event.detail ? 'system' : 'assistant',
-    event: event.event,
-    text: textFromEvent(event),
-    timestamp: Date.now(),
-  })
+  const rawText = textFromEvent(event)
+  const segments = splitCompleteThinkSegments(rawText)
+  if (segments.length === 0) return
+  if (segments.length === 1 && segments[0].kind === 'message') {
+    state.entries.push({
+      id: state.nextEntryId++,
+      instanceId: event.instanceId,
+      chatId: event.chatId,
+      label,
+      role: event.event === 'error' || event.detail ? 'system' : 'assistant',
+      event: event.event,
+      text: rawText,
+      timestamp: Date.now(),
+    })
+    return
+  }
+  for (const segment of segments) {
+    if (!segment.text) continue
+    state.entries.push({
+      id: state.nextEntryId++,
+      instanceId: event.instanceId,
+      chatId: event.chatId,
+      label,
+      role: segment.kind === 'reasoning' ? 'assistant' : (event.event === 'error' || event.detail ? 'system' : 'assistant'),
+      kind: segment.kind,
+      event: event.event,
+      text: segment.text,
+      title: segment.kind === 'reasoning' ? 'Thinking' : undefined,
+      timestamp: Date.now(),
+    })
+  }
+}
+
+function splitCompleteThinkSegments(text: string): LegacySegment[] {
+  if (!text.includes(THINK_OPEN)) return [{ kind: 'message', text }]
+  const segments: LegacySegment[] = []
+  let remaining = text
+  while (remaining.length > 0) {
+    const start = remaining.indexOf(THINK_OPEN)
+    if (start < 0) {
+      if (remaining) segments.push({ kind: 'message', text: remaining })
+      break
+    }
+    if (start > 0) segments.push({ kind: 'message', text: remaining.slice(0, start) })
+    const afterOpen = remaining.slice(start + THINK_OPEN.length)
+    const end = afterOpen.indexOf(THINK_CLOSE)
+    if (end < 0) {
+      segments.push({ kind: 'reasoning', text: afterOpen })
+      break
+    }
+    segments.push({ kind: 'reasoning', text: afterOpen.slice(0, end) })
+    remaining = afterOpen.slice(end + THINK_CLOSE.length)
+  }
+  return segments
 }
 
 function classifyLegacyEvent(event: ChatEvent): TranscriptKind {

@@ -199,4 +199,35 @@ describe('chatTranscript', () => {
       { kind: 'subagent', title: 'Sub-agent: critic', text: 'starting\nreviewing\napproved', status: 'ok', name: 'critic' }
     ])
   })
+
+  it('splits think tags from complete message events', () => {
+    const state = createTranscriptState()
+
+    applyChatEvent(state, { instanceId: 'alpha', event: 'message', chatId: 'c1', text: '\u003Cthink\u003EI should answer briefly.\u003C/think\u003E\nHello user.' }, 'Alpha')
+
+    expect(state.entries).toMatchObject([
+      { kind: 'reasoning', title: 'Thinking', text: 'I should answer briefly.' },
+      { kind: 'message', text: '\nHello user.' }
+    ])
+  })
+
+  it('handles message event without think tags as regular entry', () => {
+    const state = createTranscriptState()
+
+    applyChatEvent(state, { instanceId: 'alpha', event: 'message', chatId: 'c1', text: 'Just a normal reply.' }, 'Alpha')
+
+    expect(state.entries).toMatchObject([
+      { text: 'Just a normal reply.' }
+    ])
+  })
+
+  it('handles message event with only think tags (no visible response)', () => {
+    const state = createTranscriptState()
+
+    applyChatEvent(state, { instanceId: 'alpha', event: 'message', chatId: 'c1', text: '\u003Cthink\u003EHmm let me think...\u003C/think\u003E' }, 'Alpha')
+
+    expect(state.entries).toMatchObject([
+      { kind: 'reasoning', title: 'Thinking', text: 'Hmm let me think...' }
+    ])
+  })
 })
