@@ -16,7 +16,6 @@ from urllib.parse import parse_qs, unquote, urlparse
 from nanobot.admin.auth import is_authorized
 from nanobot.agent.subagents import AgentLoader
 from nanobot.config.schema import Config
-from nanobot.providers.registry import find_by_name
 from nanobot.session.manager import SessionManager
 
 _MAX_REQUEST_HEADER_BYTES = 65536
@@ -157,45 +156,30 @@ def _sessions_payload(ctx: AdminContext, query: str) -> dict[str, Any]:
     return {"sessions": sessions, "next_cursor": None}
 
 
-def _settings_payload(ctx: AdminContext, *, requires_restart: bool = False) -> dict[str, Any]:
-    model = ctx.config.agents.defaults.model
-    return {
-        "agent": {
-            "model": model,
-            "provider": ctx.config.agents.defaults.provider,
-            "resolved_provider": ctx.config.get_provider_name(model),
-            "has_api_key": bool(ctx.config.get_api_key(model)),
-        },
-        "requires_restart": requires_restart,
-    }
+def _get_config_payload(ctx: AdminContext) -> dict[str, Any]:
+    return ctx.config.model_dump(mode="json", by_alias=True)
 
 
-def _patch_settings(ctx: AdminContext, body: bytes) -> tuple[dict[str, Any], int]:
+def _put_config(ctx: AdminContext, body: bytes) -> tuple[dict[str, Any], int]:
+    from nanobot.config.loader import save_config
+
     try:
-        payload = json.loads(body.decode("utf-8") or "{}")
+        data = json.loads(body.decode("utf-8") or "{}")
     except json.JSONDecodeError:
         return {"error": "invalid json"}, 400
-    if not isinstance(payload, dict):
+    if not isinstance(data, dict):
         return {"error": "json object required"}, 400
-    changed = False
-    model = payload.get("model")
-    if model is not None:
-        if not isinstance(model, str) or not model.strip():
-            return {"error": "model is required"}, 400
-        if ctx.config.agents.defaults.model != model.strip():
-            ctx.config.agents.defaults.model = model.strip()
-            changed = True
-    provider = payload.get("provider")
-    if provider is not None:
-        if not isinstance(provider, str) or not provider.strip():
-            return {"error": "provider is required"}, 400
-        provider = provider.strip()
-        if provider != "auto" and find_by_name(provider) is None:
-            return {"error": "unknown provider"}, 400
-        if ctx.config.agents.defaults.provider != provider:
-            ctx.config.agents.defaults.provider = provider
-            changed = True
-    return _settings_payload(ctx, requires_restart=changed), 200
+    try:
+        new_config = Config.model_validate(data)
+    except Exception as exc:
+        return {"error": f"invalid config: {exc}"}, 400
+    ctx.config.__dict__.update(new_config.__dict__)
+    for name in type(ctx.config).model_fields:
+        old = getattr(new_config, name)
+        if hasattr(old, "__dict__"):
+            setattr(ctx.config, name, old)
+    save_config(ctx.config)
+    return _get_config_payload(ctx), 200
 
 
 def _builtin_agents_dir() -> Path:
@@ -513,11 +497,11 @@ async def handle_http_request(raw: bytes, ctx: AdminContext) -> bytes:
             return _json_response({"deleted": False})
         return _json_response({"deleted": ctx.session_manager.delete_session(key)})
 
-    if method == "GET" and path == "/admin/v1/settings":
-        return _json_response(_settings_payload(ctx))
+    if method == "GET" and path == "/admin/v1/config":
+        return _json_response(_get_config_payload(ctx))
 
-    if method == "PATCH" and path == "/admin/v1/settings":
-        payload, status = _patch_settings(ctx, body)
+    if method == "PUT" and path == "/admin/v1/config":
+        payload, status = _put_config(ctx, body)
         return _json_response(payload, status=status)
 
     if method == "GET" and path == "/admin/v1/subagents":

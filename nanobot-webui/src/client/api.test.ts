@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { deleteSubagent, fetchInstanceLogs, fetchInstanceSettings, fetchInstanceStatus, fetchLogTail, fetchStateInstances, fetchStateTopics, fetchSubagent, fetchSubagents, fetchUsage, fetchWebuiLogs, patchInstanceSettings, saveStateInstances, saveStateTopics, saveSubagent } from './api'
+import { deleteSubagent, fetchInstanceConfig, fetchInstanceLogs, fetchInstanceStatus, fetchLogTail, fetchStateInstances, fetchStateTopics, fetchSubagent, fetchSubagents, fetchUsage, fetchWebuiLogs, putInstanceConfig, saveStateInstances, saveStateTopics, saveSubagent } from './api'
 
 describe('admin API helpers', () => {
   afterEach(() => {
@@ -42,23 +42,23 @@ describe('admin API helpers', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/webui/logs', { headers: { authorization: 'Bearer dashboard' } })
   })
 
-  it('loads and patches settings through the dashboard proxy', async () => {
-    const settings = { agent: { model: 'gpt-4.1', provider: 'auto', resolved_provider: 'openai', has_api_key: true }, requires_restart: false }
-    const updated = { agent: { model: 'gpt-4.1-mini', provider: 'openai', resolved_provider: 'openai', has_api_key: true }, requires_restart: true }
+  it('loads and saves full config through the dashboard proxy', async () => {
+    const config = { agents: { defaults: { model: 'gpt-4.1', provider: 'auto' } }, channels: {}, tools: {}, gateway: { admin: { enabled: true } } }
+    const updated = { agents: { defaults: { model: 'gpt-4.1-mini', provider: 'openai' } }, channels: {}, tools: {}, gateway: { admin: { enabled: true } } }
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({ ok: true, json: vi.fn().mockResolvedValue(settings) })
+      .mockResolvedValueOnce({ ok: true, json: vi.fn().mockResolvedValue(config) })
       .mockResolvedValueOnce({ ok: true, json: vi.fn().mockResolvedValue(updated) })
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(fetchInstanceSettings('alpha', 'dashboard')).resolves.toEqual(settings)
-    await expect(patchInstanceSettings('alpha', 'dashboard', { model: 'gpt-4.1-mini', provider: 'openai' })).resolves.toEqual(updated)
+    await expect(fetchInstanceConfig('alpha', 'dashboard')).resolves.toEqual(config)
+    await expect(putInstanceConfig('alpha', 'dashboard', updated)).resolves.toEqual(updated)
 
-    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/instances/alpha/settings', { headers: { authorization: 'Bearer dashboard' } })
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/instances/alpha/settings', {
-      method: 'PATCH',
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/instances/alpha/config', { headers: { authorization: 'Bearer dashboard' } })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/instances/alpha/config', {
+      method: 'PUT',
       headers: { authorization: 'Bearer dashboard', 'content-type': 'application/json' },
-      body: JSON.stringify({ model: 'gpt-4.1-mini', provider: 'openai' })
+      body: JSON.stringify(updated)
     })
   })
 

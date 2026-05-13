@@ -14,37 +14,17 @@ vi.mock('./CodeEditor.vue', () => ({
 describe('AgentConfigPanel', () => {
   afterEach(() => vi.unstubAllGlobals())
 
-  it('loads settings and displays metadata', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      json: vi.fn().mockResolvedValue({ agent: { model: 'gpt-4', provider: 'openai', resolved_provider: 'openai', has_api_key: true }, requires_restart: false })
-    }))
+  const fullConfig = {
+    agents: { defaults: { model: 'gpt-4', provider: 'openai' } },
+    channels: { websocket: { enabled: true } },
+    tools: {},
+    gateway: { admin: { enabled: true } }
+  }
 
-    const wrapper = mount(AgentConfigPanel, {
-      props: { token: 'dashboard', instance: { id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true } }
-    })
-
-    await vi.waitFor(() => expect(wrapper.text()).toContain('Resolved provider'), { timeout: 3000 })
-    expect(wrapper.text()).toContain('openai')
-  })
-
-  it('shows restart warning when requires_restart is true', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      json: vi.fn().mockResolvedValue({ agent: { model: 'gpt-4', provider: 'openai', resolved_provider: 'openai', has_api_key: true }, requires_restart: true })
-    }))
-
-    const wrapper = mount(AgentConfigPanel, {
-      props: { token: 'dashboard', instance: { id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true } }
-    })
-
-    await vi.waitFor(() => expect(wrapper.text()).toContain('Restart required'), { timeout: 3000 })
-  })
-
-  it('blocks save for invalid JSON', async () => {
+  it('loads config and displays in JSON editor', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: vi.fn().mockResolvedValue({ agent: { model: 'gpt-4', provider: 'openai', resolved_provider: 'openai', has_api_key: true }, requires_restart: false })
+      json: vi.fn().mockResolvedValue(fullConfig)
     })
     vi.stubGlobal('fetch', fetchMock)
 
@@ -52,7 +32,22 @@ describe('AgentConfigPanel', () => {
       props: { token: 'dashboard', instance: { id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true } }
     })
 
-    await vi.waitFor(() => expect(wrapper.text()).toContain('Resolved provider'), { timeout: 3000 })
+    await vi.waitFor(() => expect(wrapper.text()).not.toContain('Loading'), { timeout: 3000 })
+    expect((wrapper.vm as any).jsonDraft).toContain('gpt-4')
+  })
+
+  it('blocks save for invalid JSON', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue(fullConfig)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const wrapper = mount(AgentConfigPanel, {
+      props: { token: 'dashboard', instance: { id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true } }
+    })
+
+    await vi.waitFor(() => expect(wrapper.text()).not.toContain('Loading'), { timeout: 3000 })
     const vm = wrapper.vm as any
     vm.jsonDraft = '{bad json'
     await wrapper.get('[data-testid="save-agent-config"]').trigger('click')
@@ -60,10 +55,10 @@ describe('AgentConfigPanel', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it('blocks save when agent.model or agent.provider missing from JSON', async () => {
+  it('blocks save when JSON is not an object', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: vi.fn().mockResolvedValue({ agent: { model: 'gpt-4', provider: 'openai', resolved_provider: 'openai', has_api_key: true }, requires_restart: false })
+      json: vi.fn().mockResolvedValue(fullConfig)
     })
     vi.stubGlobal('fetch', fetchMock)
 
@@ -71,11 +66,11 @@ describe('AgentConfigPanel', () => {
       props: { token: 'dashboard', instance: { id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true } }
     })
 
-    await vi.waitFor(() => expect(wrapper.text()).toContain('Resolved provider'), { timeout: 3000 })
+    await vi.waitFor(() => expect(wrapper.text()).not.toContain('Loading'), { timeout: 3000 })
     const vm = wrapper.vm as any
-    vm.jsonDraft = '{"agent": {}}'
+    vm.jsonDraft = '[1,2,3]'
     await wrapper.get('[data-testid="save-agent-config"]').trigger('click')
-    expect(wrapper.text()).toContain('missing agent model or provider')
+    expect(wrapper.text()).toContain('Config must be a JSON object')
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 

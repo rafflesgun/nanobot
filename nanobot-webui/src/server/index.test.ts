@@ -123,20 +123,20 @@ describe('createApp', () => {
     )
     const base = await listen(app)
 
-    const res = await fetch(`${base}/api/instances/alpha/settings?verbose=true`, {
-      method: 'POST',
+    const res = await fetch(`${base}/api/instances/alpha/config?verbose=true`, {
+      method: 'PUT',
       headers: { authorization: 'Bearer dashboard', 'content-type': 'application/json' },
-      body: JSON.stringify({ enabled: false })
+      body: JSON.stringify({ agents: { defaults: { model: 'gpt-4' } } })
     })
 
     expect(res.status).toBe(201)
     await expect(res.json()).resolves.toEqual({ ok: true })
     expect(proxy).toHaveBeenCalledWith({
       instance: { id: 'alpha', name: 'alpha', baseUrl: 'http://nanobot-alpha:18790', adminToken: 'secret', websocketToken: 'ws-secret', enabled: true },
-      path: '/admin/v1/settings?verbose=true',
-      method: 'POST',
+      path: '/admin/v1/config?verbose=true',
+      method: 'PUT',
       headers: expect.objectContaining({ 'content-type': 'application/json' }),
-      body: JSON.stringify({ enabled: false })
+      body: JSON.stringify({ agents: { defaults: { model: 'gpt-4' } } })
     })
   })
 
@@ -201,7 +201,7 @@ describe('createApp', () => {
     )
     const base = await listen(app)
 
-    const res = await fetch(`${base}/api/instances/alpha/..%2Fsettings`, { headers: { authorization: 'Bearer dashboard' } })
+    const res = await fetch(`${base}/api/instances/alpha/..%2Fconfig`, { headers: { authorization: 'Bearer dashboard' } })
 
     expect(res.status).toBe(400)
     await expect(res.json()).resolves.toEqual({ error: 'invalid admin path' })
@@ -220,7 +220,7 @@ describe('createApp', () => {
     )
     const base = await listen(app)
 
-    const res = await fetch(`${base}/api/instances/alpha/settings`, { headers: { authorization: 'Bearer dashboard' } })
+    const res = await fetch(`${base}/api/instances/alpha/config`, { headers: { authorization: 'Bearer dashboard' } })
 
     expect(res.status).toBe(403)
     await expect(res.json()).resolves.toEqual({ error: 'instance disabled' })

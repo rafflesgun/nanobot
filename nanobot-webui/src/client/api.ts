@@ -84,21 +84,6 @@ export type WebuiLogEntry = {
   message?: string
 }
 
-export type InstanceSettings = {
-  agent: {
-    model: string
-    provider: string
-    resolved_provider: string
-    has_api_key: boolean
-  }
-  requires_restart: boolean
-}
-
-export type SettingsPatch = {
-  model?: string
-  provider?: string
-}
-
 export type SubagentSummary = {
   name: string
   description: string
@@ -171,18 +156,18 @@ export async function fetchWebuiLogs(token: string): Promise<WebuiLogEntry[]> {
   return payload.logs
 }
 
-export async function fetchInstanceSettings(instanceId: string, token: string): Promise<InstanceSettings> {
-  const res = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/settings`, { headers: authHeaders(token) })
-  return readJson<InstanceSettings>(res, `failed to load settings for ${instanceId}`)
+export async function fetchInstanceConfig(instanceId: string, token: string): Promise<Record<string, unknown>> {
+  const res = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/config`, { headers: authHeaders(token) })
+  return readJson<Record<string, unknown>>(res, `failed to load config for ${instanceId}`)
 }
 
-export async function patchInstanceSettings(instanceId: string, token: string, patch: SettingsPatch): Promise<InstanceSettings> {
-  const res = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/settings`, {
-    method: 'PATCH',
+export async function putInstanceConfig(instanceId: string, token: string, config: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const res = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/config`, {
+    method: 'PUT',
     headers: { ...authHeaders(token), 'content-type': 'application/json' },
-    body: JSON.stringify(patch)
+    body: JSON.stringify(config)
   })
-  return readJson<InstanceSettings>(res, `failed to update settings for ${instanceId}`)
+  return readJson<Record<string, unknown>>(res, `failed to update config for ${instanceId}`)
 }
 
 export async function restartInstance(instanceId: string, token: string): Promise<void> {
