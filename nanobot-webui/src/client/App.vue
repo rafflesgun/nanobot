@@ -169,9 +169,11 @@ onMounted(async () => {
         <section class="content" :class="{ 'chat-content': activeTab === 'chat' }">
           <p v-if="error" class="error" role="alert">{{ error }}</p>
           <OverviewPanel v-if="activeTab === 'overview'" :token="token" :instances="instances" />
-          <ChatView v-else-if="activeTab === 'chat'" :token="token" :instances="instances" />
-          <InstancesPanel v-else-if="activeTab === 'agents'" :token="token" :instances="instances" />
-          <ManagePanel v-else-if="activeTab === 'manage'" :token="token" :instances="instances" />
+          <KeepAlive>
+            <ChatView v-if="activeTab === 'chat'" :token="token" :instances="instances" />
+          </KeepAlive>
+          <InstancesPanel v-if="activeTab === 'agents'" :token="token" :instances="instances" />
+          <ManagePanel v-if="activeTab === 'manage'" :token="token" :instances="instances" />
           <section v-else-if="activeTab === 'logs'" class="logs-page">
             <div class="panel-heading">
               <div><h2>Logs</h2><p>Instance log viewer</p></div>
