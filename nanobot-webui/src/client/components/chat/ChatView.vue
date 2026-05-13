@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { fetchConversations, saveConversations, type ComposerMedia, type PublicInstance, type Conversation } from '../../api'
 import { appendOutboundMessage, applyChatEvent, type TranscriptEntry, type TranscriptState } from '../../chatTranscript'
 import { createChatSocket, type ChatEvent, type ChatSocket } from '../../socket'
+import { parseMentions } from '../../mentionUtils'
 import { useConversations } from './useConversations'
 import ConversationSidebar from './ConversationSidebar.vue'
 import ChatArea from './ChatArea.vue'
@@ -189,13 +190,17 @@ function isDuplicateEvent(conv: Conversation, event: ChatEvent): boolean {
   return false
 }
 
-function sendMessage(text: string, media: ComposerMedia[]) {
+function sendMessage(text: string, media: ComposerMedia[], _mentionedIds: string[]) {
   if (!activeConversation.value) return
+  const { mentionedIds } = parseMentions(text, activeMembers.value)
+  const allMemberIds = activeConversation.value.selectedIds
+  if (activeMembers.value.length >= 2 && mentionedIds.length === 0) return
+  const memberIds = mentionedIds.length > 0 ? mentionedIds : allMemberIds
   socket.emit('send_group_message', {
     topicId: activeConversation.value.id,
     text,
     media: media.length > 0 ? media : undefined,
-    memberIds: activeConversation.value.selectedIds,
+    memberIds,
     chatMappings: activeConversation.value.chatMappings ?? {},
   })
   appendOutboundMessage(activeConversation.value.transcript as TranscriptState, text, media)

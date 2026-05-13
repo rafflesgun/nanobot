@@ -72,7 +72,7 @@ describe('ChatView', () => {
     conv.chatMappings = { alpha: { chatId: 'chat-1', status: 'attached' } }
     await wrapper.vm.$nextTick()
 
-    wrapper.vm.sendMessage('hello', [])
+    wrapper.vm.sendMessage('hello', [], [])
     await wrapper.vm.$nextTick()
 
     expect(socket.emitted).toContainEqual(
@@ -140,7 +140,7 @@ describe('ChatView', () => {
     conv.chatMappings = { alpha: { chatId: 'chat-1', status: 'attached' } }
     await wrapper.vm.$nextTick()
 
-    wrapper.vm.sendMessage('hello', [])
+    wrapper.vm.sendMessage('hello', [], [])
     await wrapper.vm.$nextTick()
     expect(wrapper.vm.isGenerating).toBe(true)
 
