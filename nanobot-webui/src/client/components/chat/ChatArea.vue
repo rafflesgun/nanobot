@@ -17,7 +17,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  send: [text: string, media: ComposerMedia[]]
+  send: [text: string, media: ComposerMedia[], mentionedIds: string[]]
   stop: []
   addMember: []
   removeMember: [instanceId: string]
@@ -40,7 +40,9 @@ const emit = defineEmits<{
     <ChatComposer
       :disabled="!props.canSend"
       :is-generating="props.isGenerating"
-      @send="(text: string, media: ComposerMedia[]) => emit('send', text, media)"
+      :members="props.members"
+      :connection-statuses="props.connectionStatuses"
+      @send="(text: string, media: ComposerMedia[], mentionedIds: string[]) => emit('send', text, media, mentionedIds)"
       @stop="emit('stop')"
     />
   </div>
