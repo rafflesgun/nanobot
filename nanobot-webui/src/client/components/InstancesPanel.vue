@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { Icon } from '@iconify/vue'
+import CodeEditor from './CodeEditor.vue'
 import { fetchStateInstances, saveStateInstances, type PublicInstance, type StateInstance } from '../api'
 
 const props = withDefaults(defineProps<{
@@ -22,6 +24,9 @@ const name = ref('')
 const baseUrl = ref('')
 const adminToken = ref('')
 const websocketToken = ref('')
+const editMode = ref<'gui' | 'json'>('gui')
+const jsonDraft = ref('')
+const jsonError = ref('')
 
 function slug(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
@@ -76,6 +81,50 @@ function persistInstances() {
   void props.saveInstances(props.token, localInstances.value)
 }
 
+function selectMode(mode: 'gui' | 'json') {
+  if (mode === 'json') {
+    jsonDraft.value = JSON.stringify(localInstances.value.map((i) => {
+      const obj: Record<string, unknown> = { id: i.id, name: i.name, baseUrl: i.baseUrl, enabled: i.enabled }
+      if (i.adminToken) obj.adminToken = i.adminToken
+      if (i.websocketToken) obj.websocketToken = i.websocketToken
+      return obj
+    }), null, 2)
+  }
+  jsonError.value = ''
+  editMode.value = mode
+}
+
+function saveJsonInstances() {
+  jsonError.value = ''
+  let parsed: any[]
+  try {
+    parsed = JSON.parse(jsonDraft.value)
+  } catch {
+    jsonError.value = 'Invalid JSON'
+    return
+  }
+  if (!Array.isArray(parsed)) {
+    jsonError.value = 'JSON must be an array'
+    return
+  }
+  for (const entry of parsed) {
+    if (!entry.id || !entry.name || !entry.baseUrl) {
+      jsonError.value = `Instance "${entry.id || '(missing id)'}" missing required field (id, name, baseUrl)`
+      return
+    }
+  }
+  localInstances.value = parsed.map((entry: any) => ({
+    id: entry.id,
+    name: entry.name,
+    baseUrl: entry.baseUrl,
+    adminToken: entry.adminToken ?? '',
+    websocketToken: entry.websocketToken ?? '',
+    enabled: entry.enabled ?? true,
+    persisted: localInstances.value.some((li) => li.id === entry.id)
+  }))
+  persistInstances()
+}
+
 onMounted(() => {
   if (!props.token) return
   void props.loadInstances(props.token).then((instances) => {
@@ -90,11 +139,20 @@ onMounted(() => {
     <div class="panel-heading">
       <div>
         <h2>Instances</h2>
-        <p>Local CRUD shell. Server-side persistence will store these in /data in the next slice.</p>
+        <p>Manage agent instance connections to the dashboard.</p>
       </div>
     </div>
 
-    <div class="instances-layout">
+    <div class="instances-toolbar" data-testid="instances-toolbar">
+      <button type="button" data-mode="gui" :class="{ active: editMode === 'gui' }" @click="selectMode('gui')">
+        <Icon icon="mdi:form-textbox" :width="14" /> GUI Form
+      </button>
+      <button type="button" data-mode="json" :class="{ active: editMode === 'json' }" @click="selectMode('json')">
+        <Icon icon="mdi:code-json" :width="14" /> JSON
+      </button>
+    </div>
+
+    <div v-if="editMode === 'gui'" class="instances-layout">
       <form class="instance-form" @submit.prevent="saveInstance">
         <label>
           <span>ID</span>
@@ -138,12 +196,26 @@ onMounted(() => {
         </article>
       </div>
     </div>
+
+    <div v-else-if="editMode === 'json'" class="json-editor-panel">
+      <p v-if="jsonError" class="error-text" role="alert">{{ jsonError }}</p>
+      <CodeEditor
+        v-model="jsonDraft"
+        data-testid="instances-json-editor"
+        language="json"
+        placeholder="[]"
+      />
+      <button type="button" data-testid="save-json-instances" @click="saveJsonInstances">Save All Instances</button>
+    </div>
   </section>
 </template>
 
 <style scoped>
 .panel-heading { margin-bottom: 1rem; }
 .panel-heading p { color: var(--muted); line-height: 1.5; margin: 0.25rem 0 0; }
+.instances-toolbar { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
+.instances-toolbar button { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); color: var(--muted); padding: 0.35rem 0.75rem; font-size: 12px; font-weight: 560; cursor: pointer; }
+.instances-toolbar button.active { border-color: var(--accent); background: oklch(64% 0.18 255 / 0.18); color: var(--fg); }
 .instances-layout { display: grid; grid-template-columns: minmax(18rem, 0.8fr) minmax(22rem, 1.2fr); gap: 1rem; }
 .instance-form,
 .instance-card { border: 1px solid var(--border); border-radius: var(--radius); background: oklch(19% 0.014 255 / 0.88); padding: 1rem; }
@@ -160,5 +232,7 @@ onMounted(() => {
 .instance-card em { border: 1px solid var(--border); border-radius: 999px; color: var(--fg); font-size: 0.75rem; font-style: normal; padding: 0.2rem 0.55rem; }
 .instance-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 .danger { border-color: oklch(68% 0.17 25 / 0.42); color: oklch(80% 0.12 25); }
+.json-editor-panel { display: grid; gap: 0.75rem; }
+.error-text { color: var(--warn); margin: 0; line-height: 1.5; }
 @media (max-width: 900px) { .instances-layout { grid-template-columns: 1fr; } }
 </style>
