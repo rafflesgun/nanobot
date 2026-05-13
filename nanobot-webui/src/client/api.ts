@@ -185,6 +185,14 @@ export async function patchInstanceSettings(instanceId: string, token: string, p
   return readJson<InstanceSettings>(res, `failed to update settings for ${instanceId}`)
 }
 
+export async function restartInstance(instanceId: string, token: string): Promise<void> {
+  const res = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/restart`, {
+    method: 'POST',
+    headers: authHeaders(token)
+  })
+  if (!res.ok) throw new Error(`failed to restart ${instanceId}: ${res.status}`)
+}
+
 export async function fetchSubagents(instanceId: string, token: string): Promise<SubagentSummary[]> {
   const res = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/subagents`, { headers: authHeaders(token) })
   const payload = await readJson<{ subagents: SubagentSummary[] }>(res, `failed to load subagents for ${instanceId}`)
