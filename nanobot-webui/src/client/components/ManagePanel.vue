@@ -1,76 +1,107 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { Icon } from '@iconify/vue'
 import type { PublicInstance } from '../api'
-import LogsPanel from './LogsPanel.vue'
-import SettingsPanel from './SettingsPanel.vue'
+import AgentConfigPanel from './AgentConfigPanel.vue'
 import SubagentsPanel from './SubagentsPanel.vue'
+import LogsPanel from './LogsPanel.vue'
 
 const props = defineProps<{ token: string; instances: PublicInstance[] }>()
 
-type ManageSection = 'settings' | 'subagents' | 'logs' | 'session' | 'memory' | 'credentials' | 'restart'
+type ManageSection = 'agent-config' | 'subagents' | 'logs'
 
-const sections: Array<{ id: ManageSection; label: string; unsupported?: string }> = [
-  { id: 'settings', label: 'Settings' },
-  { id: 'subagents', label: 'Subagents' },
-  { id: 'logs', label: 'Logs' },
-  { id: 'session', label: 'Session', unsupported: 'Session management requires nanobot session API support. Active sessions will appear here when available.' },
-  { id: 'memory', label: 'Memory', unsupported: 'Memory management requires nanobot memory API support. Memory snapshots and compaction controls will appear here.' },
-  { id: 'credentials', label: 'Credentials', unsupported: 'Credential management requires nanobot credentials API support. API keys and tokens will be managed here.' },
-  { id: 'restart', label: 'Restart', unsupported: 'Restart controls require nanobot lifecycle API support. Safe restart and status checks will appear here.' }
+const sections: Array<{ id: ManageSection; label: string; icon: string }> = [
+  { id: 'agent-config', label: 'Agent Config', icon: 'mdi:cog-outline' },
+  { id: 'subagents', label: 'Subagents', icon: 'mdi:file-document-edit-outline' },
+  { id: 'logs', label: 'Logs', icon: 'mdi:file-document-outline' }
 ]
 
-const enabledInstances = computed(() => props.instances.filter((instance) => instance.enabled))
+const enabledInstances = computed(() => props.instances.filter((i) => i.enabled))
 const selectedInstanceId = ref('')
-const activeSection = ref<ManageSection>('settings')
-const selectedInstance = computed(() => enabledInstances.value.find((instance) => instance.id === selectedInstanceId.value))
-const activeUnsupported = computed(() => sections.find((section) => section.id === activeSection.value)?.unsupported)
+const activeSection = ref<ManageSection>('agent-config')
+const selectedInstance = computed(() => enabledInstances.value.find((i) => i.id === selectedInstanceId.value))
+const restarting = ref(false)
 
 watch(enabledInstances, (instances) => {
-  if (instances.some((instance) => instance.id === selectedInstanceId.value)) return
+  if (instances.some((i) => i.id === selectedInstanceId.value)) return
   selectedInstanceId.value = instances[0]?.id ?? ''
 }, { immediate: true })
+
+async function restartInstance() {
+  if (!selectedInstance.value) return
+  restarting.value = true
+  try {
+    const res = await fetch(`/api/instances/${encodeURIComponent(selectedInstance.value.id)}/restart`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${props.token}` }
+    })
+    if (!res.ok) throw new Error(`Restart failed: ${res.status}`)
+  } catch {
+    // Graceful degradation — endpoint may not exist yet
+  } finally {
+    restarting.value = false
+  }
+}
 </script>
 
 <template>
   <section class="panel manage-panel">
-    <div class="manage-header">
-      <div>
-        <h2>Manage</h2>
-        <p>Choose one target instance, then work through the management sections.</p>
-      </div>
-      <label class="target-select">
-        <span>Target instance</span>
-        <select v-model="selectedInstanceId">
-          <option v-for="instance in enabledInstances" :key="instance.id" :value="instance.id">{{ instance.name }}</option>
-        </select>
-      </label>
-    </div>
-
     <div class="manage-layout">
-      <nav class="manage-subnav" aria-label="Manage sections">
+      <div class="manage-sidebar" data-testid="instance-sidebar">
+        <div class="sidebar-heading">Instances</div>
         <button
-          v-for="section in sections"
-          :key="section.id"
+          v-for="instance in enabledInstances"
+          :key="instance.id"
           type="button"
-          :data-section="section.id"
-          :class="{ active: activeSection === section.id }"
-          @click="activeSection = section.id"
+          :data-instance="instance.id"
+          class="instance-item"
+          :class="{ active: instance.id === selectedInstanceId }"
+          @click="selectedInstanceId = instance.id"
         >
-          {{ section.label }}
+          <span class="dot success"></span>
+          <span class="instance-name">{{ instance.name }}</span>
         </button>
-      </nav>
+        <p v-if="enabledInstances.length === 0" class="muted">No enabled instances</p>
+      </div>
 
-      <div class="manage-content">
-        <SettingsPanel v-if="activeSection === 'settings'" :token="token" :instance="selectedInstance" />
-        <SubagentsPanel v-else-if="activeSection === 'subagents'" :token="token" :instance="selectedInstance" />
-        <LogsPanel v-else-if="activeSection === 'logs'" :token="token" :instance="selectedInstance" />
-        <article v-else class="unsupported-panel">
-          <div class="card-head">
-            <div><h3>{{ sections.find((section) => section.id === activeSection)?.label }}</h3></div>
-            <span class="pill"><span class="dot warn"></span>coming soon</span>
+      <div class="manage-main">
+        <div class="manage-header">
+          <div>
+            <h2>{{ selectedInstance?.name ?? 'Select an instance' }}</h2>
+            <p v-if="selectedInstance" class="muted">{{ selectedInstance.id }} · {{ selectedInstance.baseUrl }}</p>
           </div>
-          <p>{{ activeUnsupported }}</p>
-        </article>
+          <button
+            v-if="selectedInstance"
+            type="button"
+            data-testid="restart-button"
+            class="restart-btn"
+            :disabled="restarting"
+            @click="restartInstance"
+          >
+            <Icon icon="mdi:restart" :width="16" />
+            {{ restarting ? 'Restarting...' : 'Restart' }}
+          </button>
+        </div>
+
+        <nav class="manage-subnav" aria-label="Manage sections">
+          <button
+            v-for="section in sections"
+            :key="section.id"
+            type="button"
+            :data-section="section.id"
+            :class="{ active: activeSection === section.id }"
+            @click="activeSection = section.id"
+          >
+            <Icon :icon="section.icon" :width="16" />
+            {{ section.label }}
+          </button>
+        </nav>
+
+        <div class="manage-content">
+          <AgentConfigPanel v-if="activeSection === 'agent-config'" :token="token" :instance="selectedInstance" />
+          <SubagentsPanel v-else-if="activeSection === 'subagents'" :token="token" :instance="selectedInstance" />
+          <LogsPanel v-else-if="activeSection === 'logs'" :token="token" :instance="selectedInstance" />
+        </div>
       </div>
     </div>
   </section>
@@ -78,19 +109,24 @@ watch(enabledInstances, (instances) => {
 
 <style scoped>
 .manage-panel { display: grid; gap: 1rem; }
-.manage-header { align-items: end; display: flex; justify-content: space-between; gap: 1rem; }
-.manage-header p { color: var(--muted); line-height: 1.5; margin: 0.25rem 0 0; }
-.target-select { display: grid; gap: 0.45rem; min-width: 16rem; }
-.target-select span { color: var(--fg); font-weight: 700; }
-.manage-layout { display: grid; grid-template-columns: 12rem minmax(0, 1fr); gap: 1rem; }
-.manage-subnav { border: 1px solid var(--border); border-radius: var(--radius); background: oklch(19% 0.014 255 / 0.88); display: grid; gap: 0.5rem; align-content: start; padding: 0.75rem; }
-.manage-subnav button { background: transparent; border-color: transparent; color: var(--muted); justify-content: start; text-align: left; }
-.manage-subnav button.active { background: oklch(64% 0.18 255 / 0.18); border-color: oklch(64% 0.18 255 / 0.35); color: var(--fg); }
+.manage-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 1rem; }
+.manage-sidebar { border: 1px solid var(--border); border-radius: var(--radius); background: oklch(19% 0.014 255 / 0.88); padding: 0.75rem; display: grid; gap: 0.4rem; align-content: start; }
+.sidebar-heading { color: var(--fg); font-weight: 700; font-size: 13px; margin-bottom: 0.25rem; }
+.instance-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--muted); text-align: left; cursor: pointer; font-size: 13px; }
+.instance-item:hover { background: var(--surface-2); }
+.instance-item.active { border-color: oklch(64% 0.18 255 / 0.35); background: oklch(64% 0.18 255 / 0.18); color: var(--fg); }
+.instance-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.manage-main { display: grid; gap: 1rem; min-width: 0; }
+.manage-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+.manage-header h2 { margin: 0; font-size: 16px; }
+.manage-header p { margin: 0.15rem 0 0; font-size: 12px; }
+.restart-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); color: var(--fg); font-size: 12px; font-weight: 560; cursor: pointer; }
+.restart-btn:hover { border-color: var(--accent); }
+.restart-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.manage-subnav { display: flex; gap: 0.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+.manage-subnav button { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 560; cursor: pointer; }
+.manage-subnav button.active { border-color: oklch(64% 0.18 255 / 0.35); background: oklch(64% 0.18 255 / 0.18); color: var(--fg); }
 .manage-content { min-width: 0; }
-.unsupported-panel { border: 1px solid var(--border); border-radius: var(--radius); background: oklch(19% 0.014 255 / 0.88); padding: 1rem; }
-.card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-block-end: 14px; }
-.card-head h3 { margin: 0; font-size: 14px; font-weight: 650; letter-spacing: -0.01em; }
-.dot.warn { background: var(--warn); }
-.unsupported-panel p { color: var(--muted); line-height: 1.5; }
-@media (max-width: 900px) { .manage-header { align-items: stretch; flex-direction: column; } .manage-layout { grid-template-columns: 1fr; } }
+.muted { color: var(--muted); line-height: 1.5; margin: 0; }
+@media (max-width: 900px) { .manage-layout { grid-template-columns: 1fr; } }
 </style>

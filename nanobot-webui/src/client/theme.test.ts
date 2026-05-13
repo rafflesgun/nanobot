@@ -13,7 +13,7 @@ const dashboardFiles = [
   'src/client/components/chat/AddMemberDialog.vue',
   'src/client/components/OverviewPanel.vue',
   'src/client/components/LogsPanel.vue',
-  'src/client/components/SettingsPanel.vue',
+  'src/client/components/AgentConfigPanel.vue',
   'src/client/components/InstancesPanel.vue',
   'src/client/components/ManagePanel.vue'
 ]

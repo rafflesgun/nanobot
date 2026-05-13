@@ -120,10 +120,10 @@ describe('App', () => {
     await vi.waitFor(() => expect(wrapper.text()).toContain('Overview'))
 
     await wrapper.get('[data-nav="agents"]').trigger('click')
-    expect(wrapper.text()).toContain('Local CRUD shell')
+    expect(wrapper.text()).toContain('Manage agent instance connections')
 
     await wrapper.get('[data-nav="manage"]').trigger('click')
-    expect(wrapper.text()).toContain('Target instance')
+    expect(wrapper.text()).toContain('Instances')
     expect(wrapper.text()).toContain('Subagents')
   })
 
