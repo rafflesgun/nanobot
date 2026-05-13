@@ -49,6 +49,7 @@ onMounted(() => {
           :key="entry.id"
           :entry="entry"
           :instance="instanceFor(entry.instanceId)"
+          :instances="instances"
         />
       </template>
       <div v-else class="empty-state">Send a message to start the conversation.</div>

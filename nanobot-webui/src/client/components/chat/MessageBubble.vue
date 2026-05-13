@@ -10,6 +10,7 @@ import { Icon } from '@iconify/vue'
 const props = defineProps<{
   entry: TranscriptEntry
   instance?: PublicInstance
+  instances?: PublicInstance[]
 }>()
 
 const copied = ref(false)
@@ -77,8 +78,27 @@ function decodeHtmlEntities(html: string): string {
   return txt.value
 }
 
+const mentionNames = computed(() => {
+  const names = ['all']
+  if (props.instances) {
+    for (const inst of props.instances) names.push(inst.name)
+  } else if (props.instance) {
+    names.push(props.instance.name)
+  }
+  return names
+})
+
+function highlightMentions(html: string): string {
+  return html.replace(/@(\w+)/g, (match, name) => {
+    if (mentionNames.value.some(n => n.toLowerCase() === name.toLowerCase())) {
+      return `<span class="mention-tag">${match}</span>`
+    }
+    return match
+  })
+}
+
 function parsedBlocks(): Array<{ type: 'html' | 'code'; content: string; language: string; rawCode: string }> {
-  const html = renderMarkdown(displayText())
+  const html = highlightMentions(renderMarkdown(displayText()))
   const regex = /<pre class="hljs"><code class="language-(\w+)">([\s\S]*?)<\/code><\/pre>/g
   const blocks: Array<{ type: 'html' | 'code'; content: string; language: string; rawCode: string }> = []
   let lastIndex = 0
@@ -406,6 +426,14 @@ function parsedBlocks(): Array<{ type: 'html' | 'code'; content: string; languag
 
 .markdown-body :deep(a:hover) {
   color: oklch(80% 0.14 250);
+}
+
+.markdown-body :deep(.mention-tag) {
+  background: oklch(64% 0.18 255 / 0.12);
+  color: oklch(72% 0.14 250);
+  padding: 0.1em 0.3em;
+  border-radius: 4px;
+  font-weight: 500;
 }
 
 .streaming-cursor {
