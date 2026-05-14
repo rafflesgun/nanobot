@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 
 export type NanobotInstance = {
   id: string
@@ -14,6 +14,7 @@ export type WebuiConfig = {
   port: number
   authToken: string
   dataDir?: string
+  configPath?: string
   instances: NanobotInstance[]
 }
 
@@ -83,6 +84,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): WebuiConfig {
     port: Number(env.PORT || 6060),
     authToken,
     dataDir: typeof env.WEBUI_DATA_DIR === 'string' && env.WEBUI_DATA_DIR.trim() ? env.WEBUI_DATA_DIR.trim() : '/data',
+    configPath: typeof env.WEBUI_CONFIG === 'string' && env.WEBUI_CONFIG.trim() ? env.WEBUI_CONFIG.trim() : undefined,
     instances: loadConfigFileInstances(file)
   }
 }
@@ -107,4 +109,36 @@ export function websocketUrlForInstance(instance: NanobotInstance): string {
   url.searchParams.set('client_id', 'nanobot-webui')
   url.searchParams.set('token', instance.websocketToken)
   return url.toString()
+}
+
+type ConfigFileInstancePayload = {
+  id: string
+  name?: string
+  adminBaseUrl?: string
+  baseUrl?: string
+  adminToken?: string
+  websocketUrl?: string
+  websocketToken?: string
+  enabled?: boolean
+}
+
+export function writeInstancesToConfig(config: WebuiConfig, instances: ConfigFileInstancePayload[]): void {
+  if (!config.configPath) throw new Error('no config file path available')
+  const raw = JSON.parse(readFileSync(config.configPath, 'utf-8')) as Record<string, unknown>
+  raw.instances = instances.map((inst) => {
+    const existing = config.instances.find((ei) => ei.id === inst.id)
+    const base = existing
+      ? { id: existing.id, name: existing.name, adminBaseUrl: existing.baseUrl, adminToken: existing.adminToken, websocketUrl: existing.websocketUrl, websocketToken: existing.websocketToken, enabled: existing.enabled }
+      : { id: inst.id }
+    if (inst.name !== undefined) base.name = inst.name
+    if (inst.adminBaseUrl !== undefined) base.adminBaseUrl = inst.adminBaseUrl
+    if (inst.baseUrl !== undefined) base.adminBaseUrl = inst.baseUrl.replace(/\/$/, '')
+    if (inst.adminToken !== undefined) base.adminToken = inst.adminToken
+    if (inst.websocketUrl !== undefined) base.websocketUrl = inst.websocketUrl
+    if (inst.websocketToken !== undefined) base.websocketToken = inst.websocketToken
+    if (inst.enabled !== undefined) base.enabled = inst.enabled
+    return base
+  })
+  writeFileSync(config.configPath, `${JSON.stringify(raw, null, 2)}\n`)
+  config.instances = loadConfigFileInstances(raw as ConfigFile)
 }

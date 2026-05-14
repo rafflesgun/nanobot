@@ -61,6 +61,7 @@ export async function saveConversations(token: string, conversations: Conversati
 export type StateInstance = PublicInstance & {
   adminToken?: string
   websocketToken?: string
+  websocketUrl?: string
 }
 
 export type InstanceStatus = {

@@ -50,7 +50,7 @@ function setGenerating(value: boolean) {
 const {
   conversations, activeConversationId, activeConversation, dateGroups,
   loadConversations, createConversation, deleteConversation, renameConversation,
-  selectConversation, persistConversations,
+  selectConversation, touchConversation, persistConversations,
 } = useConversations({
   loadConversationsApi: props.loadConversationsApi,
   saveConversationsApi: props.saveConversationsApi,
@@ -149,6 +149,7 @@ function handleChatEvent(event: ChatEvent) {
   const instanceLabel = instance?.name ?? event.instanceId
 
   applyChatEvent(conv.transcript as import('../../chatTranscript').TranscriptState, event, instanceLabel)
+  touchConversation(conv.id)
 
   if (event.event === 'delta') {
     activeGeneratingIds.value.add(event.instanceId)
@@ -204,6 +205,7 @@ function sendMessage(text: string, media: ComposerMedia[], _mentionedIds: string
     chatMappings: activeConversation.value.chatMappings ?? {},
   })
   appendOutboundMessage(activeConversation.value.transcript as TranscriptState, text, media)
+  touchConversation(activeConversation.value.id)
   setGenerating(true)
   persistConversations(props.token)
 }
@@ -215,10 +217,10 @@ function stopGenerating() {
 }
 
 async function handleCreateConversation(name: string, memberIds: string[]) {
+  showNewChatDialog.value = false
   const conv = createConversation(name, memberIds)
   ensureConnections(conv)
   await persistConversations(props.token)
-  showNewChatDialog.value = false
 }
 
 function handleSelectConversation(id: string) {

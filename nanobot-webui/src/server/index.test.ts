@@ -254,31 +254,42 @@ describe('createApp', () => {
     expect(stateStore.writeTopics).toHaveBeenCalledWith([{ id: 'ops', name: 'Ops', selectedIds: ['alpha'], transcript: { entries: [], debugEvents: [] } }])
   })
 
-  it('stores instances and redacts secrets from authenticated state list responses', async () => {
-    const stateStore = {
-      read: vi.fn().mockResolvedValue({
-        topics: [],
-        instances: [{ id: 'beta', name: 'Beta', baseUrl: 'http://beta', adminToken: 'admin-secret', websocketToken: 'ws-secret', enabled: true }]
-      }),
-      writeTopics: vi.fn().mockResolvedValue(undefined),
-      writeInstances: vi.fn().mockResolvedValue(undefined)
-    }
-    const { app } = createApp({ port: 6060, authToken: 'dashboard', dataDir: '/tmp/ignored', instances: [] }, { stateStore })
+  it('writes instances to config file and reads them back', async () => {
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), 'nanobot-webui-test-'))
+    tempDirs.push(dataDir)
+    const configPath = path.join(dataDir, 'webui-config.json')
+    await writeFile(configPath, JSON.stringify({
+      authToken: 'dashboard',
+      instances: [
+        { id: 'alpha', name: 'Alpha', adminBaseUrl: 'http://alpha', adminToken: 'a-secret', websocketUrl: 'ws://alpha', websocketToken: 'ws-secret', enabled: true }
+      ]
+    }))
+    const { app } = createApp({
+      port: 6060,
+      authToken: 'dashboard',
+      dataDir,
+      configPath,
+      instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', adminToken: 'a-secret', websocketUrl: 'ws://alpha', websocketToken: 'ws-secret', enabled: true }]
+    })
     const base = await listen(app)
 
     const list = await fetch(`${base}/api/state/instances`, { headers: { authorization: 'Bearer dashboard' } })
+    expect(list.status).toBe(200)
+    const listPayload = await list.json()
+    expect(listPayload.instances[0]).toEqual({ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true })
+    expect(JSON.stringify(listPayload)).not.toContain('secret')
+
     const save = await fetch(`${base}/api/state/instances`, {
       method: 'PUT',
       headers: { authorization: 'Bearer dashboard', 'content-type': 'application/json' },
-      body: JSON.stringify({ instances: [{ id: 'gamma', name: 'Gamma', baseUrl: 'http://gamma', adminToken: 'gamma-admin', websocketToken: 'gamma-ws', enabled: false }] })
+      body: JSON.stringify({ instances: [{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', adminToken: 'a-secret', websocketUrl: 'ws://alpha', websocketToken: 'ws-secret', enabled: false }] })
     })
-
-    expect(list.status).toBe(200)
-    const listPayload = await list.json()
-    expect(listPayload).toEqual({ instances: [{ id: 'beta', name: 'Beta', baseUrl: 'http://beta', enabled: true }] })
-    expect(JSON.stringify(listPayload)).not.toContain('secret')
     expect(save.status).toBe(200)
-    await expect(save.json()).resolves.toEqual({ instances: [{ id: 'gamma', name: 'Gamma', baseUrl: 'http://gamma', enabled: false }] })
-    expect(stateStore.writeInstances).toHaveBeenCalledWith([{ id: 'gamma', name: 'Gamma', baseUrl: 'http://gamma', adminToken: 'gamma-admin', websocketToken: 'gamma-ws', enabled: false }])
+    const savePayload = await save.json()
+    expect(savePayload.instances[0].enabled).toBe(false)
+
+    const afterSave = await fetch(`${base}/api/instances`, { headers: { authorization: 'Bearer dashboard' } })
+    const afterPayload = await afterSave.json()
+    expect(afterPayload.instances[0].enabled).toBe(false)
   })
 })

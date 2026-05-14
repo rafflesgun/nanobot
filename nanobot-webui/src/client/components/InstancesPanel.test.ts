@@ -35,8 +35,9 @@ describe('InstancesPanel', () => {
     await wrapper.get('[data-testid="create-instance"]').trigger('click')
     expect(wrapper.text()).toContain('Beta Prime')
 
-    await wrapper.get('[data-testid="toggle-beta"]').trigger('click')
-    expect(wrapper.text()).toContain('disabled')
+    await wrapper.get('[data-testid="toggle-beta"]').trigger('change')
+    const beta = (wrapper.vm as any).localInstances.find((i: any) => i.id === 'beta')
+    expect(beta.enabled).toBe(false)
 
     await wrapper.get('[data-testid="delete-beta"]').trigger('click')
     expect(wrapper.text()).not.toContain('Beta Prime')
@@ -44,7 +45,7 @@ describe('InstancesPanel', () => {
 
   it('loads persisted instance drafts and saves CRUD changes', async () => {
     const loadInstances = vi.fn().mockResolvedValue([{ id: 'beta', name: 'Beta', baseUrl: 'http://beta', enabled: true }])
-    const saveInstances = vi.fn().mockResolvedValue(undefined)
+    const saveInstances = vi.fn().mockResolvedValue([{ id: 'alpha', name: 'Alpha', baseUrl: 'http://alpha', enabled: true }, { id: 'beta', name: 'Beta', baseUrl: 'http://beta', enabled: false }])
     const wrapper = mount(InstancesPanel, {
       props: {
         token: 'dashboard',
@@ -55,7 +56,7 @@ describe('InstancesPanel', () => {
     })
 
     await vi.waitFor(() => expect(wrapper.text()).toContain('Beta'))
-    await wrapper.get('[data-testid="toggle-beta"]').trigger('click')
+    await wrapper.get('[data-testid="toggle-beta"]').trigger('change')
 
     expect(loadInstances).toHaveBeenCalledWith('dashboard')
     await vi.waitFor(() => expect(saveInstances).toHaveBeenCalled())

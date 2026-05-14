@@ -211,17 +211,7 @@ watch(() => props.token, loadSubagents)
 .mode-badge.readonly { background: oklch(50% 0.04 255 / 0.3); color: var(--muted); }
 .mode-badge.editing { background: oklch(70% 0.15 145 / 0.15); color: var(--success); }
 .editor-actions { display: flex; gap: 0.4rem; }
-.btn { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--fg); font-size: 12px; font-weight: 560; cursor: pointer; transition: all 0.15s; }
-.btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.btn:hover:not(:disabled) { border-color: oklch(64% 0.18 255 / 0.4); }
-.compact { min-height: 2rem; padding: 0 0.6rem; }
-.btn-primary { border-color: oklch(64% 0.18 255 / 0.5); background: oklch(64% 0.18 255 / 0.15); color: oklch(78% 0.14 255); }
-.btn-primary:hover:not(:disabled) { background: oklch(64% 0.18 255 / 0.25); border-color: var(--accent); }
 .btn-secondary { color: var(--muted); }
-.btn-ghost { border-color: transparent; background: transparent; color: var(--muted); }
-.btn-ghost:hover:not(:disabled) { background: var(--surface-2); color: var(--fg); }
-.btn-danger-ghost { border-color: transparent; background: transparent; color: oklch(68% 0.1 25); }
-.btn-danger-ghost:hover:not(:disabled) { background: oklch(68% 0.17 25 / 0.12); color: oklch(75% 0.14 25); }
 .error-text { color: var(--warn); margin: 0; }
 @media (max-width: 960px) { .subagents-layout { grid-template-columns: 1fr; } .subagents-header { flex-direction: column; } }
 </style>

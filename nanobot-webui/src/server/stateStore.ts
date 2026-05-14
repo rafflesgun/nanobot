@@ -35,23 +35,11 @@ export type StateTopic = {
   }
 }
 
-export type StateInstance = {
-  id: string
-  name: string
-  baseUrl: string
-  adminToken?: string
-  websocketToken?: string
-  enabled: boolean
-}
-
 export type WebuiState = {
   topics: StateTopic[]
-  instances: StateInstance[]
 }
 
-export type StateStore = ReturnType<typeof createStateStore>
-
-const defaultState: WebuiState = { topics: [], instances: [] }
+const defaultState: WebuiState = { topics: [] }
 
 function statePath(dataDir: string) {
   return path.join(dataDir, 'webui-state.json')
@@ -59,19 +47,11 @@ function statePath(dataDir: string) {
 
 function normalizeState(raw: Partial<WebuiState> | undefined): WebuiState {
   return {
-    topics: Array.isArray(raw?.topics) ? raw.topics : [],
-    instances: Array.isArray(raw?.instances) ? raw.instances : []
+    topics: Array.isArray(raw?.topics) ? raw.topics : []
   }
 }
 
-export function publicStateInstance(instance: StateInstance) {
-  return {
-    id: instance.id,
-    name: instance.name,
-    baseUrl: instance.baseUrl,
-    enabled: instance.enabled
-  }
-}
+export type StateStore = ReturnType<typeof createStateStore>
 
 export function createStateStore(dataDir: string) {
   let writeLock: Promise<void> = Promise.resolve()
@@ -103,10 +83,6 @@ export function createStateStore(dataDir: string) {
     async writeTopics(topics: StateTopic[]) {
       const current = await read()
       await write({ ...current, topics })
-    },
-    async writeInstances(instances: StateInstance[]) {
-      const current = await read()
-      await write({ ...current, instances })
     }
   }
 }

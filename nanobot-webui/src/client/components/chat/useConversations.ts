@@ -23,16 +23,14 @@ function generateId(): string {
   }
 }
 
-function getToday(): Date {
-  const d = new Date()
-  d.setHours(0, 0, 0, 0)
-  return d
-}
-
 function getLastEntryDate(conv: Conversation): Date {
   const updatedAt = (conv as Record<string, unknown>).updatedAt
   if (typeof updatedAt === 'string') {
     return new Date(updatedAt)
+  }
+  if (conv.transcript?.entries?.length) {
+    const last = conv.transcript.entries[conv.transcript.entries.length - 1]
+    if (last?.timestamp) return new Date(last.timestamp)
   }
   return new Date(0)
 }
@@ -105,12 +103,13 @@ export function useConversations(options: UseConversationsOptions) {
   }
 
   function createConversation(name: string, memberIds: string[]): Conversation {
-    const conv: Conversation = {
+    const conv = {
       id: generateId(),
       name,
       selectedIds: memberIds,
       transcript: { entries: [], debugEvents: [], nextEntryId: 1 },
-    }
+      updatedAt: new Date().toISOString(),
+    } as Conversation
     conversations.value = [conv, ...conversations.value]
     activeConversationId.value = conv.id
     return conv
@@ -134,6 +133,13 @@ export function useConversations(options: UseConversationsOptions) {
     activeConversationId.value = id
   }
 
+  function touchConversation(id: string) {
+    const conv = conversations.value.find((c: Conversation) => c.id === id)
+    if (conv) {
+      ;(conv as Record<string, unknown>).updatedAt = new Date().toISOString()
+    }
+  }
+
   async function persistConversations(token: string) {
     await options.saveConversationsApi(token, conversations.value)
   }
@@ -148,6 +154,7 @@ export function useConversations(options: UseConversationsOptions) {
     deleteConversation,
     renameConversation,
     selectConversation,
+    touchConversation,
     persistConversations,
   }
 }

@@ -15,6 +15,10 @@ const props = withDefaults(defineProps<{
   saveInstances: () => saveStateInstances
 })
 
+const emit = defineEmits<{
+  'instances-changed': [instances: PublicInstance[]]
+}>()
+
 type LocalInstance = StateInstance & { persisted?: boolean }
 
 const localInstances = ref<LocalInstance[]>(props.instances.map((instance) => ({ ...instance, persisted: true })))
@@ -23,6 +27,7 @@ const id = ref('')
 const name = ref('')
 const baseUrl = ref('')
 const adminToken = ref('')
+const websocketUrl = ref('')
 const websocketToken = ref('')
 const editMode = ref<'gui' | 'json'>('gui')
 const jsonDraft = ref('')
@@ -38,6 +43,7 @@ function resetForm() {
   name.value = ''
   baseUrl.value = ''
   adminToken.value = ''
+  websocketUrl.value = ''
   websocketToken.value = ''
 }
 
@@ -49,9 +55,10 @@ function saveInstance() {
     existing.name = name.value.trim()
     existing.baseUrl = baseUrl.value.trim()
     if (adminToken.value) existing.adminToken = adminToken.value
+    if (websocketUrl.value) existing.websocketUrl = websocketUrl.value
     if (websocketToken.value) existing.websocketToken = websocketToken.value
   } else {
-    localInstances.value.push({ id: nextId, name: name.value.trim(), baseUrl: baseUrl.value.trim(), adminToken: adminToken.value, websocketToken: websocketToken.value, enabled: true, persisted: false })
+    localInstances.value.push({ id: nextId, name: name.value.trim(), baseUrl: baseUrl.value.trim(), adminToken: adminToken.value, websocketUrl: websocketUrl.value, websocketToken: websocketToken.value, enabled: true, persisted: false })
   }
   persistInstances()
   resetForm()
@@ -63,6 +70,7 @@ function editInstance(instance: LocalInstance) {
   name.value = instance.name
   baseUrl.value = instance.baseUrl
   adminToken.value = ''
+  websocketUrl.value = ''
   websocketToken.value = ''
 }
 
@@ -78,7 +86,13 @@ function deleteInstance(instanceId: string) {
 
 function persistInstances() {
   if (!props.token) return
-  void props.saveInstances(props.token, localInstances.value)
+  void props.saveInstances(props.token, localInstances.value).then((saved) => {
+    const publicInstances = Array.isArray(saved) ? saved : localInstances.value.map(({ persisted, adminToken, websocketUrl, websocketToken, ...rest }) => rest)
+    emit('instances-changed', publicInstances)
+  }).catch(() => {
+    const publicInstances = localInstances.value.map(({ persisted, adminToken, websocketUrl, websocketToken, ...rest }) => rest)
+    emit('instances-changed', publicInstances)
+  })
 }
 
 function selectMode(mode: 'gui' | 'json') {
@@ -86,6 +100,7 @@ function selectMode(mode: 'gui' | 'json') {
     jsonDraft.value = JSON.stringify(localInstances.value.map((i) => {
       const obj: Record<string, unknown> = { id: i.id, name: i.name, baseUrl: i.baseUrl, enabled: i.enabled }
       if (i.adminToken) obj.adminToken = i.adminToken
+      if (i.websocketUrl) obj.websocketUrl = i.websocketUrl
       if (i.websocketToken) obj.websocketToken = i.websocketToken
       return obj
     }), null, 2)
@@ -147,7 +162,7 @@ onMounted(() => {
   <section class="panel instances-panel">
     <div class="panel-heading">
       <div>
-        <h2>Instances</h2>
+        <h2>Agents</h2>
         <p>Manage agent instance connections to the dashboard.</p>
       </div>
     </div>
@@ -180,6 +195,10 @@ onMounted(() => {
           <input data-testid="new-instance-admin-token" v-model="adminToken" type="password" autocomplete="off">
         </label>
         <label>
+          <span>WebSocket URL</span>
+          <input data-testid="new-instance-ws-url" v-model="websocketUrl" type="text" placeholder="ws://nanobot-beta:8765">
+        </label>
+        <label>
           <span>WebSocket token</span>
           <input data-testid="new-instance-ws-token" v-model="websocketToken" type="password" autocomplete="off">
         </label>
@@ -192,21 +211,20 @@ onMounted(() => {
         <article v-for="instance in localInstances" :key="instance.id" class="instance-card">
           <header>
             <div class="instance-meta">
-              <span class="dot" :class="instance.enabled ? 'success' : 'danger'"></span>
+              <label class="toggle">
+                <input type="checkbox" :data-testid="`toggle-${instance.id}`" :checked="instance.enabled" @change="toggleInstance(instance)">
+                <span class="toggle-slider"></span>
+              </label>
               <div>
                 <strong>{{ instance.name }}</strong>
                 <span class="instance-id">{{ instance.id }}</span>
               </div>
             </div>
-            <span class="status-badge" :class="instance.enabled ? 'enabled' : 'disabled'">{{ instance.enabled ? 'enabled' : 'disabled' }}</span>
           </header>
           <p class="instance-url">{{ instance.baseUrl }}</p>
           <div class="instance-actions">
             <button class="btn btn-ghost compact" type="button" :data-testid="`edit-${instance.id}`" @click="editInstance(instance)">
               <Icon icon="mdi:pencil-outline" :width="13" /> Edit
-            </button>
-            <button class="btn btn-ghost compact" type="button" :data-testid="`toggle-${instance.id}`" @click="toggleInstance(instance)">
-              <Icon :icon="instance.enabled ? 'mdi:pause' : 'mdi:play'" :width="13" /> {{ instance.enabled ? 'Disable' : 'Enable' }}
             </button>
             <button class="btn btn-danger-ghost compact" type="button" :data-testid="`delete-${instance.id}`" @click="deleteInstance(instance.id)">
               <Icon icon="mdi:delete-outline" :width="13" /> Delete
@@ -249,29 +267,21 @@ onMounted(() => {
 .instance-cards { display: grid; gap: 0.5rem; }
 .instance-card { display: grid; gap: 0.6rem; padding: 0.85rem 1rem; }
 .instance-card header { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; }
-.instance-meta { display: flex; align-items: center; gap: 8px; }
-.instance-meta .dot { flex-shrink: 0; }
-.instance-meta div { display: flex; align-items: baseline; gap: 6px; }
+.instance-meta { display: flex; align-items: center; gap: 10px; }
 .instance-meta strong { font-size: 14px; }
 .instance-id { color: var(--muted); font-size: 11px; font-family: var(--font-mono); }
-.status-badge { font-size: 10px; padding: 2px 8px; border-radius: 4px; font-weight: 600; text-transform: uppercase; }
-.status-badge.enabled { background: oklch(70% 0.15 145 / 0.12); color: var(--success); }
-.status-badge.disabled { background: oklch(50% 0.04 255 / 0.3); color: var(--muted); }
 .instance-url { color: var(--muted); margin: 0; font-size: 12px; font-family: var(--font-mono); }
 .instance-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-.btn { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--fg); font-size: 12px; font-weight: 560; cursor: pointer; transition: all 0.15s; }
-.btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.btn:hover:not(:disabled) { border-color: oklch(64% 0.18 255 / 0.4); }
-.compact { min-height: 2rem; padding: 0 0.6rem; }
-.btn-primary { border-color: oklch(64% 0.18 255 / 0.5); background: oklch(64% 0.18 255 / 0.15); color: oklch(78% 0.14 255); }
-.btn-primary:hover:not(:disabled) { background: oklch(64% 0.18 255 / 0.25); border-color: var(--accent); }
-.btn-ghost { border-color: transparent; background: transparent; color: var(--muted); }
-.btn-ghost:hover:not(:disabled) { background: var(--surface-2); color: var(--fg); }
-.btn-danger-ghost { border-color: transparent; background: transparent; color: oklch(68% 0.1 25); }
-.btn-danger-ghost:hover:not(:disabled) { background: oklch(68% 0.17 25 / 0.12); color: oklch(75% 0.14 25); }
 .json-editor-panel { display: grid; gap: 0.75rem; }
 .error-text { color: var(--warn); margin: 0; line-height: 1.5; }
 .muted { color: var(--muted); }
 .empty { text-align: center; padding: 2rem 0; font-size: 13px; }
+.toggle { position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; cursor: pointer; }
+.toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+.toggle-slider { position: absolute; inset: 0; border-radius: 20px; background: oklch(40% 0.02 255); border: 1px solid var(--border); transition: all 0.2s ease; }
+.toggle-slider::before { content: ''; position: absolute; width: 14px; height: 14px; left: 2px; bottom: 2px; border-radius: 50%; background: var(--muted); transition: all 0.2s ease; }
+.toggle input:checked + .toggle-slider { background: oklch(64% 0.18 255 / 0.25); border-color: oklch(64% 0.18 255 / 0.5); }
+.toggle input:checked + .toggle-slider::before { transform: translateX(16px); background: oklch(72% 0.16 255); }
+.toggle input:focus-visible + .toggle-slider { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (max-width: 900px) { .instances-layout { grid-template-columns: 1fr; } }
 </style>

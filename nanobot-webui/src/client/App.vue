@@ -172,7 +172,7 @@ onMounted(async () => {
           <KeepAlive>
             <ChatView v-if="activeTab === 'chat'" :token="token" :instances="instances" />
           </KeepAlive>
-          <InstancesPanel v-if="activeTab === 'agents'" :token="token" :instances="instances" />
+          <InstancesPanel v-if="activeTab === 'agents'" :token="token" :instances="instances" @instances-changed="instances = $event" />
           <ManagePanel v-if="activeTab === 'manage'" :token="token" :instances="instances" />
           <section v-else-if="activeTab === 'logs'" class="logs-page">
             <div class="panel-heading">
@@ -276,6 +276,16 @@ select {
 button {
   cursor: pointer;
 }
+
+.btn { display: inline-flex; align-items: center; gap: 5px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--fg); font-size: 12px; font-weight: 560; cursor: pointer; transition: background 0.15s, border-color 0.15s, color 0.15s; padding: 0.4rem 0.75rem; min-height: 2rem; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-primary { border-color: oklch(64% 0.18 255 / 0.5); background: oklch(64% 0.18 255 / 0.15); color: oklch(78% 0.14 255); }
+.btn-primary:hover:not(:disabled) { background: oklch(64% 0.18 255 / 0.28); border-color: var(--accent); }
+.btn-ghost { color: var(--muted); }
+.btn-ghost:hover:not(:disabled) { background: var(--surface-2); color: var(--fg); }
+.btn-danger-ghost { color: oklch(68% 0.1 25); }
+.btn-danger-ghost:hover:not(:disabled) { background: oklch(68% 0.17 25 / 0.12); color: oklch(75% 0.14 25); }
+.compact { padding: 0 0.6rem; min-height: 2rem; }
 
 input,
 select {

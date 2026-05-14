@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createStateStore, publicStateInstance, type StateInstance, type StateTopic } from './stateStore'
+import { createStateStore, type StateTopic } from './stateStore'
 
 let tempDirs: string[] = []
 
@@ -21,7 +21,7 @@ describe('stateStore', () => {
   it('returns empty defaults when the state file does not exist', async () => {
     const store = createStateStore(await tempDataDir())
 
-    await expect(store.read()).resolves.toEqual({ topics: [], instances: [] })
+    await expect(store.read()).resolves.toEqual({ topics: [] })
   })
 
   it('persists topics to a json file under the data directory', async () => {
@@ -75,19 +75,6 @@ describe('stateStore', () => {
 
     await store.writeTopics(topics)
 
-    await expect(store.read()).resolves.toEqual({ topics, instances: [] })
-  })
-
-  it('persists instances while redacting secrets from public instance data', async () => {
-    const store = createStateStore(await tempDataDir())
-    const instances: StateInstance[] = [
-      { id: 'beta', name: 'Beta', baseUrl: 'http://beta', adminToken: 'admin-secret', websocketToken: 'ws-secret', enabled: true }
-    ]
-
-    await store.writeInstances(instances)
-
-    await expect(store.read()).resolves.toMatchObject({ instances })
-    expect(publicStateInstance(instances[0])).toEqual({ id: 'beta', name: 'Beta', baseUrl: 'http://beta', enabled: true })
-    expect(JSON.stringify(publicStateInstance(instances[0]))).not.toContain('secret')
+    await expect(store.read()).resolves.toEqual({ topics })
   })
 })

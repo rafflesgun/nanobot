@@ -27,6 +27,22 @@ function isStreaming(): boolean {
   return props.entry.text.endsWith('▍')
 }
 
+async function copyMarkdown() {
+  await copyToClipboard(props.entry.text)
+  copied.value = true
+  setTimeout(() => { copied.value = false }, 2000)
+}
+
+function onMentionClick(e: MouseEvent) {
+  const target = (e.target as HTMLElement).closest('.mention-tag') as HTMLElement | null
+  if (!target) return
+  const tag = target.textContent ?? ''
+  void copyToClipboard(tag).then(() => {
+    target.classList.add('copied')
+    setTimeout(() => { target.classList.remove('copied') }, 1200)
+  })
+}
+
 function displayText(): string {
   if (isStreaming()) return props.entry.text.slice(0, -1)
   return props.entry.text
@@ -64,12 +80,6 @@ async function copyToClipboard(text: string) {
     document.execCommand('copy')
     document.body.removeChild(ta)
   }
-}
-
-async function copyMarkdown() {
-  await copyToClipboard(props.entry.text)
-  copied.value = true
-  setTimeout(() => { copied.value = false }, 2000)
 }
 
 function decodeHtmlEntities(html: string): string {
@@ -168,11 +178,11 @@ function parsedBlocks(): Array<{ type: 'html' | 'code'; content: string; languag
         <span class="bubble-name">{{ instance?.name ?? entry.label }}</span>
       </div>
       <div class="bubble-content">
-        <div class="markdown-body">
-          <template v-for="(block, i) in parsedBlocks()" :key="i">
-            <div v-if="block.type === 'html'" v-html="block.content" />
-            <CodeBlock v-else :language="block.language" :code="block.rawCode" />
-          </template>
+          <div class="markdown-body" @click="onMentionClick">
+            <template v-for="(block, i) in parsedBlocks()" :key="i">
+              <div v-if="block.type === 'html'" v-html="block.content" />
+              <CodeBlock v-else :language="block.language" :code="block.rawCode" />
+            </template>
           <span v-if="isStreaming()" class="streaming-cursor">▍</span>
         </div>
         <div class="bubble-footer">
@@ -431,9 +441,25 @@ function parsedBlocks(): Array<{ type: 'html' | 'code'; content: string; languag
 .markdown-body :deep(.mention-tag) {
   background: oklch(64% 0.18 255 / 0.12);
   color: oklch(72% 0.14 250);
-  padding: 0.1em 0.3em;
-  border-radius: 4px;
-  font-weight: 500;
+  padding: 0.1em 0.45em;
+  border-radius: 999px;
+  border: 1px solid oklch(64% 0.18 255 / 0.25);
+  font-weight: 600;
+  font-size: 0.9em;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  user-select: none;
+}
+
+.markdown-body :deep(.mention-tag:hover) {
+  background: oklch(64% 0.18 255 / 0.22);
+  border-color: oklch(64% 0.18 255 / 0.45);
+}
+
+.markdown-body :deep(.mention-tag.copied) {
+  background: oklch(70% 0.14 145 / 0.15);
+  border-color: oklch(70% 0.14 145 / 0.35);
+  color: var(--success);
 }
 
 .streaming-cursor {

@@ -7,8 +7,8 @@ import serve from 'koa-static'
 import { isDashboardAuthorized } from './auth.js'
 import { registerChatBridge } from './chatBridge.js'
 import type { WebuiConfig } from './config.js'
-import { loadConfig, publicInstance } from './config.js'
-import { createStateStore, publicStateInstance, type StateStore } from './stateStore.js'
+import { loadConfig, publicInstance, writeInstancesToConfig } from './config.js'
+import { createStateStore, type StateStore } from './stateStore.js'
 import { proxyAdminRequest as defaultProxyAdminRequest } from './upstream.js'
 import { createWebuiLogger, type WebuiLogger } from './webuiLogger.js'
 
@@ -116,20 +116,15 @@ export function createApp(config: WebuiConfig, deps: CreateAppDeps = {}) {
     ctx.body = { topics }
   })
 
-  router.get('/api/state/instances', async (ctx) => {
-    try {
-      const state = await stateStore.read()
-      ctx.body = { instances: state.instances.map(publicStateInstance) }
-    } catch {
-      ctx.body = { instances: [] }
-    }
+  router.get('/api/state/instances', (ctx) => {
+    ctx.body = { instances: config.instances.map(publicInstance) }
   })
 
   router.put('/api/state/instances', async (ctx) => {
     const payload = JSON.parse(await readRequestBody(ctx.req)) as { instances?: unknown }
     const instances = Array.isArray(payload.instances) ? payload.instances : []
-    await stateStore.writeInstances(instances)
-    ctx.body = { instances: instances.map(publicStateInstance) }
+    writeInstancesToConfig(config, instances as Parameters<typeof writeInstancesToConfig>[1])
+    ctx.body = { instances: config.instances.map(publicInstance) }
   })
 
   router.all(/^\/api\/instances\/([^/]+)\/(.*)$/, async (ctx) => {
