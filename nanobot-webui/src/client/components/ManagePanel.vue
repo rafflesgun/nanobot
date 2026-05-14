@@ -110,21 +110,22 @@ async function restartInstance() {
 <style scoped>
 .manage-panel { display: grid; gap: 1rem; }
 .manage-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 1rem; }
-.manage-sidebar { border: 1px solid var(--border); border-radius: var(--radius); background: oklch(19% 0.014 255 / 0.88); padding: 0.75rem; display: grid; gap: 0.4rem; align-content: start; }
-.sidebar-heading { color: var(--fg); font-weight: 700; font-size: 13px; margin-bottom: 0.25rem; }
-.instance-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--muted); text-align: left; cursor: pointer; font-size: 13px; }
-.instance-item:hover { background: var(--surface-2); }
-.instance-item.active { border-color: oklch(64% 0.18 255 / 0.35); background: oklch(64% 0.18 255 / 0.18); color: var(--fg); }
+.manage-sidebar { border: 1px solid var(--border); border-radius: var(--radius); background: oklch(19% 0.014 255 / 0.88); padding: 0.75rem; display: grid; gap: 0.3rem; align-content: start; }
+.sidebar-heading { color: var(--fg); font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.35rem; padding: 0 6px; }
+.instance-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--muted); text-align: left; cursor: pointer; font-size: 13px; font-weight: 500; transition: all 0.15s; }
+.instance-item:hover { background: var(--surface-2); color: var(--fg); }
+.instance-item.active { border-color: oklch(64% 0.18 255 / 0.35); background: oklch(64% 0.18 255 / 0.18); color: var(--fg); font-weight: 600; }
 .instance-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .manage-main { display: grid; gap: 1rem; min-width: 0; }
 .manage-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
-.manage-header h2 { margin: 0; font-size: 16px; }
+.manage-header h2 { margin: 0; font-size: 16px; font-weight: 700; }
 .manage-header p { margin: 0.15rem 0 0; font-size: 12px; }
-.restart-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); color: var(--fg); font-size: 12px; font-weight: 560; cursor: pointer; }
-.restart-btn:hover { border-color: var(--accent); }
-.restart-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.manage-subnav { display: flex; gap: 0.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
-.manage-subnav button { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 560; cursor: pointer; }
+.restart-btn { display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--fg); font-size: 12px; font-weight: 560; cursor: pointer; transition: all 0.15s; }
+.restart-btn:hover:not(:disabled) { border-color: oklch(64% 0.18 255 / 0.4); }
+.restart-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.manage-subnav { display: flex; gap: 0.35rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+.manage-subnav button { display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 560; cursor: pointer; transition: all 0.15s; }
+.manage-subnav button:hover { color: var(--fg); background: var(--surface-2); }
 .manage-subnav button.active { border-color: oklch(64% 0.18 255 / 0.35); background: oklch(64% 0.18 255 / 0.18); color: var(--fg); }
 .manage-content { min-width: 0; }
 .muted { color: var(--muted); line-height: 1.5; margin: 0; }

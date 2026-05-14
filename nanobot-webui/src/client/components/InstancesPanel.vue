@@ -128,8 +128,17 @@ function saveJsonInstances() {
 onMounted(() => {
   if (!props.token) return
   void props.loadInstances(props.token).then((instances) => {
-    if (!Array.isArray(instances)) return
-    localInstances.value = instances.map((instance) => ({ ...instance, persisted: true }))
+    if (!Array.isArray(instances) || instances.length === 0) return
+    const configIds = new Set(props.instances.map((i) => i.id))
+    const stateIds = new Set(instances.map((i) => i.id))
+    const merged = [
+      ...props.instances.map((i) => {
+        const stateVersion = instances.find((s) => s.id === i.id)
+        return { ...(stateVersion ?? i), persisted: true }
+      }),
+      ...instances.filter((s) => !configIds.has(s.id)).map((i) => ({ ...i, persisted: true }))
+    ]
+    localInstances.value = merged
   }).catch(() => {})
 })
 </script>
@@ -143,7 +152,7 @@ onMounted(() => {
       </div>
     </div>
 
-    <div class="instances-toolbar" data-testid="instances-toolbar">
+    <div class="mode-toggle" data-testid="instances-toolbar">
       <button type="button" data-mode="gui" :class="{ active: editMode === 'gui' }" @click="selectMode('gui')">
         <Icon icon="mdi:form-textbox" :width="14" /> GUI Form
       </button>
@@ -174,26 +183,37 @@ onMounted(() => {
           <span>WebSocket token</span>
           <input data-testid="new-instance-ws-token" v-model="websocketToken" type="password" autocomplete="off">
         </label>
-        <button data-testid="create-instance" type="button" @click="saveInstance">{{ editingId ? 'Save instance' : 'Create instance' }}</button>
+        <button data-testid="create-instance" type="button" class="btn btn-primary" @click="saveInstance">
+          <Icon :icon="editingId ? 'mdi:content-save-outline' : 'mdi:plus'" :width="14" /> {{ editingId ? 'Save instance' : 'Create instance' }}
+        </button>
       </form>
 
       <div class="instance-cards">
         <article v-for="instance in localInstances" :key="instance.id" class="instance-card">
           <header>
-            <div>
-              <strong>{{ instance.name }}</strong>
-              <span>{{ instance.id }}</span>
+            <div class="instance-meta">
+              <span class="dot" :class="instance.enabled ? 'success' : 'danger'"></span>
+              <div>
+                <strong>{{ instance.name }}</strong>
+                <span class="instance-id">{{ instance.id }}</span>
+              </div>
             </div>
-            <em>{{ instance.enabled ? 'enabled' : 'disabled' }}</em>
+            <span class="status-badge" :class="instance.enabled ? 'enabled' : 'disabled'">{{ instance.enabled ? 'enabled' : 'disabled' }}</span>
           </header>
-          <p>{{ instance.baseUrl }}</p>
-          <small>{{ instance.persisted ? 'from dashboard state' : 'local draft' }}</small>
+          <p class="instance-url">{{ instance.baseUrl }}</p>
           <div class="instance-actions">
-            <button class="secondary" type="button" :data-testid="`edit-${instance.id}`" @click="editInstance(instance)">Edit</button>
-            <button class="secondary" type="button" :data-testid="`toggle-${instance.id}`" @click="toggleInstance(instance)">{{ instance.enabled ? 'Disable' : 'Enable' }}</button>
-            <button class="secondary danger" type="button" :data-testid="`delete-${instance.id}`" @click="deleteInstance(instance.id)">Delete</button>
+            <button class="btn btn-ghost compact" type="button" :data-testid="`edit-${instance.id}`" @click="editInstance(instance)">
+              <Icon icon="mdi:pencil-outline" :width="13" /> Edit
+            </button>
+            <button class="btn btn-ghost compact" type="button" :data-testid="`toggle-${instance.id}`" @click="toggleInstance(instance)">
+              <Icon :icon="instance.enabled ? 'mdi:pause' : 'mdi:play'" :width="13" /> {{ instance.enabled ? 'Disable' : 'Enable' }}
+            </button>
+            <button class="btn btn-danger-ghost compact" type="button" :data-testid="`delete-${instance.id}`" @click="deleteInstance(instance.id)">
+              <Icon icon="mdi:delete-outline" :width="13" /> Delete
+            </button>
           </div>
         </article>
+        <p v-if="localInstances.length === 0" class="muted empty">No instances configured yet.</p>
       </div>
     </div>
 
@@ -205,7 +225,9 @@ onMounted(() => {
         language="json"
         placeholder="[]"
       />
-      <button type="button" data-testid="save-json-instances" @click="saveJsonInstances">Save All Instances</button>
+      <button type="button" data-testid="save-json-instances" class="btn btn-primary" @click="saveJsonInstances">
+        <Icon icon="mdi:content-save-outline" :width="14" /> Save All Instances
+      </button>
     </div>
   </section>
 </template>
@@ -213,26 +235,43 @@ onMounted(() => {
 <style scoped>
 .panel-heading { margin-bottom: 1rem; }
 .panel-heading p { color: var(--muted); line-height: 1.5; margin: 0.25rem 0 0; }
-.instances-toolbar { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
-.instances-toolbar button { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); color: var(--muted); padding: 0.35rem 0.75rem; font-size: 12px; font-weight: 560; cursor: pointer; }
-.instances-toolbar button.active { border-color: var(--accent); background: oklch(64% 0.18 255 / 0.18); color: var(--fg); }
+.mode-toggle { display: inline-flex; gap: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 0.75rem; }
+.mode-toggle button { display: inline-flex; align-items: center; gap: 5px; padding: 0.35rem 0.75rem; font-size: 12px; font-weight: 560; cursor: pointer; border: none; background: var(--surface); color: var(--muted); transition: all 0.15s; }
+.mode-toggle button + button { border-left: 1px solid var(--border); }
+.mode-toggle button.active { background: oklch(64% 0.18 255 / 0.18); color: var(--fg); }
+.mode-toggle button:hover:not(.active) { background: var(--surface-2); }
 .instances-layout { display: grid; grid-template-columns: minmax(18rem, 0.8fr) minmax(22rem, 1.2fr); gap: 1rem; }
-.instance-form,
-.instance-card { border: 1px solid var(--border); border-radius: var(--radius); background: oklch(19% 0.014 255 / 0.88); padding: 1rem; }
+.instance-form, .instance-card { border: 1px solid var(--border); border-radius: var(--radius); background: oklch(19% 0.014 255 / 0.88); padding: 1rem; }
 .instance-form { display: grid; gap: 0.85rem; align-content: start; }
 .instance-form label { display: grid; gap: 0.4rem; }
-.instance-form span { color: var(--fg); font-weight: 700; }
-.instance-cards { display: grid; gap: 0.75rem; }
-.instance-card { display: grid; gap: 0.75rem; }
-.instance-card header { display: flex; justify-content: space-between; gap: 1rem; }
-.instance-card header div { display: grid; gap: 0.25rem; }
-.instance-card span,
-.instance-card p,
-.instance-card small { color: var(--muted); margin: 0; }
-.instance-card em { border: 1px solid var(--border); border-radius: 999px; color: var(--fg); font-size: 0.75rem; font-style: normal; padding: 0.2rem 0.55rem; }
-.instance-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-.danger { border-color: oklch(68% 0.17 25 / 0.42); color: oklch(80% 0.12 25); }
+.instance-form span { color: var(--fg); font-size: 12px; font-weight: 700; }
+.instance-form input { font-size: 13px; }
+.instance-cards { display: grid; gap: 0.5rem; }
+.instance-card { display: grid; gap: 0.6rem; padding: 0.85rem 1rem; }
+.instance-card header { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; }
+.instance-meta { display: flex; align-items: center; gap: 8px; }
+.instance-meta .dot { flex-shrink: 0; }
+.instance-meta div { display: flex; align-items: baseline; gap: 6px; }
+.instance-meta strong { font-size: 14px; }
+.instance-id { color: var(--muted); font-size: 11px; font-family: var(--font-mono); }
+.status-badge { font-size: 10px; padding: 2px 8px; border-radius: 4px; font-weight: 600; text-transform: uppercase; }
+.status-badge.enabled { background: oklch(70% 0.15 145 / 0.12); color: var(--success); }
+.status-badge.disabled { background: oklch(50% 0.04 255 / 0.3); color: var(--muted); }
+.instance-url { color: var(--muted); margin: 0; font-size: 12px; font-family: var(--font-mono); }
+.instance-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.btn { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--fg); font-size: 12px; font-weight: 560; cursor: pointer; transition: all 0.15s; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn:hover:not(:disabled) { border-color: oklch(64% 0.18 255 / 0.4); }
+.compact { min-height: 2rem; padding: 0 0.6rem; }
+.btn-primary { border-color: oklch(64% 0.18 255 / 0.5); background: oklch(64% 0.18 255 / 0.15); color: oklch(78% 0.14 255); }
+.btn-primary:hover:not(:disabled) { background: oklch(64% 0.18 255 / 0.25); border-color: var(--accent); }
+.btn-ghost { border-color: transparent; background: transparent; color: var(--muted); }
+.btn-ghost:hover:not(:disabled) { background: var(--surface-2); color: var(--fg); }
+.btn-danger-ghost { border-color: transparent; background: transparent; color: oklch(68% 0.1 25); }
+.btn-danger-ghost:hover:not(:disabled) { background: oklch(68% 0.17 25 / 0.12); color: oklch(75% 0.14 25); }
 .json-editor-panel { display: grid; gap: 0.75rem; }
 .error-text { color: var(--warn); margin: 0; line-height: 1.5; }
+.muted { color: var(--muted); }
+.empty { text-align: center; padding: 2rem 0; font-size: 13px; }
 @media (max-width: 900px) { .instances-layout { grid-template-columns: 1fr; } }
 </style>

@@ -59,7 +59,10 @@ describe('InstancesPanel', () => {
 
     expect(loadInstances).toHaveBeenCalledWith('dashboard')
     await vi.waitFor(() => expect(saveInstances).toHaveBeenCalled())
-    expect(saveInstances).toHaveBeenLastCalledWith('dashboard', [expect.objectContaining({ id: 'beta', enabled: false })])
+    expect(saveInstances).toHaveBeenLastCalledWith('dashboard', expect.arrayContaining([
+      expect.objectContaining({ id: 'alpha', enabled: true }),
+      expect.objectContaining({ id: 'beta', enabled: false })
+    ]))
   })
 
   it('toggles between GUI and JSON editor modes', async () => {
