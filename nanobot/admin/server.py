@@ -157,11 +157,20 @@ def _sessions_payload(ctx: AdminContext, query: str) -> dict[str, Any]:
 
 
 def _get_config_payload(ctx: AdminContext) -> dict[str, Any]:
+    from nanobot.config.loader import get_config_path
+
+    path = get_config_path()
+    if path.exists():
+        try:
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
     return ctx.config.model_dump(mode="json", by_alias=True)
 
 
 def _put_config(ctx: AdminContext, body: bytes) -> tuple[dict[str, Any], int]:
-    from nanobot.config.loader import save_config
+    from nanobot.config.loader import get_config_path
 
     try:
         data = json.loads(body.decode("utf-8") or "{}")
@@ -170,16 +179,15 @@ def _put_config(ctx: AdminContext, body: bytes) -> tuple[dict[str, Any], int]:
     if not isinstance(data, dict):
         return {"error": "json object required"}, 400
     try:
-        new_config = Config.model_validate(data)
+        Config.model_validate(data)
     except Exception as exc:
         return {"error": f"invalid config: {exc}"}, 400
-    ctx.config.__dict__.update(new_config.__dict__)
-    for name in type(ctx.config).model_fields:
-        old = getattr(new_config, name)
-        if hasattr(old, "__dict__"):
-            setattr(ctx.config, name, old)
-    save_config(ctx.config)
-    return _get_config_payload(ctx), 200
+    path = get_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    ctx.config = Config.model_validate(data)
+    return data, 200
 
 
 def _builtin_agents_dir() -> Path:
