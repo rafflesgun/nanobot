@@ -130,6 +130,7 @@ include = [
     "nanobot/templates/**/*.md",
     "nanobot/skills/**/*.md",
     "nanobot/skills/**/*.sh",
+    "nanobot/agents/**/*.md",
     "nanobot/web/dist/**/*",
 ]
 # nanobot/web/dist/ is produced by `cd webui && bun run build` and is
@@ -147,7 +148,6 @@ packages = ["nanobot"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "bridge" = "nanobot/bridge"
-"nanobot/agents" = "nanobot/agents"
 
 [tool.hatch.build.targets.sdist]
 include = [
