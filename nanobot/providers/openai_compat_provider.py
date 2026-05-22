@@ -11,6 +11,7 @@ import secrets
 import string
 import time
 import uuid
+from collections import deque
 from collections.abc import Awaitable, Callable
 from ipaddress import ip_address
 from typing import TYPE_CHECKING, Any
@@ -88,6 +89,10 @@ _THINKING_STYLE_MAP: dict[str, Any] = {
     "enable_thinking": lambda on: {"enable_thinking": on},
     "reasoning_split": lambda on: {"reasoning_split": on},
 }
+
+
+def _model_slug(model_name: str) -> str:
+    return model_name.lower().rsplit("/", 1)[-1]
 
 
 def _is_kimi_thinking_model(model_name: str) -> bool:
@@ -455,6 +460,7 @@ class OpenAICompatProvider(LLMProvider):
         """Strip non-standard keys, normalize tool_call IDs."""
         sanitized = LLMProvider._sanitize_request_messages(messages, _ALLOWED_MSG_KEYS)
         id_map: dict[str, str] = {}
+        pending_tool_ids: dict[str, deque[str]] = {}
         force_string_content = bool(self._spec and self._spec.name == "deepseek")
 
         def map_id(value: Any) -> Any:
@@ -462,15 +468,49 @@ class OpenAICompatProvider(LLMProvider):
                 return value
             return id_map.setdefault(value, self._normalize_tool_call_id(value))
 
+        def unique_tool_id(value: Any, used_ids: set[str], idx: int) -> str:
+            if isinstance(value, str) and value:
+                base = map_id(value)
+            else:
+                base = _short_tool_id()
+            if not isinstance(base, str) or not base:
+                base = _short_tool_id()
+            if base not in used_ids:
+                return base
+            seed = value if isinstance(value, str) and value else base
+            salt = 1
+            while True:
+                candidate = self._normalize_tool_call_id(f"{seed}:{idx}:{salt}")
+                if isinstance(candidate, str) and candidate not in used_ids:
+                    return candidate
+                salt += 1
+
+        def map_tool_result_id(value: Any) -> Any:
+            if not isinstance(value, str):
+                return value
+            queue = pending_tool_ids.get(value)
+            if queue:
+                mapped = queue.popleft()
+                if not queue:
+                    pending_tool_ids.pop(value, None)
+                return mapped
+            return map_id(value)
+
         for clean in sanitized:
             if isinstance(clean.get("tool_calls"), list):
                 normalized = []
-                for tc in clean["tool_calls"]:
+                used_ids: set[str] = set()
+                for idx, tc in enumerate(clean["tool_calls"]):
                     if not isinstance(tc, dict):
                         normalized.append(tc)
                         continue
                     tc_clean = dict(tc)
-                    tc_clean["id"] = map_id(tc_clean.get("id"))
+                    raw_id = tc_clean.get("id")
+                    mapped_id = unique_tool_id(raw_id, used_ids, idx)
+                    tc_clean["id"] = mapped_id
+                    used_ids.add(mapped_id)
+                    if isinstance(raw_id, str) and raw_id:
+                        pending_tool_ids.setdefault(raw_id, deque()).append(mapped_id)
                     function = tc_clean.get("function")
                     if isinstance(function, dict):
                         function_clean = dict(function)
@@ -484,11 +524,9 @@ class OpenAICompatProvider(LLMProvider):
                     normalized.append(tc_clean)
                 clean["tool_calls"] = normalized
                 if clean.get("role") == "assistant":
-                    # Some OpenAI-compatible gateways reject assistant messages
-                    # that mix non-empty content with tool_calls.
                     clean["content"] = None
             if "tool_call_id" in clean and clean["tool_call_id"]:
-                clean["tool_call_id"] = map_id(clean["tool_call_id"])
+                clean["tool_call_id"] = map_tool_result_id(clean["tool_call_id"])
             if (
                 force_string_content
                 and not (clean.get("role") == "assistant" and clean.get("tool_calls"))
@@ -591,6 +629,30 @@ class OpenAICompatProvider(LLMProvider):
             thinking_enabled = semantic_effort not in ("none", "minimal")
             kwargs.setdefault("extra_body", {}).update(
                 {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
+            )
+
+            # Moonshot rejects requests that carry both 'reasoning_effort'
+            # and the native 'thinking' param.  We already expressed the
+            # user's intent via the provider-native shape, so drop the
+            # redundant wire-level kwarg.  Only kimi models need this —
+            # Xiaomi's API accepts both params.
+            if _model_slug(model_name) in _KIMI_THINKING_MODELS:
+                kwargs.pop("reasoning_effort", None)
+
+        # OpenRouter uses its own unified `reasoning` field and does not
+        # forward provider-specific thinking shapes to upstream. For known
+        # thinking-capable models routed via OR, mirror the effort signal
+        # into reasoning.effort (OR's documented enum:
+        # "none"|"minimal"|"low"|"medium"|"high"|"xhigh"), which OR
+        # translates to the upstream model's native shape.
+        if (
+            self._spec
+            and self._spec.name == "openrouter"
+            and reasoning_effort is not None
+            and _is_kimi_thinking_model(model_name)
+        ):
+            kwargs.setdefault("extra_body", {}).update(
+                {"reasoning": {"effort": semantic_effort}}
             )
 
         if tools:
@@ -1088,6 +1150,15 @@ class OpenAICompatProvider(LLMProvider):
                     reasoning_parts.append(reasoning)
             for tc in (delta.tool_calls or []) if delta else []:
                 _accum_tc(tc, getattr(tc, "index", 0))
+
+        # Some providers (e.g. Zhipu/GLM) reuse the same tool_call id for
+        # parallel tool calls in streaming mode. Deduplicate before building
+        # the response so downstream tool messages don't collide.
+        _seen_tc_ids: set[str] = set()
+        for b in tc_bufs.values():
+            if not b["id"] or b["id"] in _seen_tc_ids:
+                b["id"] = _short_tool_id()
+            _seen_tc_ids.add(b["id"])
 
         return LLMResponse(
             content="".join(content_parts) or None,

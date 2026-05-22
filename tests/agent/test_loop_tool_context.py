@@ -8,6 +8,7 @@ from nanobot.agent.tools.image_generation import GenerateImageTool
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ProviderConfig, ToolsConfig
 from nanobot.providers.base import LLMResponse, ToolCallRequest
+from nanobot.agent.tools.context import RequestContext
 
 
 class _ContextRecordingTool:
@@ -17,18 +18,12 @@ class _ContextRecordingTool:
     def __init__(self) -> None:
         self.contexts: list[dict] = []
 
-    def set_context(
-        self,
-        channel: str,
-        chat_id: str,
-        metadata: dict | None = None,
-        session_key: str | None = None,
-    ) -> None:
+    def set_context(self, ctx: RequestContext) -> None:
         self.contexts.append({
-            "channel": channel,
-            "chat_id": chat_id,
-            "metadata": metadata,
-            "session_key": session_key,
+            "channel": ctx.channel,
+            "chat_id": ctx.chat_id,
+            "metadata": ctx.metadata,
+            "session_key": ctx.session_key,
         })
 
     async def execute(self, **_kwargs) -> str:
@@ -38,6 +33,10 @@ class _ContextRecordingTool:
 class _Tools:
     def __init__(self, tool: _ContextRecordingTool) -> None:
         self.tool = tool
+
+    @property
+    def tool_names(self) -> list[str]:
+        return ["cron"]
 
     def get(self, name: str):
         return self.tool if name == "cron" else None

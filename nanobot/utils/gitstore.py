@@ -177,7 +177,7 @@ class GitStore:
             sha = self._run_git("rev-parse", "--short=8", "HEAD")
             return sha.stdout.strip() or None
         except Exception:
-            logger.warning("Git auto-commit failed: {}", message)
+            logger.exception("Git auto-commit failed: {}", message)
             return None
 
     def _resolve_sha(self, short_sha: str) -> bytes | None:
@@ -290,7 +290,7 @@ class GitStore:
                 entries.append(CommitInfo(sha=sha[:8], message=msg, timestamp=ts))
             return entries
         except Exception:
-            logger.warning("Git log failed")
+            logger.exception("Git log failed")
             return []
 
     def line_ages(self, file_path: str) -> list[LineAge]:
@@ -339,7 +339,7 @@ class GitStore:
             cp = self._run_git("diff", sha1, sha2, "--", *self._tracked_files)
             return cp.stdout if cp.returncode == 0 else ""
         except Exception:
-            logger.warning("Git diff_commits failed")
+            logger.exception("Git diff_commits failed")
             return ""
 
     def find_commit(self, short_sha: str, max_entries: int = 20) -> CommitInfo | None:
@@ -401,7 +401,7 @@ class GitStore:
                     return None
             return self.auto_commit(f"revert: undo {target}")
         except Exception:
-            logger.warning("Git revert failed for {}", commit)
+            logger.exception("Git revert failed for {}", commit)
             return None
 
     @staticmethod

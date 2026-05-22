@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
 
@@ -55,16 +55,13 @@ class TelegramConfig(Base):
     """Telegram channel configuration."""
 
     enabled: bool = False
-    token: str = ""  # Bot token from @BotFather
-    allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs or usernames
-    proxy: str | None = (
-        None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
-    )
-    reply_to_message: bool = False  # If true, bot replies quote the original message
+    token: str = ""
+    allow_from: list[str] = Field(default_factory=list)
+    proxy: str | None = None
+    reply_to_message: bool = False
     react_emoji: str | list[str] = Field(default_factory=lambda: ["⚡️", "👌", "👀", "🔥", "👍"])
-    group_policy: Literal["open", "mention"] = (
-        "mention"  # "mention" responds when @mentioned or replied to, "open" responds to all
-    )
+    group_policy: Literal["open", "mention"] = "mention"
+    show_reasoning: bool = True
     connection_pool_size: int = 32
     pool_timeout: float = 5.0
     streaming: bool = True
@@ -255,9 +252,10 @@ class ChannelsConfig(Base):
 
     model_config = ConfigDict(extra="allow")
 
-    send_progress: bool = True  # stream agent's text progress to the channel
-    send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
-    show_usage: bool = False  # show token usage hints in responses
+    send_progress: bool = True
+    send_tool_hints: bool = False
+    show_reasoning: bool = True
+    show_usage: bool = False
     send_max_retries: int = Field(
         default=3, ge=0, le=10
     )  # Max delivery attempts (initial send included)
@@ -298,10 +296,40 @@ class DreamConfig(Base):
         return f"every {hours}h"
 
 
+class InlineFallbackConfig(Base):
+    model: str
+    provider: str
+    max_tokens: int | None = None
+    context_window_tokens: int | None = None
+    temperature: float | None = None
+    reasoning_effort: str | None = None
+
+
+FallbackCandidate = str | InlineFallbackConfig
+
+
+class ModelPresetConfig(Base):
+    model: str
+    provider: str = "auto"
+    max_tokens: int = 8192
+    context_window_tokens: int = 65_536
+    temperature: float = 0.1
+    reasoning_effort: str | None = None
+
+    def to_generation_settings(self) -> Any:
+        from nanobot.providers.base import GenerationSettings
+        return GenerationSettings(
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+            reasoning_effort=self.reasoning_effort,
+        )
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
     workspace: str = "~/.nanobot/workspace"
+    model_preset: str | None = None
     model: str = "anthropic/claude-opus-4-5"
     fallback_models: list[str] = Field(
         default_factory=list
@@ -471,6 +499,11 @@ class ProvidersConfig(Base):
     github_copilot: ProviderConfig = Field(
         default_factory=ProviderConfig, exclude=True
     )  # Github Copilot (OAuth)
+    skywork: ProviderConfig = Field(default_factory=ProviderConfig)  # Skywork / APIFree API gateway
+    atomic_chat: ProviderConfig = Field(default_factory=ProviderConfig)  # Atomic Chat local models
+    ant_ling: ProviderConfig = Field(default_factory=ProviderConfig)  # Ant Ling
+    novita: ProviderConfig = Field(default_factory=ProviderConfig)  # Novita AI
+    nvidia: ProviderConfig = Field(default_factory=ProviderConfig)  # NVIDIA NIM (nvapi- keys)
 
 
 class HeartbeatConfig(Base):
@@ -626,6 +659,38 @@ class Config(BaseSettings):
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     subagents: SubAgentsConfig = Field(default_factory=SubAgentsConfig)
     curator: CuratorConfig = Field(default_factory=CuratorConfig)
+    model_presets: dict[str, ModelPresetConfig] = Field(
+        default_factory=dict,
+         validation_alias=AliasChoices("modelPresets", "model_presets"),
+    )
+
+    @model_validator(mode="after")
+    def _validate_model_preset(self) -> "Config":
+        if "default" in self.model_presets:
+            raise ValueError("model_preset name 'default' is reserved for agents.defaults")
+        name = self.agents.defaults.model_preset
+        if name and name != "default" and name not in self.model_presets:
+            raise ValueError(f"model_preset {name!r} not found in model_presets")
+        return self
+
+
+    def resolve_default_preset(self) -> ModelPresetConfig:
+        """Return the implicit `default` preset from agents.defaults fields."""
+        d = self.agents.defaults
+        return ModelPresetConfig(
+            model=d.model, provider=d.provider, max_tokens=d.max_tokens,
+            context_window_tokens=d.context_window_tokens,
+            temperature=d.temperature, reasoning_effort=d.reasoning_effort,
+        )
+
+    def resolve_preset(self, name: str | None = None) -> ModelPresetConfig:
+        """Return effective model params from a named preset or the implicit default."""
+        name = self.agents.defaults.model_preset if name is None else name
+        if not name or name == "default":
+            return self.resolve_default_preset()
+        if name not in self.model_presets:
+            raise KeyError(f"model_preset {name!r} not found in model_presets")
+        return self.model_presets[name]
 
     @property
     def workspace_path(self) -> Path:

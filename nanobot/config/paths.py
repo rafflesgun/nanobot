@@ -7,7 +7,7 @@ from pathlib import Path
 from nanobot.config.loader import get_config_path
 from nanobot.utils.helpers import ensure_dir, get_workspace_path
 
-__all__ = ["get_workspace_path", "load_temperature_overrides", "save_temperature_overrides"]
+__all__ = ["get_workspace_path", "get_webui_dir", "load_temperature_overrides", "save_temperature_overrides"]
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,11 @@ def get_cron_dir() -> Path:
 def get_logs_dir() -> Path:
     """Get the logs directory."""
     return get_runtime_subdir("logs")
+
+
+def get_webui_dir() -> Path:
+    """Return the directory for WebUI-only persisted display threads (JSON)."""
+    return get_runtime_subdir("webui")
 
 
 def get_media_dir(channel: str | None = None, workspace: str | Path | None = None) -> Path:

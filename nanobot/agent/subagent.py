@@ -17,7 +17,7 @@ from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.runner import AgentRunSpec, AgentRunner
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.agent.tools.search import GlobTool, GrepTool
+from nanobot.agent.tools.search import FindFilesTool, GrepTool
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage
@@ -304,7 +304,7 @@ class SubagentManager:
                 )
             )
             tools.register(
-                GlobTool(
+                FindFilesTool(
                     workspace=self.workspace,
                     allowed_dir=allowed_root,
                     extra_allowed_dirs=read_extra,

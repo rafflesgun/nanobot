@@ -41,7 +41,7 @@ from nanobot.agent.tools.file_state import FileStateStore, bind_file_states, res
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.agent.tools.search import GlobTool, GrepTool
+from nanobot.agent.tools.search import FindFilesTool, GrepTool
 from nanobot.agent.tools.self import MyTool
 from nanobot.agent.tools.session_search import SessionSearchTool
 from nanobot.agent.tools.shell import ExecTool
@@ -434,7 +434,7 @@ class AgentLoop:
         self._workflow_progress = WorkflowProgressManager(WorkflowStore(self.workspace))
         self._register_default_tools()
         if _tc.my.enable:
-            self.tools.register(MyTool(loop=self, modify_allowed=_tc.my.allow_set))
+            self.tools.register(MyTool(runtime_state=self, modify_allowed=_tc.my.allow_set))
         self._runtime_vars: dict[str, Any] = {}
         self._current_iteration: int = 0
         self.commands = CommandRouter()
@@ -497,7 +497,7 @@ class AgentLoop:
         )
         for cls in (WriteFileTool, EditFileTool, ListDirTool):
             self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
-        for cls in (GlobTool, GrepTool):
+        for cls in (FindFilesTool, GrepTool):
             self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
 
         # Factories for sub-agent tools (used by recall/curator agents)
@@ -645,7 +645,13 @@ class AgentLoop:
                     elif name in ("session_search", "workflow_run"):
                         tool.set_context(session_key=effective_key)
                     else:
-                        tool.set_context(channel, chat_id)
+                        params = inspect.signature(tool.set_context).parameters
+                        non_self = [p for p in params if p != "self"]
+                        if len(non_self) == 1 and non_self[0] == "ctx":
+                            from nanobot.agent.tools.context import RequestContext
+                            tool.set_context(RequestContext(channel=channel, chat_id=chat_id, session_key=effective_key, metadata=metadata or {}))
+                        else:
+                            tool.set_context(channel, chat_id)
 
     def _ordered_fallback_models(self, primary_model: str) -> list[str]:
         """Return de-duplicated fallback models in the order they should be tried."""
