@@ -78,6 +78,8 @@ class FallbackProvider(LLMProvider):
         provider_factory: Callable[[Any], LLMProvider],
     ):
         self._primary = primary
+        self._request_seq = 0
+        self._active_request_count = 0
         self._fallback_presets = list(fallback_presets)
         self._provider_factory = provider_factory
         self._has_fallbacks = bool(fallback_presets)

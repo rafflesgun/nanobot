@@ -389,6 +389,9 @@ class SubAgentConfig(Base):
 
 class SubAgentsConfig(Base):
     """Sub-agent overrides. Keys match agent names from agents/ directory."""
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="allow")
+
     recall: SubAgentConfig | None = None
     curator: SubAgentConfig | None = None
 
@@ -764,32 +767,35 @@ class Config(BaseSettings):
         return None, None
 
     def get_provider(
-        self, model: str | None = None, agent: AgentDefaults | None = None
+        self, model: str | None = None, agent: AgentDefaults | None = None, preset: ModelPresetConfig | None = None
     ) -> ProviderConfig | None:
         """Get matched provider config (api_key, api_base, extra_headers). Falls back to first available."""
+        model = model or (preset.model if preset else None)
         p, _ = self._match_provider(model, agent=agent)
         return p
 
     def get_provider_name(
-        self, model: str | None = None, agent: AgentDefaults | None = None
+        self, model: str | None = None, agent: AgentDefaults | None = None, preset: ModelPresetConfig | None = None
     ) -> str | None:
         """Get the registry name of the matched provider (e.g. "deepseek", "openrouter")."""
+        model = model or (preset.model if preset else None)
         _, name = self._match_provider(model, agent=agent)
         return name
 
     def get_api_key(
-        self, model: str | None = None, agent: AgentDefaults | None = None
+        self, model: str | None = None, agent: AgentDefaults | None = None, preset: ModelPresetConfig | None = None
     ) -> str | None:
         """Get API key for the given model. Falls back to first available key."""
-        p = self.get_provider(model, agent=agent)
+        p = self.get_provider(model, agent=agent, preset=preset)
         return p.api_key if p else None
 
     def get_api_base(
-        self, model: str | None = None, agent: AgentDefaults | None = None
+        self, model: str | None = None, agent: AgentDefaults | None = None, preset: ModelPresetConfig | None = None
     ) -> str | None:
         """Get API base URL for the given model. Falls back to the provider default when present."""
         from nanobot.providers.registry import find_by_name
 
+        model = model or (preset.model if preset else None)
         p, name = self._match_provider(model, agent=agent)
         if p and p.api_base:
             return p.api_base
@@ -804,4 +810,4 @@ class Config(BaseSettings):
         provider_name = self.tools.image_generation.provider
         return getattr(self.providers, provider_name, None)
 
-    model_config = ConfigDict(env_prefix="NANOBOT_", env_nested_delimiter="__")
+    model_config = ConfigDict(env_prefix="NANOBOT_", env_nested_delimiter="__", extra="ignore")

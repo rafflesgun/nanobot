@@ -704,6 +704,69 @@ class Consolidator:
                 }
                 self.sessions.save(session)
 
+    async def compact_idle_session(self, key: str, max_suffix: int = 8) -> str | None:
+        """Compact an idle session: archive old messages, keep *max_suffix* most recent.
+
+        Returns the summary text, ``""`` for empty sessions, ``None`` on LLM failure.
+        """
+        lock = self.get_lock(key)
+        async with lock:
+            session = self.sessions.get_or_create(key)
+            if not session.messages:
+                session.updated_at = datetime.now()
+                self.sessions.save(session)
+                return ""
+
+            archive_end = max(0, len(session.messages) - max_suffix)
+            if archive_end <= session.last_consolidated:
+                return ""
+
+            chunk = session.messages[session.last_consolidated : archive_end]
+            if not chunk:
+                return ""
+
+            formatted = MemoryStore._format_messages(chunk)
+            try:
+                response = await self.provider.chat_with_retry(
+                    model=self.model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": render_template(
+                                "agent/consolidator_archive.md",
+                                strip=True,
+                            ),
+                        },
+                        {"role": "user", "content": formatted},
+                    ],
+                    tools=None,
+                    tool_choice=None,
+                )
+                if response.finish_reason == "error":
+                    raise RuntimeError(f"LLM returned error: {response.content}")
+                summary = response.content or "[no summary]"
+            except Exception:
+                logger.warning("compact_idle_session LLM failed for %s, raw-archiving", key)
+                self.store.raw_archive(chunk)
+                session.messages = session.messages[archive_end:]
+                session.last_consolidated = 0
+                self.sessions.save(session)
+                return None
+
+            if summary and summary != "(nothing)":
+                self.store.append_history(summary)
+                session.metadata["_last_summary"] = {
+                    "text": summary,
+                    "last_active": session.updated_at.isoformat(),
+                }
+            else:
+                self.store.raw_archive(chunk)
+
+            session.messages = session.messages[archive_end:]
+            session.last_consolidated = 0
+            self.sessions.save(session)
+            return summary
+
 
 # ---------------------------------------------------------------------------
 # Dream — heavyweight cron-scheduled memory consolidation

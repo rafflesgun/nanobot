@@ -356,13 +356,16 @@ class AgentLoop:
             overrides: dict[str, dict[str, Any]] = {}
             sa = getattr(rtc.config, "subagents", None) if rtc else None
             if sa:
-                for name in ("recall", "curator"):
+                for name in type(sa).model_fields:
                     sub = getattr(sa, name, None)
                     if sub:
                         overrides[name] = {
                             k: v for k, v in sub.model_dump(by_alias=False).items()
                             if v is not None
                         }
+                for name, sub in (sa.__pydantic_extra__ or {}).items():
+                    if isinstance(sub, dict):
+                        overrides[name] = {k: v for k, v in sub.items() if v is not None}
             self._delegate_tool.set_subagent_overrides(overrides)
         except Exception:
             pass
