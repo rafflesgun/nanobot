@@ -7,7 +7,6 @@ from typing import Any
 
 from loguru import logger
 
-from nanobot.agent.subagent import SubagentStatus
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.context import ContextAware, RequestContext
 from nanobot.agent.tools.runtime_state import RuntimeState
@@ -214,7 +213,7 @@ class MyTool(Tool, ContextAware):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _format_status(st: SubagentStatus, indent: str = "  ") -> str:
+    def _format_status(st: "SubagentStatus", indent: str = "  ") -> str:
         elapsed = time.monotonic() - st.started_at
         tool_summary = ", ".join(
             f"{e.get('name', '?')}({e.get('status', '?')})" for e in st.tool_events[-5:]
@@ -232,6 +231,7 @@ class MyTool(Tool, ContextAware):
 
     @staticmethod
     def _format_value(val: Any, key: str = "") -> str:
+        from nanobot.agent.subagent import SubagentStatus
         if isinstance(val, SubagentStatus):
             header = f"Subagent [{val.task_id}] '{val.label}'"
             detail = MyTool._format_status(val, "  ")
@@ -239,6 +239,7 @@ class MyTool(Tool, ContextAware):
         # SubagentManager: delegate to its _task_statuses dict
         if hasattr(val, "_task_statuses") and isinstance(val._task_statuses, dict):
             return MyTool._format_value(val._task_statuses, key)
+        from nanobot.agent.subagent import SubagentStatus
         if isinstance(val, dict) and val and isinstance(next(iter(val.values())), SubagentStatus):
             prefix = f"{key}: " if key else ""
             lines = [f"{prefix}{len(val)} subagent(s):"]

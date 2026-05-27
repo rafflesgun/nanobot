@@ -9,6 +9,12 @@ from typing import Any
 # render it and other channels may ignore unknown keys.
 OUTBOUND_META_AGENT_UI = "_agent_ui"
 
+# Internal-only inbound metadata used by in-process channels to ask the agent
+# loop to update runtime state without going through a user session.
+INBOUND_META_RUNTIME_CONTROL = "_runtime_control"
+RUNTIME_CONTROL_ACK = "_ack"
+RUNTIME_CONTROL_MCP_RELOAD = "mcp_reload"
+
 
 @dataclass
 class InboundMessage:

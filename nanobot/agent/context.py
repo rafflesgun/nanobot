@@ -6,12 +6,48 @@ import platform
 from contextlib import suppress
 from importlib.resources import files as pkg_files
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping, Sequence
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
-from nanobot.utils.helpers import build_assistant_message, current_time_str, detect_image_mime, truncate_text
+from nanobot.agent.tools import mcp as mcp_tools
+from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.bus.events import InboundMessage
+from nanobot.apps.cli import utils as cli_app_utils
+from nanobot.session.goal_state import goal_state_runtime_lines
+from nanobot.utils.helpers import (
+    build_assistant_message,
+    current_time_str,
+    detect_image_mime,
+    truncate_text,
+)
 from nanobot.utils.prompt_templates import render_template
+
+
+def session_extra(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Return persisted kwargs for turn-attached capabilities."""
+    return cli_app_utils.session_extra(metadata) | mcp_tools.session_extra(metadata)
+
+
+def runtime_lines(state: Any, msg: Any, workspace: Path, *, skip: bool = False) -> list[str]:
+    """Return model-visible runtime annotations for turn-attached capabilities."""
+    return [
+        *cli_app_utils.runtime_lines(msg, workspace, skip=skip),
+        *mcp_tools.runtime_lines(
+            msg,
+            configured_server_names=set(state._mcp_servers),
+            connected_server_names=set(state._mcp_stacks),
+            skip=skip,
+        ),
+    ]
+
+
+async def connect_mcp(state: Any, tools: ToolRegistry) -> None:
+    await mcp_tools.connect_missing_servers(state, tools)
+
+
+async def handle_runtime_control(state: Any, msg: InboundMessage, tools: ToolRegistry) -> bool:
+    return await mcp_tools.handle_runtime_control(state, msg, tools)
 
 
 class ContextBuilder:
@@ -183,8 +219,15 @@ class ContextBuilder:
         current_role: str = "user",
         session_summary: str | None = None,
         sender_id: str | None = None,
+        session_metadata: Mapping[str, Any] | None = None,
+        current_runtime_lines: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
+        extra = [
+            *goal_state_runtime_lines(session_metadata),
+        ]
+        if current_runtime_lines:
+            extra.extend(line for line in current_runtime_lines if line)
         runtime_ctx = self._build_runtime_context(
             channel,
             chat_id,

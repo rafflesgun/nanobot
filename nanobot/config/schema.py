@@ -1,7 +1,9 @@
 """Configuration schema using Pydantic."""
 
+from __future__ import annotations
+
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
@@ -9,6 +11,12 @@ from pydantic_settings import BaseSettings
 
 from nanobot.cron.types import CronSchedule
 
+if TYPE_CHECKING:
+    from nanobot.agent.tools.cli_apps import CliAppsToolConfig
+    from nanobot.agent.tools.image_generation import ImageGenerationToolConfig
+    from nanobot.agent.tools.self import MyToolConfig
+    from nanobot.agent.tools.shell import ExecToolConfig
+    from nanobot.agent.tools.web import WebToolsConfig
 
 class Base(BaseModel):
     """Base model that accepts both camelCase and snake_case keys."""
@@ -309,6 +317,9 @@ FallbackCandidate = str | InlineFallbackConfig
 
 
 class ModelPresetConfig(Base):
+    """A named set of model + generation parameters for quick switching."""
+
+    label: str | None = None
     model: str
     provider: str = "auto"
     max_tokens: int = 8192
@@ -444,8 +455,9 @@ class ProviderConfig(Base):
 
     api_key: str | None = None
     api_base: str | None = None
+    api_type: Literal["auto", "chat_completions", "responses"] = "auto"  # Request API surface
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
-    extra_body: dict[str, Any] | None = None  # Extra fields merged into every request body
+    extra_body: dict[str, Any] | None = None  # Extra provider request fields; shape depends on provider/API surface
 
 
 class BedrockProviderConfig(ProviderConfig):
@@ -507,6 +519,16 @@ class ProvidersConfig(Base):
     ant_ling: ProviderConfig = Field(default_factory=ProviderConfig)  # Ant Ling
     novita: ProviderConfig = Field(default_factory=ProviderConfig)  # Novita AI
     nvidia: ProviderConfig = Field(default_factory=ProviderConfig)  # NVIDIA NIM (nvapi- keys)
+
+    @model_validator(mode="after")
+    def _validate_api_type_scope(self) -> "ProvidersConfig":
+        for name in self.__class__.model_fields:
+            if name == "openai":
+                continue
+            provider = getattr(self, name, None)
+            if isinstance(provider, ProviderConfig) and provider.api_type != "auto":
+                raise ValueError("providers.<name>.api_type is only supported for providers.openai")
+        return self
 
 
 class HeartbeatConfig(Base):
@@ -589,6 +611,7 @@ class MCPServerConfig(Base):
     command: str = ""  # Stdio: command to run (e.g. "npx")
     args: list[str] = Field(default_factory=list)  # Stdio: command arguments
     env: dict[str, str] = Field(default_factory=dict)  # Stdio: extra env vars
+    cwd: str = ""  # Stdio: working directory for MCP server runtime artifacts
     url: str = ""  # HTTP/SSE: endpoint URL
     headers: dict[str, str] = Field(default_factory=dict)  # HTTP/SSE: custom headers
     tool_timeout: int = 30  # seconds before a tool call is cancelled
@@ -635,17 +658,35 @@ class ImageGenerationToolConfig(Base):
     quality: Literal["auto", "low", "medium", "high", "standard", "hd"] = "auto"
 
 
-class ToolsConfig(Base):
-    """Tools configuration."""
+def _lazy_default(module: str, class_name: str) -> Any:
+    """Lazily import a class and return a default instance.
 
-    web: WebToolsConfig = Field(default_factory=WebToolsConfig)
-    exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
+    Used to break circular imports: tool config classes import Base from
+    this module, so we can't import them eagerly at module level.
+    """
+    import importlib
+    mod = importlib.import_module(module)
+    cls = getattr(mod, class_name)
+    return cls()
+
+
+class ToolsConfig(Base):
+    """Tools configuration.
+
+    Field types for tool-specific sub-configs are resolved via model_rebuild()
+    at the bottom of this file to avoid circular imports (tool modules import
+    Base from schema.py).
+    """
+
+    web: WebToolsConfig = Field(default_factory=lambda: _lazy_default("nanobot.agent.tools.web", "WebToolsConfig"))
+    exec: ExecToolConfig = Field(default_factory=lambda: _lazy_default("nanobot.agent.tools.shell", "ExecToolConfig"))
+    cli_apps: CliAppsToolConfig = Field(default_factory=lambda: _lazy_default("nanobot.agent.tools.cli_apps", "CliAppsToolConfig"))
     restrict_to_workspace: WorkspaceRestrictionConfig = Field(
         default_factory=WorkspaceRestrictionConfig
     )
-    my: MyToolConfig = Field(default_factory=MyToolConfig)
+    my: MyToolConfig = Field(default_factory=lambda: _lazy_default("nanobot.agent.tools.self", "MyToolConfig"))
     image_generation: ImageGenerationToolConfig = Field(
-        default_factory=ImageGenerationToolConfig
+        default_factory=lambda: _lazy_default("nanobot.config.schema", "ImageGenerationToolConfig"),
     )
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     ssrf_whitelist: list[str] = Field(default_factory=list)
@@ -811,3 +852,43 @@ class Config(BaseSettings):
         return getattr(self.providers, provider_name, None)
 
     model_config = ConfigDict(env_prefix="NANOBOT_", env_nested_delimiter="__", extra="ignore")
+
+
+def _resolve_tool_config_refs() -> None:
+    """Resolve forward references in ToolsConfig by importing tool config classes.
+
+    Must be called after all modules are loaded (breaks circular imports).
+    Re-exports the classes into this module's namespace so existing imports
+    like ``from nanobot.config.schema import ExecToolConfig`` continue to work.
+    """
+    import sys
+
+    from nanobot.agent.tools.cli_apps import CliAppsToolConfig
+    from nanobot.agent.tools.self import MyToolConfig
+    from nanobot.agent.tools.shell import ExecToolConfig
+    from nanobot.agent.tools.web import WebFetchConfig, WebSearchConfig, WebToolsConfig
+
+    # ImageGenerationToolConfig is defined locally in this module.
+    ImageGenerationToolConfig = sys.modules[__name__].ImageGenerationToolConfig  # type: ignore[attr-defined]
+
+    # Re-export into this module's namespace
+    mod = sys.modules[__name__]
+    mod.ExecToolConfig = ExecToolConfig  # type: ignore[attr-defined]
+    mod.CliAppsToolConfig = CliAppsToolConfig  # type: ignore[attr-defined]
+    mod.WebToolsConfig = WebToolsConfig  # type: ignore[attr-defined]
+    mod.WebSearchConfig = WebSearchConfig  # type: ignore[attr-defined]
+    mod.WebFetchConfig = WebFetchConfig  # type: ignore[attr-defined]
+    mod.MyToolConfig = MyToolConfig  # type: ignore[attr-defined]
+    mod.ImageGenerationToolConfig = ImageGenerationToolConfig  # type: ignore[attr-defined]
+
+    ToolsConfig.model_rebuild()
+    Config.model_rebuild()
+
+
+# Eagerly resolve when the import chain allows it (no circular deps at this
+# point).  If it fails (first import triggers a cycle), the rebuild will
+# happen lazily when Config/ToolsConfig is first used at runtime.
+try:
+    _resolve_tool_config_refs()
+except ImportError:
+    pass

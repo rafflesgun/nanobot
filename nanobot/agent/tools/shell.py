@@ -5,16 +5,29 @@ import os
 import re
 import shutil
 import sys
+from dataclasses import dataclass
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
+from pydantic import Field
+
 from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.exec_session import (
+    DEFAULT_EXEC_SESSION_MANAGER,
+    DEFAULT_MAX_OUTPUT_CHARS,
+    DEFAULT_YIELD_MS,
+    MAX_OUTPUT_CHARS,
+    MAX_YIELD_MS,
+    clamp_session_int,
+    format_session_poll,
+)
 from nanobot.agent.tools.sandbox import wrap_command
 from nanobot.agent.tools.schema import IntegerSchema, StringSchema, tool_parameters_schema
 from nanobot.config.paths import get_media_dir
+from nanobot.config.schema import Base
 
 _IS_WINDOWS = sys.platform == "win32"
 
@@ -29,6 +42,25 @@ _WORKSPACE_BOUNDARY_NOTE = (
 )
 
 
+class ExecToolConfig(Base):
+    """Shell exec tool configuration."""
+    enable: bool = True
+    timeout: int = Field(default=60, ge=0)  # Hard timeout (s); 0 = no limit. Not capped by the per-call max.
+    path_append: str = ""
+    sandbox: str = ""
+    allowed_env_keys: list[str] = Field(default_factory=list)
+    allow_patterns: list[str] = Field(default_factory=list)
+    deny_patterns: list[str] = Field(default_factory=list)
+
+
+@dataclass(slots=True)
+class _PreparedCommand:
+    command: str
+    cwd: str
+    env: dict[str, str]
+    timeout: int | None
+    shell_program: str | None
+    login: bool
 @tool_parameters(
     tool_parameters_schema(
         command=StringSchema("The shell command to execute"),
@@ -87,6 +119,7 @@ class ExecTool(Tool):
         self.allowed_dirs = [Path(p).resolve() for p in (allowed_dirs or [])]
         self.path_append = path_append
         self.allowed_env_keys = allowed_env_keys or []
+        self._session_manager = DEFAULT_EXEC_SESSION_MANAGER
 
     @property
     def name(self) -> str:
@@ -123,12 +156,125 @@ class ExecTool(Tool):
         return True
 
     async def execute(
+        self, command: str | None = None, cmd: str | None = None,
+        working_dir: str | None = None, workdir: str | None = None,
+        timeout: int | None = None, shell: str | None = None,
+        login: bool | None = None, yield_time_ms: int | None = None,
+        max_output_chars: int | None = None,
+        max_output_tokens: int | None = None,
+        **kwargs: Any,
+    ) -> str:
+        command = command or cmd
+        working_dir = working_dir or workdir
+        if not command:
+            return "Error: Missing command. Provide command or cmd."
+        if max_output_chars is None:
+            max_output_chars = max_output_tokens
+
+        prepared = self._prepare_command(command, working_dir, timeout, shell, login)
+        if isinstance(prepared, str):
+            return prepared
+
+        if yield_time_ms is not None:
+            return await self._execute_session(prepared, yield_time_ms, max_output_chars)
+
+        try:
+            process = await self._spawn(
+                prepared.command,
+                prepared.cwd,
+                prepared.env,
+                prepared.shell_program,
+                prepared.login,
+            )
+
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=prepared.timeout,
+                )
+            except asyncio.TimeoutError:
+                await self._kill_process(process)
+                return f"Error: Command timed out after {prepared.timeout} seconds"
+            except asyncio.CancelledError:
+                await self._kill_process(process)
+                raise
+
+            output_parts = []
+
+            if stdout:
+                output_parts.append(stdout.decode("utf-8", errors="replace"))
+
+            if stderr:
+                stderr_text = stderr.decode("utf-8", errors="replace")
+                if stderr_text.strip():
+                    output_parts.append(f"STDERR:\n{stderr_text}")
+
+            output_parts.append(f"\nExit code: {process.returncode}")
+
+            result = "\n".join(output_parts) if output_parts else "(no output)"
+
+            max_len = clamp_session_int(max_output_chars, self._MAX_OUTPUT, 1000, MAX_OUTPUT_CHARS)
+            if len(result) > max_len:
+                half = max_len // 2
+                result = (
+                    result[:half]
+                    + f"\n\n... ({len(result) - max_len:,} chars truncated) ...\n\n"
+                    + result[-half:]
+                )
+
+            return result
+
+        except Exception as e:
+            return f"Error executing command: {str(e)}"
+
+    async def _execute_session(
+        self,
+        prepared: _PreparedCommand,
+        yield_time_ms: int | None,
+        max_output_chars: int | None,
+    ) -> str:
+        try:
+            session_id, poll = await self._session_manager.start(
+                command=prepared.command,
+                cwd=prepared.cwd,
+                env=prepared.env,
+                timeout=prepared.timeout,
+                shell_program=prepared.shell_program,
+                login=prepared.login,
+                yield_time_ms=clamp_session_int(yield_time_ms, DEFAULT_YIELD_MS, 0, MAX_YIELD_MS),
+                max_output_chars=clamp_session_int(
+                    max_output_chars,
+                    DEFAULT_MAX_OUTPUT_CHARS,
+                    1000,
+                    MAX_OUTPUT_CHARS,
+                ),
+            )
+            return format_session_poll(session_id, poll)
+        except Exception as exc:
+            return f"Error executing command: {exc}"
+
+    def _resolve_timeout(self, timeout: int | None) -> int | None:
+        """Resolve the effective hard timeout in seconds (None = no limit).
+
+        A per-call timeout supplied by the model stays capped at _MAX_TIMEOUT so
+        the LLM cannot request unbounded execution. The config-level default
+        (self.timeout) may exceed that cap, and 0 disables the limit entirely
+        for trusted long-running tasks (#3595).
+        """
+        if timeout:
+            return min(timeout, self._MAX_TIMEOUT)
+        if self.timeout and self.timeout > 0:
+            return self.timeout
+        return None
+
+    def _prepare_command(
         self,
         command: str,
         working_dir: str | None = None,
         timeout: int | None = None,
-        **kwargs: Any,
-    ) -> str:
+        shell: str | None = None,
+        login: bool | None = None,
+    ) -> _PreparedCommand | str:
         cwd = working_dir or self.working_dir or os.getcwd()
 
         # Prevent an LLM-supplied working_dir from escaping the configured
@@ -166,7 +312,7 @@ class ExecTool(Tool):
                 command = wrap_command(self.sandbox, command, workspace, cwd)
                 cwd = str(Path(workspace).resolve())
 
-        effective_timeout = min(timeout or self.timeout, self._MAX_TIMEOUT)
+        effective_timeout = self._resolve_timeout(timeout)
         env = self._build_env()
 
         if self.path_append:
@@ -176,61 +322,25 @@ class ExecTool(Tool):
                 env["NANOBOT_PATH_APPEND"] = self.path_append
                 command = f'export PATH="$PATH{os.pathsep}$NANOBOT_PATH_APPEND"; {command}'
 
-        try:
-            process = await self._spawn(command, cwd, env)
-
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(),
-                    timeout=effective_timeout,
-                )
-            except asyncio.TimeoutError:
-                await self._kill_process(process)
-                return f"Error: Command timed out after {effective_timeout} seconds"
-            except asyncio.CancelledError:
-                await self._kill_process(process)
-                raise
-
-            output_parts = []
-
-            if stdout:
-                output_parts.append(stdout.decode("utf-8", errors="replace"))
-
-            if stderr:
-                stderr_text = stderr.decode("utf-8", errors="replace")
-                if stderr_text.strip():
-                    output_parts.append(f"STDERR:\n{stderr_text}")
-
-            output_parts.append(f"\nExit code: {process.returncode}")
-
-            result = "\n".join(output_parts) if output_parts else "(no output)"
-
-            max_len = self._MAX_OUTPUT
-            if len(result) > max_len:
-                half = max_len // 2
-                result = (
-                    result[:half]
-                    + f"\n\n... ({len(result) - max_len:,} chars truncated) ...\n\n"
-                    + result[-half:]
-                )
-
-            return result
-
-        except Exception as e:
-            return f"Error executing command: {str(e)}"
+        return _PreparedCommand(
+            command=command,
+            cwd=cwd,
+            env=env,
+            timeout=effective_timeout,
+            shell_program=shell,
+            login=login or False,
+        )
 
     @staticmethod
     async def _spawn(
         command: str,
         cwd: str,
         env: dict[str, str],
+        shell_program: str | None = None,
+        login: bool | None = None,
     ) -> asyncio.subprocess.Process:
         """Launch *command* in a platform-appropriate shell."""
         if _IS_WINDOWS:
-            # create_subprocess_exec re-quotes args via list2cmdline, which
-            # breaks commands containing paths with spaces (e.g. "D:\Program
-            # Files\python.exe" "script.py"). create_subprocess_shell passes
-            # the raw command string to COMSPEC without re-quoting.
             return await asyncio.create_subprocess_shell(
                 command,
                 stdout=asyncio.subprocess.PIPE,
@@ -238,12 +348,13 @@ class ExecTool(Tool):
                 cwd=cwd,
                 env=env,
             )
-        bash = shutil.which("bash") or "/bin/bash"
+        shell = shell_program or (shutil.which("bash") or "/bin/bash")
+        args = [shell]
+        if login is not False:
+            args.append("-l")
+        args.extend(["-c", command])
         return await asyncio.create_subprocess_exec(
-            bash,
-            "-l",
-            "-c",
-            command,
+            *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,

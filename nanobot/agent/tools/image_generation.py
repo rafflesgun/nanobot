@@ -88,6 +88,44 @@ class GenerateImageTool(Tool):
         """Set the callback used to send generated images."""
         self._send_callback = callback
 
+    def _provider_client(self) -> ImageGenerationProvider | None:
+        provider = self._provider_config()
+        cls = get_image_gen_provider(self.config.provider)
+        if cls is None:
+            return None
+        kwargs = {
+            "api_key": provider.api_key if provider else None,
+            "api_base": provider.api_base if provider else None,
+            "extra_headers": provider.extra_headers if provider else None,
+            "extra_body": provider.extra_body if provider else None,
+        }
+        return cls(**kwargs)
+
+    def _resolve_reference_image(self, value: str) -> str:
+        raw_path = Path(value).expanduser()
+        path = raw_path if raw_path.is_absolute() else self.workspace / raw_path
+        try:
+            resolved = path.resolve(strict=True)
+        except OSError as exc:
+            raise ImageGenerationError(f"reference image not found: {value}") from exc
+
+        allowed_roots = [self.workspace.resolve(), get_media_dir().resolve()]
+        if not any(_is_relative_to(resolved, root) for root in allowed_roots):
+            raise ImageGenerationError(
+                "reference_images must be inside the workspace or nanobot media directory"
+            )
+        if not resolved.is_file():
+            raise ImageGenerationError(f"reference image is not a file: {value}")
+        raw = resolved.read_bytes()
+        if detect_image_mime(raw) is None:
+            raise ImageGenerationError(f"unsupported reference image: {value}")
+        return str(resolved)
+
+    def _resolve_reference_images(self, values: list[str] | None) -> list[str]:
+        if not values:
+            return []
+        return [self._resolve_reference_image(value) for value in values if value]
+
     async def execute(
         self,
         prompt: str,
@@ -100,6 +138,10 @@ class GenerateImageTool(Tool):
             return "Error: No target channel/chat specified"
         if not self._send_callback:
             return "Error: Message sending not configured"
+
+        client = self._provider_client()
+        if client is None:
+            return f"Error: unsupported image generation provider '{self.config.provider}'"
 
         try:
             result = await self._service.generate(prompt, size=size, quality=quality)

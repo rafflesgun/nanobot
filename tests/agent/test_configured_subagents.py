@@ -73,6 +73,7 @@ async def test_spawn_tool_passes_subagent_id_to_manager() -> None:
         subagent_id="research",
         model_override=None,
         origin_message_id=None,
+        temperature=None,
     )
 
 
@@ -96,6 +97,7 @@ async def test_spawn_tool_keeps_topic_session_key() -> None:
         subagent_id=None,
         model_override=None,
         origin_message_id=None,
+        temperature=None,
     )
 
 
@@ -119,6 +121,7 @@ async def test_spawn_tool_passes_model_override_to_manager() -> None:
         subagent_id=None,
         model_override="openai/gpt-4o",
         origin_message_id=None,
+        temperature=None,
     )
 
 

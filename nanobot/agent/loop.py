@@ -10,15 +10,19 @@ import os
 import re
 import time
 from contextlib import AsyncExitStack, nullcontext, suppress
+from enum import Enum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 
+from nanobot.agent import context as agent_context
+from nanobot.agent import model_presets as preset_helpers
 from nanobot.agent.autocompact import AutoCompact
 from nanobot.agent.curator import CuratorScheduler
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.hook import AgentHook, AgentHookContext, CompositeHook
+from nanobot.agent.progress_hook import AgentProgressHook
 from nanobot.agent.memory import Consolidator, Dream
 from nanobot.agent.runner import (
     _MAX_INJECTIONS_PER_TURN,
@@ -60,10 +64,16 @@ from nanobot.config.paths import (
 from nanobot.config.schema import AgentDefaults, ProviderConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.factory import ProviderSnapshot
+from nanobot.session.goal_state import (
+    goal_state_runtime_lines,
+    runner_wall_llm_timeout_s,
+    sustained_goal_active,
+)
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.document import extract_documents
 from nanobot.utils.helpers import image_placeholder_text
 from nanobot.utils.helpers import truncate_text as truncate_text_fn
+from nanobot.utils.image_generation_intent import image_generation_prompt
 from nanobot.utils.progress_events import (
     build_tool_event_finish_payloads,
     build_tool_event_start_payload,
@@ -72,6 +82,7 @@ from nanobot.utils.progress_events import (
 )
 from nanobot.utils.runtime import (
     EMPTY_FINAL_RESPONSE_MESSAGE,
+    SUSTAINED_GOAL_CONTINUE_PROMPT,
     format_provider_error,
     is_provider_error_message,
 )
@@ -93,6 +104,16 @@ if TYPE_CHECKING:
 UNIFIED_SESSION_KEY = "unified:default"
 
 _tool_factories: dict[str, Any] = {}
+
+class TurnState(Enum):
+    RESTORE = auto()
+    COMPACT = auto()
+    COMMAND = auto()
+    BUILD = auto()
+    RUN = auto()
+    SAVE = auto()
+    RESPOND = auto()
+    DONE = auto()
 
 
 class _LoopHook(AgentHook):
@@ -263,6 +284,7 @@ class AgentLoop:
         workspace: Path,
         model: str | None = None,
         max_iterations: int | None = None,
+        max_concurrent_subagents: int | None = None,
         context_window_tokens: int | None = None,
         context_block_limit: int | None = None,
         max_tool_result_chars: int | None = None,
@@ -390,6 +412,8 @@ class AgentLoop:
             disabled_skills=disabled_skills,
             max_iterations=self.max_iterations,
             max_repeat_lookups=self.max_repeat_lookups,
+            max_concurrent_subagents=max_concurrent_subagents,
+            llm_wall_timeout_for_session=lambda sk: runner_wall_llm_timeout_s(self.sessions, sk),
         )
         self._unified_session = unified_session
         self._max_messages = max_messages if max_messages > 0 else 120
@@ -449,6 +473,62 @@ class AgentLoop:
         if not isinstance(content, str):
             return content
         return re.sub(r"^(?:\[Message Time: [^\]\n]+\](?:\n+|$))+", "", content).lstrip("\n")
+
+    @classmethod
+    def from_config(
+        cls,
+        config: Any,
+        bus: MessageBus | None = None,
+        **extra: Any,
+    ) -> AgentLoop:
+        """Create an AgentLoop from config with the common parameter set.
+
+        Extra keyword arguments are forwarded to ``AgentLoop.__init__``,
+        allowing callers to override or extend the standard config-derived
+        parameters (e.g. ``cron_service``, ``session_manager``).
+        """
+        from nanobot.providers.factory import make_provider
+
+        if bus is None:
+            bus = MessageBus()
+        defaults = config.agents.defaults
+        provider = extra.pop("provider", None) or make_provider(config)
+        resolved = config.resolve_preset()
+        model = extra.pop("model", None) or resolved.model
+        context_window_tokens = extra.pop("context_window_tokens", None) or resolved.context_window_tokens
+        provider_snapshot_loader = extra.pop("provider_snapshot_loader", None)
+        preset_snapshot_loader = extra.pop("preset_snapshot_loader", None) or preset_helpers.make_preset_snapshot_loader(
+            config,
+            provider_snapshot_loader,
+        )
+        return cls(
+            bus=bus,
+            provider=provider,
+            workspace=config.workspace_path,
+            model=model,
+            max_iterations=defaults.max_tool_iterations,
+            max_concurrent_subagents=defaults.max_concurrent_subagents,
+            context_window_tokens=context_window_tokens,
+            context_block_limit=defaults.context_block_limit,
+            max_tool_result_chars=defaults.max_tool_result_chars,
+            provider_retry_mode=defaults.provider_retry_mode,
+            tool_hint_max_length=defaults.tool_hint_max_length,
+            restrict_to_workspace=config.tools.restrict_to_workspace,
+            mcp_servers=config.tools.mcp_servers,
+            channels_config=config.channels,
+            timezone=defaults.timezone,
+            unified_session=defaults.unified_session,
+            disabled_skills=defaults.disabled_skills,
+            session_ttl_minutes=defaults.session_ttl_minutes,
+            consolidation_ratio=defaults.consolidation_ratio,
+            max_messages=defaults.max_messages,
+            tools_config=config.tools,
+            model_presets=preset_helpers.configured_model_presets(config),
+            model_preset=defaults.model_preset,
+            provider_snapshot_loader=provider_snapshot_loader,
+            preset_snapshot_loader=preset_snapshot_loader,
+            **extra,
+        )
 
     def _sync_subagent_runtime_limits(self) -> None:
         """Keep subagent runtime limits aligned with mutable loop settings."""
@@ -688,6 +768,66 @@ class AgentLoop:
 
         return format_tool_hints(tool_calls)
 
+    async def _build_retry_wait_callback(
+        self, msg: InboundMessage
+    ) -> Callable[[str], Awaitable[None]]:
+        """Build a retry-wait callback that publishes to the message bus."""
+
+        async def _on_retry_wait(content: str) -> None:
+            meta = dict(msg.metadata or {})
+            meta["_retry_wait"] = True
+            await self.bus.publish_outbound(
+                OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=content,
+                    metadata=meta,
+                )
+            )
+
+        return _on_retry_wait
+
+    def _persist_user_message_early(
+        self,
+        msg: InboundMessage,
+        session: Session,
+        **kwargs: Any,
+    ) -> bool:
+        """Persist the triggering user message before the turn starts.
+
+        Returns True if the message was persisted.
+        """
+        media_paths = [p for p in (msg.media or []) if isinstance(p, str) and p]
+        has_text = isinstance(msg.content, str) and msg.content.strip()
+        if has_text or media_paths:
+            extra: dict[str, Any] = ({"media": list(media_paths)} if media_paths else {}) | agent_context.session_extra(msg.metadata)
+            extra.update(kwargs)
+            text = msg.content if isinstance(msg.content, str) else ""
+            session.add_message("user", text, **extra)
+            self._mark_pending_user_turn(session)
+            self.sessions.save(session)
+            return True
+        return False
+
+    def _build_initial_messages(
+        self,
+        msg: InboundMessage,
+        session: Session,
+        history: list[dict[str, Any]],
+        pending_summary: str | None,
+    ) -> list[dict[str, Any]]:
+        """Build the initial message list for the LLM turn."""
+        return self.context.build_messages(
+            history=history,
+            current_message=image_generation_prompt(msg.content, msg.metadata),
+            media=msg.media if msg.media else None,
+            channel=msg.channel,
+            chat_id=self._runtime_chat_id(msg),
+            sender_id=msg.sender_id,
+            session_summary=pending_summary,
+            session_metadata=session.metadata, current_runtime_lines=agent_context.runtime_lines(self, msg, self.context.workspace),
+        )
+
     async def _dispatch_command_inline(
         self,
         msg: InboundMessage,
@@ -839,118 +979,162 @@ class AgentLoop:
                 metadata=_meta,
             )
 
-        try:
-            new_temp = float(temp_arg)
-            if new_temp < 0 or new_temp > 2.0:
-                return OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content="❌ Temperature must be between 0.0 and 2.0.",
-                    metadata=_meta,
-                )
-        except ValueError:
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=f"❌ Invalid temperature value: `{temp_arg}`. Use a number like `0.7`.",
-                metadata=_meta,
-            )
-
-        self._temperature_overrides[session_key] = new_temp
-        save_temperature_overrides(self._temperature_overrides)
-        logger.info("Temperature set to {} for session {}", new_temp, session_key)
-        return OutboundMessage(
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            content=f"✅ Temperature set to `{new_temp}` for this session.\nUse `/model temp reset` to revert to default.",
-            metadata=_meta,
-        )
-
-    async def _handle_stats_command(self, msg: InboundMessage, args: list[str]) -> OutboundMessage:
-        """Handle /stats command for chat, topic, or global token usage."""
-        _meta = dict(msg.metadata or {})
-        _meta["command_response"] = True
-
-        if args and args[0].lower() == "topic" and _meta.get("message_thread_id") is None:
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content="❌ This command is only available in topic threads.",
-                metadata=_meta,
-            )
-
-        if args and args[0].lower() == "all":
-            stats = self.stats_manager.get_total_stats()
-            if not stats:
-                return OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content="📊 No token usage statistics found.",
-                    metadata=_meta,
-                )
-
-            total_messages = sum(stat["count"] for stat in stats.values())
-            total_input = sum(stat["total_input_tokens"] for stat in stats.values())
-            total_cached = sum(stat.get("total_cached_tokens", 0) for stat in stats.values())
-            total_tokens = sum(stat["total_tokens"] for stat in stats.values())
-            response = "📊 Total Token Usage Statistics\n\n"
-            response += f"• Total messages: {total_messages}\n"
-            if total_cached:
-                response += f"• Cached tokens: {total_cached:,}\n"
-                if total_input:
-                    response += f"• Cache hit rate: {total_cached * 100 // total_input}%\n"
-            response += f"• Total tokens: {total_tokens:,}\n\n"
-            for channel, stat in stats.items():
-                cached_text = ""
-                if stat.get("total_cached_tokens", 0):
-                    cached_text = f", {stat['total_cached_tokens']:,} cached"
-                response += (
-                    f"📡 {channel}: {stat['total_tokens']:,} tokens{cached_text} ({stat['count']} messages)\n"
-                )
-
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=response,
-                metadata=_meta,
-            )
-
-        stats = self.stats_manager.get_stats(msg.channel, msg.chat_id)
-        if not stats:
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content="📊 No token usage statistics found for this chat.",
-                metadata=_meta,
-            )
-
-        total_messages = stats["count"]
-        total_input = stats["total_input_tokens"]
-        total_output = stats["total_output_tokens"]
-        total_tokens = stats["total_tokens"]
-        total_cached = stats.get("total_cached_tokens", 0)
-
-        response = "📊 Token Usage Statistics"
-        if _meta.get("message_thread_id") is not None:
-            response += f" (Topic {_meta.get('message_thread_id')})"
-        else:
-            response += " (This Chat)"
-        response += "\n\n"
-        response += f"• Total messages: {total_messages}\n"
-        response += f"• Input tokens: {total_input:,}\n"
-        response += f"• Output tokens: {total_output:,}\n"
-        if total_cached:
-            response += f"• Cached tokens: {total_cached:,}\n"
-            if total_input:
-                response += f"• Cache hit rate: {total_cached * 100 // total_input}%\n"
-        response += f"• Total tokens: {total_tokens:,}\n\n"
-
         return OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,
             content=response,
             metadata=_meta,
         )
+
+    async def _run_agent_loop(
+        self,
+        msg: InboundMessage,
+        session_key: str,
+        session: Session,
+        pending_summary: str | None = None,
+        on_progress: Callable[..., Awaitable[None]] | None = None,
+        on_stream: Callable[[str], Awaitable[None]] | None = None,
+        on_stream_end: Callable[..., Awaitable[None]] | None = None,
+        message_id: str | None = None,
+        thread_id: int | None = None,
+        channel: str | None = None,
+        chat_id: str | None = None,
+        *,
+        metadata: dict[str, Any] | None = None,
+    ) -> tuple[str | None, list[dict[str, Any]], list[dict[str, Any]], str | None, bool]:
+        """Run the agent loop for a single message.
+
+        Returns (final_content, tools_used, messages, stop_reason, had_injections).
+        """
+        self._sync_subagent_runtime_limits()
+
+        loop_hook = AgentProgressHook(
+            on_progress=on_progress,
+            on_stream=on_stream,
+            on_stream_end=on_stream_end,
+            channel=channel,
+            chat_id=chat_id,
+            message_id=message_id,
+            metadata=metadata,
+            session_key=session_key,
+            tool_hint_max_length=self.tool_hint_max_length,
+            set_tool_context=self._set_tool_context,
+            on_iteration=lambda iteration: setattr(self, "_current_iteration", iteration),
+        )
+        hook: AgentHook = (
+            CompositeHook([loop_hook] + self._extra_hooks) if self._extra_hooks else loop_hook
+        )
+
+        async def _checkpoint(payload: dict[str, Any]) -> None:
+            if session is None:
+                return
+            self._set_runtime_checkpoint(session, payload)
+
+        async def _drain_pending(*, limit: int = _MAX_INJECTIONS_PER_TURN) -> list[dict[str, Any]]:
+            """Drain follow-up messages from the pending queue.
+
+            When no messages are immediately available but sub-agents
+            spawned in this dispatch are still running, blocks until at
+            least one result arrives (or timeout).  This keeps the runner
+            loop alive so subsequent sub-agent completions are consumed
+            in-order rather than dispatched separately.
+            """
+            if pending_queue is None:
+                return []
+
+            def _to_user_message(pending_msg: InboundMessage) -> dict[str, Any]:
+                content = pending_msg.content
+                media = pending_msg.media if pending_msg.media else None
+                if media:
+                    content, media = extract_documents(content, media)
+                    media = media or None
+                user_content = self.context._build_user_content(content, media)
+                return {"role": "user", "content": user_content}
+
+            items: list[dict[str, Any]] = []
+            while len(items) < limit:
+                try:
+                    items.append(_to_user_message(pending_queue.get_nowait()))
+                except asyncio.QueueEmpty:
+                    break
+
+            # Block if nothing drained but sub-agents spawned in this dispatch
+            # are still running.  Keeps the runner loop alive so subsequent
+            # completions are injected in-order rather than dispatched separately.
+            if (not items
+                    and session is not None
+                    and self.subagents.get_running_count_by_session(session.key) > 0):
+                try:
+                    msg = await asyncio.wait_for(pending_queue.get(), timeout=300)
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "Timeout waiting for sub-agent completion in session {}",
+                        session.key,
+                    )
+                    return items
+                items.append(_to_user_message(msg))
+                while len(items) < limit:
+                    try:
+                        items.append(_to_user_message(pending_queue.get_nowait()))
+                    except asyncio.QueueEmpty:
+                        break
+
+            return items
+
+        active_session_key = session.key if session else session_key
+        file_state_token = bind_file_states(self._file_state_store.for_session(active_session_key))
+        # Build continuation message that embeds the active goal objective so
+        # the LLM can see it even if earlier Runtime Context was truncated.
+        _goal_lines = goal_state_runtime_lines(session.metadata if session is not None else None)
+        _goal_continue = (
+            "You have an active sustained goal:\n\n"
+            + "\n".join(_goal_lines)
+            + "\n\nPlease continue working toward the objective using your tools, "
+            "or call complete_goal if the work is truly finished."
+        ) if _goal_lines else SUSTAINED_GOAL_CONTINUE_PROMPT
+        try:
+            result = await self.runner.run(AgentRunSpec(
+                initial_messages=initial_messages,
+                tools=self.tools,
+                model=self.model,
+                max_iterations=self.max_iterations,
+                max_tool_result_chars=self.max_tool_result_chars,
+                hook=hook,
+                error_message="Sorry, I encountered an error calling the AI model.",
+                concurrent_tools=True,
+                workspace=self.workspace,
+                session_key=session.key if session else None,
+                context_window_tokens=self.context_window_tokens,
+                context_block_limit=self.context_block_limit,
+                provider_retry_mode=self.provider_retry_mode,
+                progress_callback=on_progress,
+                stream_progress_deltas=on_stream is not None,
+                retry_wait_callback=on_retry_wait,
+                checkpoint_callback=_checkpoint,
+                injection_callback=_drain_pending,
+                # Sustained goals may legitimately exceed NANOBOT_LLM_TIMEOUT_S; idle stall
+                # is still capped by NANOBOT_STREAM_IDLE_TIMEOUT_S in streaming providers.
+                llm_timeout_s=runner_wall_llm_timeout_s(
+                    self.sessions,
+                    session.key if session is not None else session_key,
+                    metadata=(session.metadata if session is not None else None),
+                ),
+                goal_active_predicate=lambda: sustained_goal_active(session.metadata) if session is not None else False,
+                goal_continue_message=_goal_continue,
+            ))
+        finally:
+            reset_file_states(file_state_token)
+        self._last_usage = result.usage
+        if result.stop_reason == "max_iterations":
+            logger.warning("Max iterations ({}) reached", self.max_iterations)
+            # Push final content through stream so streaming channels (e.g. Feishu)
+            # update the card instead of leaving it empty.
+            if on_stream and on_stream_end:
+                await on_stream(result.final_content or "")
+                await on_stream_end(resuming=False)
+        elif result.stop_reason == "error":
+            logger.error("LLM returned error: {}", (result.final_content or "")[:200])
+        return result.final_content, result.tools_used, result.messages, result.stop_reason, result.had_injections
 
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
@@ -982,6 +1166,8 @@ class AgentLoop:
                 logger.warning("Error consuming inbound message: {}, continuing...", e)
                 continue
 
+            if await agent_context.handle_runtime_control(self, msg, self.tools):
+                continue
             raw = msg.content.strip()
             if self.commands.is_priority(raw):
                 await self._dispatch_command_inline(
@@ -1466,6 +1652,96 @@ class AgentLoop:
         """Stop the agent loop."""
         self._running = False
         logger.info("Agent loop stopping")
+
+    async def _process_system_message(
+        self,
+        msg: InboundMessage,
+        session_key: str | None = None,
+        on_progress: Callable[..., Awaitable[None]] | None = None,
+        on_stream: Callable[[str], Awaitable[None]] | None = None,
+        on_stream_end: Callable[..., Awaitable[None]] | None = None,
+        pending_queue: asyncio.Queue | None = None,
+    ) -> OutboundMessage | None:
+        """Process a system inbound message (e.g. subagent announce)."""
+        channel, chat_id = (
+            msg.chat_id.split(":", 1) if ":" in msg.chat_id else ("cli", msg.chat_id)
+        )
+        logger.info("Processing system message from {}", msg.sender_id)
+        key = msg.session_key_override or f"{channel}:{chat_id}"
+        session = self.sessions.get_or_create(key)
+        if self._restore_runtime_checkpoint(session):
+            self.sessions.save(session)
+        if self._restore_pending_user_turn(session):
+            self.sessions.save(session)
+
+        session, pending = self.auto_compact.prepare_session(session, key)
+        if pending:
+            logger.info("Memory compact triggered for session {}", key)
+
+        await self.consolidator.maybe_consolidate_by_tokens(
+            session,
+            replay_max_messages=self._max_messages,
+        )
+        is_subagent = msg.sender_id == "subagent"
+        if is_subagent and self._persist_subagent_followup(session, msg):
+            logger.debug("Subagent result persisted for session {}", key)
+            self.sessions.save(session)
+        self._set_tool_context(
+            channel, chat_id, msg.metadata.get("message_id"),
+            msg.metadata, session_key=key,
+        )
+        _hist_kwargs: dict[str, Any] = {
+            "max_messages": self._max_messages,
+            "max_tokens": self._replay_token_budget(),
+            "include_timestamps": True,
+        }
+        history = session.get_history(**_hist_kwargs)
+        current_role = "assistant" if is_subagent else "user"
+
+        messages = self.context.build_messages(
+            history=history,
+            current_message="" if is_subagent else msg.content,
+            channel=channel,
+            chat_id=chat_id,
+            current_role=current_role,
+            sender_id=msg.sender_id,
+            session_summary=pending,
+            session_metadata=session.metadata, current_runtime_lines=agent_context.runtime_lines(self, msg, self.context.workspace, skip=is_subagent),
+        )
+        t_wall = time.time()
+        final_content, _, all_msgs, stop_reason, _ = await self._run_agent_loop(
+            messages, session=session, channel=channel, chat_id=chat_id,
+            message_id=msg.metadata.get("message_id"),
+            metadata=msg.metadata,
+            session_key=key,
+            pending_queue=pending_queue,
+        )
+        wall_done = time.time()
+        latency_ms = max(0, int((wall_done - t_wall) * 1000))
+        self._save_turn(session, all_msgs, 1 + len(history), turn_latency_ms=latency_ms)
+        if channel == "websocket":
+            self._pending_turn_latency_ms[key] = latency_ms
+        session.enforce_file_cap(on_archive=self.context.memory.raw_archive)
+        self._clear_runtime_checkpoint(session)
+        self.sessions.save(session)
+        self._schedule_background(
+            self.consolidator.maybe_consolidate_by_tokens(
+                session,
+                replay_max_messages=self._max_messages,
+            )
+        )
+        content = final_content or "Background task completed."
+        outbound_metadata: dict[str, Any] = {}
+        if channel == "slack" and key.startswith("slack:") and key.count(":") >= 2:
+            outbound_metadata["slack"] = {"thread_ts": key.split(":", 2)[2]}
+        if origin_message_id := msg.metadata.get("origin_message_id"):
+            outbound_metadata["origin_message_id"] = origin_message_id
+        return OutboundMessage(
+            channel=channel,
+            chat_id=chat_id,
+            content=content,
+            metadata=outbound_metadata,
+        )
 
     async def _process_message(
         self,

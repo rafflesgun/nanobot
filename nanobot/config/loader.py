@@ -10,8 +10,11 @@ import pydantic
 from loguru import logger
 from pydantic import BaseModel
 
-from nanobot.config.schema import Config
+from nanobot.config.schema import Config, _resolve_tool_config_refs
 
+# Global variable to store current config path (for multi-instance support)
+_current_config_path: Path | None = None
+_schema_refs_ready = False
 
 def get_config_path() -> Path:
     """Get the default configuration file path."""
@@ -35,6 +38,11 @@ def load_config(config_path: Path | None = None) -> Config:
     Returns:
         Loaded configuration object.
     """
+    global _schema_refs_ready
+    if not _schema_refs_ready:
+        _resolve_tool_config_refs()
+        _schema_refs_ready = True
+
     path = config_path or _config_path_override or _current_config_path or get_config_path()
 
     config = Config()
@@ -180,7 +188,6 @@ def _migrate_config(data: dict) -> dict:
 
 
 _config_path_override: Path | None = None
-_current_config_path: Path | None = None
 
 
 def set_config_path(path: Path | str | None) -> None:

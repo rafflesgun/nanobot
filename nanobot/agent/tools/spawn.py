@@ -3,13 +3,31 @@
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.context import ContextAware, RequestContext
+from nanobot.agent.tools.schema import NumberSchema, StringSchema, tool_parameters_schema
 
 if TYPE_CHECKING:
     from nanobot.agent.subagent import SubagentManager
 
 
-class SpawnTool(Tool):
+@tool_parameters(
+    tool_parameters_schema(
+        task=StringSchema("The task for the subagent to complete"),
+        label=StringSchema("Optional short label for the task (for display)"),
+        temperature=NumberSchema(
+            description=(
+                "Optional sampling temperature for the subagent "
+                "(0.0 = deterministic, higher = more creative). "
+                "Defaults to the provider's configured temperature."
+            ),
+            minimum=0.0,
+            maximum=2.0,
+        ),
+        required=["task"],
+    )
+)
+class SpawnTool(Tool, ContextAware):
     """Tool to spawn a subagent for background task execution."""
 
     def __init__(self, manager: "SubagentManager"):
@@ -78,32 +96,12 @@ class SpawnTool(Tool):
             )
         return description
 
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "task": {
-                    "type": "string",
-                    "description": "The task for the subagent to complete",
-                },
-                "label": {
-                    "type": "string",
-                    "description": "Optional short label for the task (for display)",
-                },
-                "subagent_id": {
-                    "type": "string",
-                    "description": "Optional configured subagent profile to use for this task",
-                },
-            },
-            "required": ["task"],
-        }
-
     async def execute(
         self,
         task: str,
         label: str | None = None,
         subagent_id: str | None = None,
+        temperature: float | None = None,
         **kwargs: Any,
     ) -> str:
         """Spawn a subagent to execute the given task."""
@@ -128,6 +126,7 @@ class SpawnTool(Tool):
             "subagent_id": subagent_id,
             "model_override": self._model_override.get(),
             "origin_message_id": self._origin_message_id.get(),
+            "temperature": temperature,
         }
         try:
             return await self._manager.spawn(**spawn_kwargs)
@@ -141,4 +140,5 @@ class SpawnTool(Tool):
                 origin_chat_id=self._origin_chat_id.get(),
                 session_key=self._session_key.get(),
                 origin_message_id=self._origin_message_id.get(),
+                temperature=temperature,
             )

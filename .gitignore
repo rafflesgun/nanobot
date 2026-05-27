@@ -100,3 +100,4 @@ temp/
 *.tmp
 /.ccb
 exp/
+.playwright-mcp/

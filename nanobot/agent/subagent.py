@@ -101,6 +101,8 @@ class SubagentManager:
         disabled_skills: list[str] | None = None,
         max_iterations: int | None = None,
         max_repeat_lookups: int | None = None,
+        max_concurrent_subagents: int | None = None,
+        llm_wall_timeout_for_session: Callable[[str | None], float | None] | None = None,
     ):
         self.provider = provider
         self.workspace = workspace
@@ -132,17 +134,22 @@ class SubagentManager:
             if max_iterations is not None
             else defaults.max_tool_iterations
         )
-        self.max_concurrent_subagents = defaults.max_concurrent_subagents
+        self.max_concurrent_subagents = (
+            max_concurrent_subagents
+            if max_concurrent_subagents is not None
+            else defaults.max_concurrent_subagents
+        )
         self.max_repeat_lookups = (
             max_repeat_lookups
             if max_repeat_lookups is not None
             else defaults.max_repeat_lookups
         )
+        self.runner = AgentRunner(provider)
+        self._llm_wall_timeout_for_session = llm_wall_timeout_for_session
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
         self.stats_manager = StatsManager(workspace)
-        self.runner = AgentRunner(provider)
 
     def set_provider(self, provider: LLMProvider, model: str) -> None:
         self.provider = provider
@@ -160,6 +167,7 @@ class SubagentManager:
         origin_thread_id: int | None = None,
         model_override: str | None = None,
         origin_message_id: str | None = None,
+        temperature: float | None = None,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
         task_id = str(uuid.uuid4())[:8]
@@ -189,6 +197,7 @@ class SubagentManager:
                 subagent_id=subagent_id,
                 model_override=model_override,
                 origin_message_id=origin_message_id,
+                temperature=temperature,
             )
         )
         self._running_tasks[task_id] = bg_task
@@ -244,6 +253,7 @@ class SubagentManager:
         subagent_id: str | None = None,
         model_override: str | None = None,
         origin_message_id: str | None = None,
+        temperature: float | None = None,
     ) -> None:
         """Execute the subagent task and announce the result."""
         status = status or SubagentStatus(
@@ -358,6 +368,7 @@ class SubagentManager:
                 initial_messages=messages,
                 tools=tools,
                 model=model_override or agent_config.model,
+                temperature=temperature,
                 max_iterations=self.max_iterations,
                 max_tool_result_chars=self.max_tool_result_chars,
                 error_message="Subagent task failed.",
