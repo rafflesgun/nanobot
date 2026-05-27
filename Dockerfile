@@ -3,7 +3,7 @@ FROM oven/bun:1.2.22 AS webui-builder
 WORKDIR /app
 COPY webui/ ./webui/
 WORKDIR /app/webui
-RUN bun install --frozen-lockfile && bun run build
+RUN bun install && bun run build
 
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
