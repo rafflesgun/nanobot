@@ -15,6 +15,10 @@ if TYPE_CHECKING:
     tool_parameters_schema(
         task=StringSchema("The task for the subagent to complete"),
         label=StringSchema("Optional short label for the task (for display)"),
+        subagent_id=StringSchema(
+            "ID of a configured subagent profile to use "
+            "(e.g. research, writer).  Omit for a generic subagent."
+        ),
         temperature=NumberSchema(
             description=(
                 "Optional sampling temperature for the subagent "

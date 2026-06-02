@@ -6,7 +6,8 @@ the merge with upstream/main on 2 April 2026,
 and the merge with `origin/main` on 27 April 2026,
 and the merge with `upstream/main` on 1 May 2026,
 and the merge with `origin/main` on 6 May 2026,
-and the merge with `origin/main` on 22 May 2026.
+and the merge with `origin/main` on 22 May 2026,
+and the merge with `origin/main` on 27 May 2026.
 
 Goal: help future merge conflict resolution (human or agent)  
 understand intended behavior quickly.
@@ -53,6 +54,7 @@ understand intended behavior quickly.
 | **OpenAI-compatible image generation tool** | ✅ | image_generation.py, agent/tools/image_generation.py, agent/loop.py, cli/commands.py, config/schema.py | tests/test_image_generation_*.py, tests/tools/test_image_generation_tool.py, tests/agent/test_loop_tool_context.py | `tools.imageGeneration.enabled = false`; gateway-only tool registration; uses `providers.openai` or `providers.custom` |
 | Web search enhancements merged into main   | ℹ️     | agent/tools/web.py, README.md                          | tests/tools/test_web_search_tool.py    | Multi-provider search now upstream (`brave`, `tavily`, `duckduckgo`, `searxng`, `jina`) |
 | Sub-agent architecture (delegate tool)          | ✅     | agent/subagents.py, agent/tools/delegate.py, agent/loop.py, config/schema.py, pyproject.toml, utils/stats.py, agents/*.md | tests/agent/test_subagents.py, tests/tools/test_delegate.py, tests/agent/test_curator.py, tests/agent/test_context_fencing.py, tests/utils/test_stats.py, tests/agent/test_skill_usage.py | `subagents.<name>.model`, `fallbackModels`, `timeout_s`; delegate tool replaces spawn for agent-file tasks; per-sub-agent fallback chain; runtime agent discovery; cached token tracking in `/stats` |
+| **Lazy _resolve_tool_config_refs patching**    | ✅     | nanobot/config/schema.py                                | tests/agent/test_configured_subagents.py  | `ToolsConfig.__init__` and `Config.__init__` + `model_validate` patched for lazy resolve; ensures ToolsConfig works even when imported before the full import chain resolves |
 
 ## Detailed Descriptions & Merge Guidance
 

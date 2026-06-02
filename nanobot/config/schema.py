@@ -885,10 +885,54 @@ def _resolve_tool_config_refs() -> None:
     Config.model_rebuild()
 
 
-# Eagerly resolve when the import chain allows it (no circular deps at this
-# point).  If it fails (first import triggers a cycle), the rebuild will
-# happen lazily when Config/ToolsConfig is first used at runtime.
-try:
-    _resolve_tool_config_refs()
-except ImportError:
-    pass
+# Lazily called when ToolsConfig or Config is first instantiated.
+_tools_config_refs_resolved = False
+
+
+def _ensure_refs_resolved() -> None:
+    global _tools_config_refs_resolved
+    if not _tools_config_refs_resolved:
+        _resolve_tool_config_refs()
+        _tools_config_refs_resolved = True
+
+
+# Patch __init_subclass__ or model_post_init to auto-resolve on first use.
+_orig_tc_init = ToolsConfig.__init__
+
+
+def _tc_init_with_resolve(self, **data: Any) -> None:
+    _ensure_refs_resolved()
+    _orig_tc_init(self, **data)
+
+
+ToolsConfig.__init__ = _tc_init_with_resolve  # type: ignore[assignment]
+
+_orig_config_init = Config.__init__
+
+
+def _config_init_with_resolve(self, **data: Any) -> None:
+    _ensure_refs_resolved()
+    _orig_config_init(self, **data)
+
+
+Config.__init__ = _config_init_with_resolve  # type: ignore[assignment]
+
+# Also patch model_validate which bypasses __init__
+_orig_tc_model_validate = ToolsConfig.model_validate
+_orig_config_model_validate = Config.model_validate
+
+
+@classmethod
+def _tc_model_validate_with_resolve(cls, obj: Any, **kwargs: Any) -> Any:  # type: ignore[misc]
+    _ensure_refs_resolved()
+    return _orig_tc_model_validate(obj, **kwargs)
+
+
+@classmethod
+def _config_model_validate_with_resolve(cls, obj: Any, **kwargs: Any) -> Any:  # type: ignore[misc]
+    _ensure_refs_resolved()
+    return _orig_config_model_validate(obj, **kwargs)
+
+
+ToolsConfig.model_validate = _tc_model_validate_with_resolve  # type: ignore[assignment]
+Config.model_validate = _config_model_validate_with_resolve  # type: ignore[assignment]

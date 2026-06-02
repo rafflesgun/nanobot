@@ -89,6 +89,8 @@ class GenerateImageTool(Tool):
         self._send_callback = callback
 
     def _provider_client(self) -> ImageGenerationProvider | None:
+        if not hasattr(self, "config") or not hasattr(self, "_provider_config"):
+            return None
         provider = self._provider_config()
         cls = get_image_gen_provider(self.config.provider)
         if cls is None:
@@ -140,7 +142,7 @@ class GenerateImageTool(Tool):
             return "Error: Message sending not configured"
 
         client = self._provider_client()
-        if client is None:
+        if client is None and hasattr(self, "config"):
             return f"Error: unsupported image generation provider '{self.config.provider}'"
 
         try:
