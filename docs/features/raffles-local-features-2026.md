@@ -7,7 +7,8 @@ and the merge with `origin/main` on 27 April 2026,
 and the merge with `upstream/main` on 1 May 2026,
 and the merge with `origin/main` on 6 May 2026,
 and the merge with `origin/main` on 22 May 2026,
-and the merge with `origin/main` on 27 May 2026.
+and the merge with `origin/main` on 27 May 2026,
+and the merge with `origin/main` on 2 June 2026.
 
 Goal: help future merge conflict resolution (human or agent)  
 understand intended behavior quickly.

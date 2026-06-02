@@ -2005,7 +2005,8 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
             return None
 
     class _FakeCronService:
-        def __init__(self, _store_path: Path) -> None:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.jobs: list = []
             self.on_job = None
 
         async def start(self) -> None:
@@ -2018,17 +2019,7 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
             return {"jobs": 0}
 
         def register_system_job(self, _job) -> None:
-            return None
-
-    class _FakeHeartbeatService:
-        def __init__(self, **_kwargs) -> None:
-            return None
-
-        async def start(self) -> None:
-            return None
-
-        def stop(self) -> None:
-            return None
+            self.jobs.append(_job)
 
     class _FakeServer:
         async def __aenter__(self):
@@ -2076,7 +2067,6 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
     monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCronService)
-    monkeypatch.setattr("nanobot.heartbeat.service.HeartbeatService", _FakeHeartbeatService)
     monkeypatch.setattr("asyncio.start_server", _fake_start_server)
 
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
