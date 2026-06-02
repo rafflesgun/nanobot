@@ -122,6 +122,7 @@ export interface UIFileEdit {
   deleted: number;
   approximate?: boolean;
   status: "editing" | "done" | "error";
+  operation?: "edit" | "delete" | string;
   binary?: boolean;
   error?: string;
   pending?: boolean;
@@ -139,6 +140,37 @@ export interface ChatSummary {
   preview: string;
   /** Unix epoch seconds when this session currently has a turn in flight. */
   runStartedAt?: number | null;
+  workspaceScope?: WorkspaceScopePayload | null;
+}
+
+export type RuntimeSurface = "native" | "browser";
+
+export interface RuntimeCapabilities {
+  can_pick_folder: boolean;
+  can_restart_engine: boolean;
+  can_open_logs: boolean;
+  can_export_diagnostics: boolean;
+}
+
+export type WorkspaceAccessMode = "full" | "restricted";
+
+export type WebuiDefaultAccessMode = "default" | "full";
+
+export interface WorkspaceScopePayload {
+  project_path: string;
+  project_name?: string | null;
+  access_mode?: WorkspaceAccessMode;
+  restrict_to_workspace?: boolean;
+}
+
+export interface WorkspacesPayload {
+  schema_version: number;
+  default_access_mode: WebuiDefaultAccessMode;
+  default_scope: WorkspaceScopePayload;
+  controls: {
+    can_change_project: boolean;
+    can_use_full_access: boolean;
+  };
 }
 
 export type SidebarDensity = "comfortable" | "compact";
@@ -168,6 +200,37 @@ export interface BootstrapResponse {
   ws_path: string;
   expires_in: number;
   model_name?: string | null;
+}
+
+export type RestartBehavior = "none" | "nextTurn" | "engineRestart" | "appRestart";
+
+export type SettingsApplyStatus =
+  | "idle"
+  | "pending"
+  | "applying"
+  | "restarting_engine"
+  | "requires_app_restart";
+
+export interface ProviderModelInfo {
+  id: string;
+  label?: string | null;
+  owned_by?: string | null;
+  context_window?: number | null;
+}
+
+export interface ProviderModelsPayload {
+  provider: string;
+  label: string;
+  status:
+    | "available"
+    | "unsupported"
+    | "not_configured"
+    | "missing_api_base"
+    | "error";
+  models: ProviderModelInfo[];
+  model_count: number;
+  message?: string | null;
+  fetched_at?: number;
 }
 
 export interface SettingsPayload {
