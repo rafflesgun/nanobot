@@ -124,11 +124,13 @@ def test_fallback_models_accept_preset_refs_and_inline_configs() -> None:
 def test_fallback_model_preset_ref_must_exist() -> None:
     from nanobot.config.schema import Config
 
-    with pytest.raises(ValueError, match="fallback_models.*not found"):
-        Config.model_validate({
-            "agents": {"defaults": {"fallbackModels": ["missing"]}},
-            "modelPresets": {},
-        })
+    # Local branch accepts raw model IDs as fallback entries;
+    # they don't need to be preset references.
+    cfg = Config.model_validate({
+        "agents": {"defaults": {"fallbackModels": ["some-raw-model-id"]}},
+        "modelPresets": {},
+    })
+    assert cfg.agents.defaults.fallback_models == ["some-raw-model-id"]
 
 
 def test_provider_signature_tracks_fallback_presets_and_provider_config() -> None:

@@ -571,6 +571,7 @@ class LLMProvider(ABC):
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         retry_mode: str = "standard",
         on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
+        on_retry: Callable[[int, int], None] | None = None,
     ) -> LLMResponse:
         """Call chat_stream() with retry on transient provider failures."""
         if max_tokens is self._SENTINEL or max_tokens is None:
@@ -603,6 +604,7 @@ class LLMProvider(ABC):
             messages,
             retry_mode=retry_mode,
             on_retry_wait=on_retry_wait,
+            on_retry=on_retry,
             should_retry_guard=lambda: not has_streamed_content,
         )
 
@@ -617,6 +619,7 @@ class LLMProvider(ABC):
         tool_choice: str | dict[str, Any] | None = None,
         retry_mode: str = "standard",
         on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
+        on_retry: Callable[[int, int], None] | None = None,
     ) -> LLMResponse:
         """Call chat() with retry on transient provider failures.
 
@@ -645,6 +648,7 @@ class LLMProvider(ABC):
             messages,
             retry_mode=retry_mode,
             on_retry_wait=on_retry_wait,
+            on_retry=on_retry,
         )
 
     @classmethod
@@ -729,7 +733,11 @@ class LLMProvider(ABC):
         attempt: int,
         persistent: bool,
         on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
+        on_retry: Callable[[int, int], None] | None = None,
+        total_attempts: int = 0,
     ) -> None:
+        if on_retry:
+            on_retry(attempt, total_attempts)
         remaining = max(0.0, delay)
         while remaining > 0:
             if on_retry_wait:
@@ -750,6 +758,7 @@ class LLMProvider(ABC):
         *,
         retry_mode: str,
         on_retry_wait: Callable[[str], Awaitable[None]] | None,
+        on_retry: Callable[[int, int], None] | None = None,
         should_retry_guard: Callable[[], bool] | None = None,
     ) -> LLMResponse:
         attempt = 0
@@ -833,6 +842,8 @@ class LLMProvider(ABC):
                 attempt=attempt,
                 persistent=persistent,
                 on_retry_wait=on_retry_wait,
+                on_retry=on_retry,
+                total_attempts=len(delays),
             )
 
         return last_response if last_response is not None else await call(**kw)

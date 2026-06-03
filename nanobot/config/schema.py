@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
 
@@ -173,7 +173,22 @@ class AgentDefaults(Base):
     context_window_tokens: int = 65_536
     context_block_limit: int | None = None
     temperature: float = 0.1
-    fallback_models: list[str] = Field(default_factory=list)
+    fallback_models: list[str | InlineFallbackConfig | dict[str, Any]] = Field(default_factory=list)
+
+    @field_validator("fallback_models", mode="before")
+    @classmethod
+    def _normalize_fallback_models(cls, v: Any) -> list[str | InlineFallbackConfig]:
+        if not v:
+            return []
+        result: list[str | InlineFallbackConfig] = []
+        for item in v:
+            if isinstance(item, dict):
+                result.append(InlineFallbackConfig(**item))
+            elif isinstance(item, str):
+                result.append(item)
+            else:
+                result.append(item)
+        return result
     max_tool_iterations: int = 200
     max_concurrent_subagents: int = Field(default=1, ge=1)
     max_tool_result_chars: int = 16_000
