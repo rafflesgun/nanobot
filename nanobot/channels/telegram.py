@@ -433,8 +433,8 @@ class TelegramChannel(BaseChannel):
             )
         )
         self._app.add_handler(MessageHandler(filters.Regex(r"^/help(?:@\w+)?$"), self._on_help))
-        self._app.add_handler(CommandHandler("stats", self._on_stats_command, filters=private_only))
-        self._app.add_handler(CommandHandler("trace", self._on_trace_command, filters=private_only))
+        self._app.add_handler(CommandHandler("stats", self._on_stats_command, filters=filters.ChatType.PRIVATE))
+        self._app.add_handler(CommandHandler("trace", self._on_trace_command, filters=filters.ChatType.PRIVATE))
 
         # Add message handler for text, photos, video, voice, documents, and locations
         self._app.add_handler(
@@ -800,6 +800,21 @@ class TelegramChannel(BaseChannel):
                 except Exception:
                     # Fall back to _send_text which handles HTML→plain gracefully.
                     await self._send_text(int_chat_id, extra_html_chunk)
+            try:
+                tts_override = self._chat_tts_overrides.get(comp_key, {})
+                if tts_override.get("enabled"):
+                    tts_mgr = TTSManager(self.config.tts)
+                    voice_note = await tts_mgr.generate_voice_note(raw_text)
+                    if voice_note:
+                        await self._call_with_retry(
+                            self._app.bot.send_voice,
+                            chat_id=int_chat_id,
+                            voice=voice_note,
+                            filename="voice.ogg",
+                            **thread_kwargs,
+                        )
+            except Exception:
+                pass
             self._stream_bufs.pop(chat_id, None)
             return
 
@@ -946,26 +961,29 @@ class TelegramChannel(BaseChannel):
             return
         if subcommand == "all":
             stats = manager.get_all_stats()
-            sessions = stats.get("sessions", [])
-            total_tokens = sum(s.get("total_tokens", 0) for s in sessions)
-            unique_chats = len({s.get("chat_id", "") for s in sessions})
+            total_tokens = stats.get("total_tokens", 0)
+            count = stats.get("count", 0)
             text = (
                 "<b>📊 Total Token Usage Statistics</b>\n"
                 f"<code>{total_tokens}</code> tokens across "
-                f"<code>{unique_chats}</code> chat(s)"
+                f"<code>{count}</code> chat(s)"
             )
         elif subcommand == "topic" and thread_id is not None:
             stats = manager.get_stats(channel="telegram", chat_id=chat_id_str)
-            sessions = stats.get("sessions", [])
-            total_tokens = sum(s.get("total_tokens", 0) for s in sessions)
+            total_tokens = stats.get("total_tokens", 0)
             text = (
                 f"<b>📊 Token Usage Statistics (Topic {thread_id})</b>\n"
                 f"<code>{total_tokens}</code> total tokens"
             )
+        elif subcommand == "topic" and thread_id is None:
+            await update.message.reply_text(
+                "❌ This command is only available in topic threads.", parse_mode="HTML"
+            )
+            return
         else:
             stats = manager.get_stats(channel="telegram", chat_id=chat_id_str)
-            sessions = stats.get("sessions", [])
-            total_tokens = sum(s.get("total_tokens", 0) for s in sessions)
+            total_tokens = stats.get("total_tokens", 0)
+            count = stats.get("count", 0)
             if total_tokens == 0:
                 await update.message.reply_text(
                     "📊 No token usage statistics found for this chat.", parse_mode="HTML"
@@ -974,7 +992,7 @@ class TelegramChannel(BaseChannel):
             text = (
                 "<b>📊 Token Usage Statistics (This Chat)</b>\n"
                 f"<code>{total_tokens}</code> total tokens across "
-                f"<code>{len(sessions)}</code> session(s)"
+                f"<code>{count}</code> session(s)"
             )
         await update.message.reply_text(text, parse_mode="HTML")
 
