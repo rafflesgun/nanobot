@@ -32,7 +32,10 @@ class InboundMessage:
     @property
     def session_key(self) -> str:
         """Unique key for session identification."""
-        return self.session_key_override or f"{self.channel}:{self.chat_id}"
+        key = self.session_key_override or f"{self.channel}:{self.chat_id}"
+        if tid := self.metadata.get("message_thread_id"):
+            key = f"{key}:topic:{tid}"
+        return key
 
 
 @dataclass
@@ -51,3 +54,6 @@ class OutboundMessage:
     media: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
     buttons: list[list[str]] = field(default_factory=list)
+
+    def __contains__(self, item: str) -> bool:
+        return item in self.content

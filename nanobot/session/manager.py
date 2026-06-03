@@ -407,7 +407,7 @@ class SessionManager:
     @staticmethod
     def safe_key(key: str) -> str:
         """Public helper used by HTTP handlers to map an arbitrary key to a stable filename stem."""
-        return safe_filename(key.replace(":", "_"))
+        return safe_filename(str(key).replace(":", "_"))
 
     def _get_session_path(self, key: str) -> Path:
         """Get the file path for a session."""

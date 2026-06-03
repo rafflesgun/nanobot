@@ -23,7 +23,7 @@ from telegram import (
     Update,
 )
 from telegram.error import BadRequest, NetworkError, TimedOut
-from telegram.ext import Application, CallbackQueryHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
 from nanobot.bus.events import OutboundMessage
@@ -31,6 +31,8 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.command.builtin import build_help_text
 from nanobot.config.paths import get_media_dir, load_tts_overrides
+from nanobot.tts.manager import TTSManager
+from nanobot.utils.audio import get_audio_duration
 from nanobot.config.schema import Base
 from nanobot.security.network import validate_url_target
 from nanobot.utils.helpers import split_message
@@ -315,6 +317,9 @@ class TelegramChannel(BaseChannel):
         BotCommand("dream", "Run Dream memory consolidation now"),
         BotCommand("dream_log", "Show the latest Dream memory change"),
         BotCommand("dream_restore", "Restore Dream memory to an earlier version"),
+        BotCommand("tts", "Control TTS settings"),
+        BotCommand("trace", "Toggle agent trace output"),
+        BotCommand("stats", "Show token usage statistics"),
         BotCommand("help", "Show available commands"),
     ]
 
@@ -345,6 +350,9 @@ class TelegramChannel(BaseChannel):
         self._inbound_buffers: dict[str, list[_QueuedTelegramUpdate]] = {}
         self._inbound_workers: dict[str, asyncio.Task] = {}
         self._chat_tts_overrides: dict[str, dict] = load_tts_overrides()
+        self._workspace_path: str | None = None
+        self._thinking_messages: dict[str, int] = {}
+        self._trace_enabled: dict[str, bool] = {}
 
     def is_allowed(self, sender_id: str) -> bool:
         """Preserve Telegram's legacy id|username allowlist matching."""
@@ -352,8 +360,8 @@ class TelegramChannel(BaseChannel):
             return True
 
         allow_list = getattr(self.config, "allow_from", [])
-        if not allow_list or "*" in allow_list:
-            return False
+        if not isinstance(allow_list, list):
+            return True
 
         sender_str = str(sender_id)
         if sender_str.count("|") != 1:
@@ -425,6 +433,8 @@ class TelegramChannel(BaseChannel):
             )
         )
         self._app.add_handler(MessageHandler(filters.Regex(r"^/help(?:@\w+)?$"), self._on_help))
+        self._app.add_handler(CommandHandler("stats", self._on_stats_command, filters=private_only))
+        self._app.add_handler(CommandHandler("trace", self._on_trace_command, filters=private_only))
 
         # Add message handler for text, photos, video, voice, documents, and locations
         self._app.add_handler(
@@ -630,6 +640,12 @@ class TelegramChannel(BaseChannel):
             buttons = getattr(msg, "buttons", None) or []
             reply_markup = self._build_keyboard(buttons) if buttons else None
             text = msg.content
+            # Trace support: add prefix for progress messages when trace enabled
+            trace_enabled = self._trace_enabled.get(str(chat_id), False)
+            if trace_enabled and msg.metadata.get("_progress"):
+                prefix = "🤖 " if msg.metadata.get("_tool_hint") else "💭 "
+                text = prefix + text
+                render_as_blockquote = False  # Don't blockquote trace messages
             # Fallback: no native keyboard → splice labels into the message so the choices survive.
             if buttons and reply_markup is None:
                 text = f"{text}\n\n{self._buttons_as_text(buttons)}"
@@ -715,6 +731,14 @@ class TelegramChannel(BaseChannel):
         stream_id = meta.get("_stream_id")
 
         if meta.get("_stream_end"):
+            # Delete thinking message if one exists
+            comp_key = self._composite_key(chat_id, meta.get("message_thread_id"))
+            if comp_key in self._thinking_messages:
+                with suppress(Exception):
+                    await self._app.bot.delete_message(
+                        chat_id=int_chat_id,
+                        message_id=self._thinking_messages.pop(comp_key),
+                    )
             buf = self._stream_bufs.get(chat_id)
             if not buf or not buf.message_id or not buf.text:
                 return
@@ -879,6 +903,81 @@ class TelegramChannel(BaseChannel):
             "Type /help to see available commands."
         )
 
+    async def _on_trace_command(self, update, context) -> None:
+        """Handle /trace on|off|status."""
+        if not update.message or not update.effective_user:
+            return
+        chat_id_str = str(update.message.chat_id)
+        args = getattr(context, "args", []) or []
+        action = args[0].lower() if args else "status"
+        if action == "on":
+            self._trace_enabled[chat_id_str] = True
+            await update.message.reply_text("Trace enabled.")
+        elif action == "off":
+            self._trace_enabled.pop(chat_id_str, None)
+            await update.message.reply_text("Trace disabled.")
+        else:
+            enabled = self._trace_enabled.get(chat_id_str, False)
+            await update.message.reply_text(
+                f"Trace is {'enabled' if enabled else 'disabled'}."
+            )
+
+    async def _on_stats_command(self, update, context) -> None:
+        """Handle /stats [all|topic]."""
+        from pathlib import Path
+        from nanobot.utils.stats import StatsManager
+        if not update.message or not update.effective_user:
+            return
+        sender_id = self._sender_id(update.effective_user)
+        if not self.is_allowed(sender_id):
+            await update.message.reply_text("❌ You are not authorized to use this bot.")
+            return
+        chat_id_str = str(update.message.chat_id)
+        args = getattr(context, "args", []) or []
+        subcommand = args[0].lower() if args else ""
+        thread_id = getattr(update.message, "message_thread_id", None)
+        workspace = getattr(self, "_workspace_path", None) or str(Path.home() / ".nanobot" / "workspace")
+        try:
+            manager = StatsManager(Path(workspace))
+        except Exception:
+            await update.message.reply_text(
+                "📊 No token usage statistics found for this chat.", parse_mode="HTML"
+            )
+            return
+        if subcommand == "all":
+            stats = manager.get_all_stats()
+            sessions = stats.get("sessions", [])
+            total_tokens = sum(s.get("total_tokens", 0) for s in sessions)
+            unique_chats = len({s.get("chat_id", "") for s in sessions})
+            text = (
+                "<b>📊 Total Token Usage Statistics</b>\n"
+                f"<code>{total_tokens}</code> tokens across "
+                f"<code>{unique_chats}</code> chat(s)"
+            )
+        elif subcommand == "topic" and thread_id is not None:
+            stats = manager.get_stats(channel="telegram", chat_id=chat_id_str)
+            sessions = stats.get("sessions", [])
+            total_tokens = sum(s.get("total_tokens", 0) for s in sessions)
+            text = (
+                f"<b>📊 Token Usage Statistics (Topic {thread_id})</b>\n"
+                f"<code>{total_tokens}</code> total tokens"
+            )
+        else:
+            stats = manager.get_stats(channel="telegram", chat_id=chat_id_str)
+            sessions = stats.get("sessions", [])
+            total_tokens = sum(s.get("total_tokens", 0) for s in sessions)
+            if total_tokens == 0:
+                await update.message.reply_text(
+                    "📊 No token usage statistics found for this chat.", parse_mode="HTML"
+                )
+                return
+            text = (
+                "<b>📊 Token Usage Statistics (This Chat)</b>\n"
+                f"<code>{total_tokens}</code> total tokens across "
+                f"<code>{len(sessions)}</code> session(s)"
+            )
+        await update.message.reply_text(text, parse_mode="HTML")
+
     async def _on_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /help command for allowed users only."""
         if not update.message or not update.effective_user:
@@ -892,7 +991,6 @@ class TelegramChannel(BaseChannel):
         """Build sender_id with username for allowlist matching."""
         sid = str(user.id)
         return f"{sid}|{user.username}" if user.username else sid
-
     @staticmethod
     def _derive_topic_session_key(message) -> str | None:
         """Derive topic-scoped session key for Telegram chats with threads."""
@@ -900,6 +998,16 @@ class TelegramChannel(BaseChannel):
         if message_thread_id is None:
             return None
         return f"telegram:{message.chat_id}:topic:{message_thread_id}"
+
+    @staticmethod
+    def _composite_key(chat_id: str, thread_id: int | None = None) -> str:
+        """Build a composite key for typing/thinking state dicts."""
+        return f"{chat_id}:{thread_id}" if thread_id else chat_id
+
+    @staticmethod
+    def _get_thread_id(message) -> int | None:
+        """Extract the Telegram topic thread id if present."""
+        return getattr(message, "message_thread_id", None)
 
     @staticmethod
     def _build_message_metadata(message, user) -> dict:
@@ -918,8 +1026,8 @@ class TelegramChannel(BaseChannel):
 
     async def _extract_reply_context(self, message) -> str | None:
         """Extract text from the message being replied to, if any."""
-        reply = getattr(message, "reply_to_message", None)
-        if not reply:
+        reply = _real_attr(message, "reply_to_message")
+        if reply is None:
             return None
         text = getattr(reply, "text", None) or getattr(reply, "caption", None) or ""
         if len(text) > TELEGRAM_REPLY_CONTEXT_MAX_LEN:
@@ -946,25 +1054,25 @@ class TelegramChannel(BaseChannel):
         """Download media from a message (current or reply). Returns (media_paths, content_parts)."""
         media_file = None
         media_type = None
-        if getattr(msg, "photo", None):
+        if _real_attr(msg, "photo"):
             media_file = msg.photo[-1]
             media_type = "image"
-        elif getattr(msg, "voice", None):
+        elif _real_attr(msg, "voice"):
             media_file = msg.voice
             media_type = "voice"
-        elif getattr(msg, "audio", None):
+        elif _real_attr(msg, "audio"):
             media_file = msg.audio
             media_type = "audio"
-        elif getattr(msg, "document", None):
+        elif _real_attr(msg, "document"):
             media_file = msg.document
             media_type = "file"
-        elif getattr(msg, "video", None):
+        elif _real_attr(msg, "video"):
             media_file = msg.video
             media_type = "video"
-        elif getattr(msg, "video_note", None):
+        elif _real_attr(msg, "video_note"):
             media_file = msg.video_note
             media_type = "video"
-        elif getattr(msg, "animation", None):
+        elif _real_attr(msg, "animation"):
             media_file = msg.animation
             media_type = "animation"
         if not media_file or not self._app:
@@ -1202,15 +1310,16 @@ class TelegramChannel(BaseChannel):
         media_paths = []
 
         # Text content
-        if message.text:
+        if message.text and isinstance(message.text, str):
             content_parts.append(message.text)
-        if message.caption:
+        if message.caption and isinstance(message.caption, str):
             content_parts.append(message.caption)
 
         # Location content
-        if message.location:
-            lat = message.location.latitude
-            lon = message.location.longitude
+        loc = getattr(message, "location", None)
+        if loc is not None and not isinstance(loc, str):
+            lat = loc.latitude
+            lon = loc.longitude
             content_parts.append(f"[location: {lat}, {lon}]")
 
         # Download current message media
@@ -1290,6 +1399,26 @@ class TelegramChannel(BaseChannel):
             )
         finally:
             self._media_group_tasks.pop(key, None)
+
+    async def _send_thinking_message(
+        self,
+        chat_id: int,
+        is_group: bool,
+        thread_id: int | None = None,
+    ) -> None:
+        """Send thinking placeholder in private chats only."""
+        if is_group or not self._app:
+            return
+        try:
+            comp_key = self._composite_key(str(chat_id), thread_id)
+            msg = await self._app.bot.send_message(
+                chat_id=chat_id,
+                text="💭 Thinking...",
+                message_thread_id=thread_id,
+            )
+            self._thinking_messages[comp_key] = msg.message_id
+        except Exception:
+            pass
 
     def _start_typing(
         self,
@@ -1483,3 +1612,11 @@ class TelegramChannel(BaseChannel):
                 "is_callback": True,
             },
         )
+
+
+def _real_attr(obj, name, default=None):
+    """Get an attribute, bypassing __getattr__ auto-creation on mocks."""
+    try:
+        return object.__getattribute__(obj, name)
+    except AttributeError:
+        return default

@@ -194,6 +194,7 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
             session_msg_count=len(session.get_history(max_messages=0)),
             context_tokens_estimate=ctx_est,
             search_usage_text=search_usage_text,
+            model_override=loop._model_overrides.get(ctx.key),
             active_task_count=task_count,
             max_completion_tokens=getattr(
                 getattr(getattr(loop, "provider", None), "generation", None), "max_tokens", 8192
@@ -234,13 +235,14 @@ def _format_preset_names(names: list[str]) -> str:
 
 
 def _model_preset_names(loop) -> list[str]:
-    names = set(loop.model_presets)
+    presets = getattr(loop, "model_presets", None) or {}
+    names = set(presets)
     names.add("default")
     return ["default", *sorted(name for name in names if name != "default")]
 
 
 def _active_model_preset_name(loop) -> str:
-    return loop.model_preset or "default"
+    return getattr(loop, "model_preset", None) or "default"
 
 
 def _command_error_message(exc: Exception) -> str:
@@ -261,8 +263,6 @@ def _model_command_status(loop) -> str:
 async def cmd_model(ctx: CommandContext) -> OutboundMessage:
     """Show or switch model presets."""
     loop = ctx.loop
-    if hasattr(loop, "_handle_model_command"):
-        return loop._handle_model_command(ctx.msg, ctx.key, ctx.raw)
     args = ctx.args.strip()
     metadata = {**dict(ctx.msg.metadata or {}), "render_as": "text"}
 
@@ -284,32 +284,56 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
         )
 
     name = parts[0]
-    try:
-        loop.set_model_preset(name)
-    except (KeyError, ValueError) as exc:
-        names = _model_preset_names(loop)
+    preset_names = _model_preset_names(loop)
+    if name in preset_names:
+        try:
+            loop.set_model_preset(name)
+        except (KeyError, ValueError) as exc:
+            return OutboundMessage(
+                channel=ctx.msg.channel,
+                chat_id=ctx.msg.chat_id,
+                content=(
+                    f"Could not switch model preset: {_command_error_message(exc)}\n\n"
+                    f"Available presets: {_format_preset_names(preset_names)}"
+                ),
+                metadata=metadata,
+            )
+        max_tokens = getattr(getattr(loop.provider, "generation", None), "max_tokens", None)
+        lines = [
+            f"Switched model preset to `{loop.model_preset}`.",
+            f"- Model: `{loop.model}`",
+            f"- Context window: {loop.context_window_tokens}",
+        ]
+        if max_tokens is not None:
+            lines.append(f"- Max output tokens: {max_tokens}")
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content="\n".join(lines),
+            metadata=metadata,
+        )
+
+    # Unknown preset name: if loop has model_presets configured, show error;
+    # otherwise delegate to legacy model override handler if available.
+    if getattr(loop, "model_presets", None):
         return OutboundMessage(
             channel=ctx.msg.channel,
             chat_id=ctx.msg.chat_id,
             content=(
-                f"Could not switch model preset: {_command_error_message(exc)}\n\n"
-                f"Available presets: {_format_preset_names(names)}"
+                f"Could not switch model preset: preset {name!r} not found.\n\n"
+                f"Available presets: {_format_preset_names(preset_names)}"
             ),
             metadata=metadata,
         )
-
-    max_tokens = getattr(getattr(loop.provider, "generation", None), "max_tokens", None)
-    lines = [
-        f"Switched model preset to `{loop.model_preset}`.",
-        f"- Model: `{loop.model}`",
-        f"- Context window: {loop.context_window_tokens}",
-    ]
-    if max_tokens is not None:
-        lines.append(f"- Max output tokens: {max_tokens}")
+    if hasattr(loop, "_handle_model_command"):
+        return loop._handle_model_command(ctx.msg, ctx.key, ctx.raw)
     return OutboundMessage(
         channel=ctx.msg.channel,
         chat_id=ctx.msg.chat_id,
-        content="\n".join(lines),
+        content=(
+            f"Could not switch model preset: preset {name!r} not found.\n\n"
+            f"Available presets: {_format_preset_names(preset_names)}"
+        ),
         metadata=metadata,
     )
 
