@@ -1,11 +1,18 @@
 # Project-specific
 .worktrees/
+.worktree/
 .assets
 .docs
 docs/superpowers/
 .env
 .web
 .orion
+nanobot-desktop/
+desktop/
+
+# Claude / AI assistant artifacts
+docs/superpowers/
+docs/plans/
 
 # webui (monorepo frontend)
 webui/node_modules/
@@ -93,4 +100,9 @@ logs/
 tmp/
 temp/
 *.tmp
+<<<<<<< HEAD
 /.ccb
+=======
+exp/
+.playwright-mcp/
+>>>>>>> origin/main

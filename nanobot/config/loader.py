@@ -10,8 +10,21 @@ import pydantic
 from loguru import logger
 from pydantic import BaseModel
 
-from nanobot.config.schema import Config
+from nanobot.config.schema import Config, _resolve_tool_config_refs
 
+<<<<<<< HEAD
+=======
+# Global variable to store current config path (for multi-instance support)
+_current_config_path: Path | None = None
+_schema_refs_ready = False
+
+
+def set_config_path(path: Path) -> None:
+    """Set the current config path (used to derive data directory)."""
+    global _current_config_path
+    _current_config_path = path
+
+>>>>>>> origin/main
 
 def get_config_path() -> Path:
     """Get the default configuration file path."""
@@ -35,7 +48,16 @@ def load_config(config_path: Path | None = None) -> Config:
     Returns:
         Loaded configuration object.
     """
+<<<<<<< HEAD
     path = config_path or _config_path_override or _current_config_path or get_config_path()
+=======
+    global _schema_refs_ready
+    if not _schema_refs_ready:
+        _resolve_tool_config_refs()
+        _schema_refs_ready = True
+
+    path = config_path or get_config_path()
+>>>>>>> origin/main
 
     config = Config()
     if path.exists():
@@ -45,7 +67,7 @@ def load_config(config_path: Path | None = None) -> Config:
             data = _migrate_config(data)
             config = Config.model_validate(data)
         except (json.JSONDecodeError, ValueError, pydantic.ValidationError) as e:
-            logger.warning(f"Failed to load config from {path}: {e}")
+            logger.warning("Failed to load config from {}: {}", path, e)
             logger.warning("Using default configuration.")
 
     _apply_ssrf_whitelist(config)

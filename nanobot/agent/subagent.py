@@ -7,22 +7,32 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from loguru import logger
 from nanobot.utils.prompt_templates import render_template
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
+<<<<<<< HEAD
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.runner import AgentRunSpec, AgentRunner
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+=======
+from nanobot.agent.runner import AgentRunner, AgentRunSpec
+from nanobot.agent.tools.context import ToolContext
+from nanobot.agent.tools.file_state import FileStates
+from nanobot.agent.tools.loader import ToolLoader
+>>>>>>> origin/main
 from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.agent.tools.search import GlobTool, GrepTool
-from nanobot.agent.tools.shell import ExecTool
-from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
+from nanobot.security.workspace_access import (
+    WorkspaceScope,
+    bind_workspace_scope,
+    reset_workspace_scope,
+    workspace_sandbox_status,
+)
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import AgentDefaults, ExecToolConfig, WebToolsConfig
+from nanobot.config.schema import AgentDefaults, ToolsConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.utils.stats import StatsManager
 
@@ -80,6 +90,7 @@ class SubagentManager:
         workspace: Path,
         bus: MessageBus,
         model: str | None = None,
+<<<<<<< HEAD
         max_tool_result_chars: int | None = None,
         fallback_model: str | None = None,
         fallback_models: list[str] | None = None,
@@ -89,12 +100,18 @@ class SubagentManager:
         web_proxy: str | None = None,
         web_config: Any | None = None,
         exec_config: "ExecToolConfig | None" = None,
+=======
+        tools_config: ToolsConfig | None = None,
+>>>>>>> origin/main
         restrict_to_workspace: bool = False,
         extra_read: list[str] | None = None,
         extra_write: list[str] | None = None,
         disabled_skills: list[str] | None = None,
         max_iterations: int | None = None,
+        max_concurrent_subagents: int | None = None,
+        llm_wall_timeout_for_session: Callable[[str | None], float | None] | None = None,
     ):
+<<<<<<< HEAD
         from nanobot.config.schema import (
             AgentsConfig,
             ExecToolConfig,
@@ -102,10 +119,14 @@ class SubagentManager:
             WebToolsConfig,
         )
 
+=======
+        defaults = AgentDefaults()
+>>>>>>> origin/main
         self.provider = provider
         self.workspace = workspace
         self.bus = bus
         self.model = model or provider.get_default_model()
+<<<<<<< HEAD
         self.max_tool_result_chars = (
             max_tool_result_chars if max_tool_result_chars is not None else 16000
         )
@@ -122,6 +143,10 @@ class SubagentManager:
                 search=web_search_config or WebSearchConfig(),
             )
         self.exec_config = exec_config or ExecToolConfig()
+=======
+        self.tools_config = tools_config or ToolsConfig()
+        self.max_tool_result_chars = max_tool_result_chars
+>>>>>>> origin/main
         self.restrict_to_workspace = restrict_to_workspace
         self.extra_read = extra_read or []
         self.extra_write = extra_write or []
@@ -129,13 +154,52 @@ class SubagentManager:
         self.max_iterations = (
             max_iterations
             if max_iterations is not None
-            else AgentDefaults().max_tool_iterations
+            else defaults.max_tool_iterations
         )
+        self.max_concurrent_subagents = (
+            max_concurrent_subagents
+            if max_concurrent_subagents is not None
+            else defaults.max_concurrent_subagents
+        )
+<<<<<<< HEAD
+=======
+        self.runner = AgentRunner(provider)
+        self._llm_wall_timeout_for_session = llm_wall_timeout_for_session
+>>>>>>> origin/main
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
         self.stats_manager = StatsManager(workspace)
         self.runner = AgentRunner(provider)
+
+    def _subagent_tools_config(self) -> ToolsConfig:
+        """Build a ToolsConfig scoped for subagent use."""
+        return ToolsConfig(
+            exec=self.tools_config.exec,
+            web=self.tools_config.web,
+            restrict_to_workspace=self.restrict_to_workspace,
+        )
+
+    def _build_tools(
+        self,
+        workspace: Path | None = None,
+        tools_config: ToolsConfig | None = None,
+    ) -> ToolRegistry:
+        """Build an isolated subagent tool registry via ToolLoader."""
+        root = self.workspace if workspace is None else workspace
+        registry = ToolRegistry()
+        cfg = tools_config if tools_config is not None else self._subagent_tools_config()
+        ctx = ToolContext(
+            config=cfg,
+            workspace=str(root.resolve()),
+            file_state_store=FileStates(),
+            workspace_sandbox=workspace_sandbox_status(
+                restrict_to_workspace=cfg.restrict_to_workspace,
+                workspace=root,
+            ),
+        )
+        ToolLoader().load(ctx, registry, scope="subagent")
+        return registry
 
     def set_provider(self, provider: LLMProvider, model: str) -> None:
         self.provider = provider
@@ -149,9 +213,15 @@ class SubagentManager:
         origin_channel: str = "cli",
         origin_chat_id: str = "direct",
         session_key: str | None = None,
+<<<<<<< HEAD
         subagent_id: str | None = None,
         origin_thread_id: int | None = None,
         model_override: str | None = None,
+=======
+        origin_message_id: str | None = None,
+        temperature: float | None = None,
+        workspace_scope: WorkspaceScope | None = None,
+>>>>>>> origin/main
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
         task_id = str(uuid.uuid4())[:8]
@@ -178,8 +248,14 @@ class SubagentManager:
                 display_label,
                 origin,
                 status,
+<<<<<<< HEAD
                 subagent_id=subagent_id,
                 model_override=model_override,
+=======
+                origin_message_id,
+                temperature,
+                workspace_scope,
+>>>>>>> origin/main
             )
         )
         self._running_tasks[task_id] = bg_task
@@ -231,9 +307,16 @@ class SubagentManager:
         task: str,
         label: str,
         origin: dict[str, str],
+<<<<<<< HEAD
         status: SubagentStatus | None = None,
         subagent_id: str | None = None,
         model_override: str | None = None,
+=======
+        status: SubagentStatus,
+        origin_message_id: str | None = None,
+        temperature: float | None = None,
+        workspace_scope: WorkspaceScope | None = None,
+>>>>>>> origin/main
     ) -> None:
         """Execute the subagent task and announce the result."""
         status = status or SubagentStatus(
@@ -249,6 +332,7 @@ class SubagentManager:
             status.iteration = payload.get("iteration", status.iteration)
 
         try:
+<<<<<<< HEAD
             agent_config, provider = self._resolve_subagent_backend(subagent_id)
 
             # Build subagent tools (no message tool, no spawn tool)
@@ -306,11 +390,21 @@ class SubagentManager:
                     )
                 )
             system_prompt = self._build_subagent_prompt()
+=======
+            root = workspace_scope.project_path if workspace_scope is not None else self.workspace
+            cfg = None
+            if workspace_scope is not None:
+                cfg = self._subagent_tools_config()
+                cfg.restrict_to_workspace = workspace_scope.restrict_to_workspace
+            tools = self._build_tools(workspace=root, tools_config=cfg)
+            system_prompt = self._build_subagent_prompt(workspace=root)
+>>>>>>> origin/main
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": task},
             ]
 
+<<<<<<< HEAD
             spec = AgentRunSpec(
                 initial_messages=messages,
                 tools=tools,
@@ -367,12 +461,61 @@ class SubagentManager:
                         usage.get("total_tokens", 0),
                         f"subagent:{task_id}",
                     )
+=======
+            sess_key = origin.get("session_key")
+            llm_timeout = (
+                self._llm_wall_timeout_for_session(sess_key)
+                if self._llm_wall_timeout_for_session
+                else None
+            )
+            token = bind_workspace_scope(workspace_scope) if workspace_scope is not None else None
+            try:
+                result = await self.runner.run(AgentRunSpec(
+                    initial_messages=messages,
+                    tools=tools,
+                    model=self.model,
+                    temperature=temperature,
+                    max_iterations=self.max_iterations,
+                    max_tool_result_chars=self.max_tool_result_chars,
+                    hook=_SubagentHook(task_id, status),
+                    max_iterations_message="Task completed but no final response was generated.",
+                    error_message=None,
+                    fail_on_tool_error=True,
+                    checkpoint_callback=_on_checkpoint,
+                    session_key=sess_key,
+                    workspace=root,
+                    llm_timeout_s=llm_timeout,
+                ))
+            finally:
+                if token is not None:
+                    reset_workspace_scope(token)
+            status.phase = "done"
+            status.stop_reason = result.stop_reason
+
+            if result.stop_reason == "tool_error":
+                status.tool_events = list(result.tool_events)
+                await self._announce_result(
+                    task_id, label, task,
+                    self._format_partial_progress(result),
+                    origin, "error", origin_message_id,
+                )
+            elif result.stop_reason == "error":
+                await self._announce_result(
+                    task_id, label, task,
+                    result.error or "Error: subagent execution failed.",
+                    origin, "error", origin_message_id,
+                )
+            else:
+                final_result = result.final_content or "Task completed but no final response was generated."
+                logger.info("Subagent [{}] completed successfully", task_id)
+                await self._announce_result(task_id, label, task, final_result, origin, "ok", origin_message_id)
+>>>>>>> origin/main
 
         except Exception as e:
             status.phase = "error"
             status.error = str(e)
-            logger.error("Subagent [{}] failed: {}", task_id, e)
-            await self._announce_result(task_id, label, task, f"Error: {e}", origin, "error")
+            logger.exception("Subagent [{}] failed", task_id)
+            await self._announce_result(task_id, label, task, f"Error: {e}", origin, "error", origin_message_id)
 
     async def _announce_result(
         self,
@@ -382,6 +525,7 @@ class SubagentManager:
         result: str,
         origin: dict[str, str],
         status: str,
+        origin_message_id: str | None = None,
     ) -> None:
         """Announce the subagent result to the main agent via the message bus."""
         status_text = "completed successfully" if status == "ok" else "failed"
@@ -401,12 +545,19 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
         # routed to the correct pending queue (mid-turn injection) instead of
         # being dispatched as a competing independent task.
         override = origin.get("session_key") or f"{origin['channel']}:{origin['chat_id']}"
+        metadata: dict[str, Any] = {
+            "injected_event": "subagent_result",
+            "subagent_task_id": task_id,
+        }
+        if origin_message_id:
+            metadata["origin_message_id"] = origin_message_id
         msg = InboundMessage(
             channel="system",
             sender_id="subagent",
             chat_id=f"{origin['channel']}:{origin['chat_id']}",
             content=announce_content,
             session_key_override=override,
+<<<<<<< HEAD
             metadata={
                 **(
                     {"message_thread_id": origin["thread_id"]}
@@ -416,6 +567,9 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
                 "injected_event": "subagent_result",
                 "subagent_task_id": task_id,
             },
+=======
+            metadata=metadata,
+>>>>>>> origin/main
         )
 
         await self.bus.publish_inbound(msg)
@@ -423,20 +577,21 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
             "Subagent [{}] announced result to {}:{}", task_id, origin["channel"], origin["chat_id"]
         )
 
-    def _build_subagent_prompt(self) -> str:
+    def _build_subagent_prompt(self, workspace: Path | None = None) -> str:
         """Build a focused system prompt for the subagent."""
         from nanobot.agent.context import ContextBuilder
         from nanobot.agent.skills import SkillsLoader
 
         time_ctx = ContextBuilder._build_runtime_context(None, None)
+        root = workspace or self.workspace
         skills_summary = SkillsLoader(
-            self.workspace,
+            root,
             disabled_skills=self.disabled_skills,
         ).build_skills_summary()
         return render_template(
             "agent/subagent_system.md",
             time_ctx=time_ctx,
-            workspace=str(self.workspace),
+            workspace=str(root),
             skills_summary=skills_summary or "",
         )
 

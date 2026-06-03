@@ -171,7 +171,8 @@ class TestMessageToolSuppressLogic:
 class TestMessageToolTurnTracking:
     def test_sent_in_turn_tracks_same_target(self) -> None:
         tool = MessageTool()
-        tool.set_context("feishu", "chat1")
+        from nanobot.agent.tools.context import RequestContext
+        tool.set_context(RequestContext(channel="feishu", chat_id="chat1"))
         assert not tool._sent_in_turn
         tool._sent_in_turn = True
         assert tool._sent_in_turn
@@ -182,6 +183,7 @@ class TestMessageToolTurnTracking:
         tool.start_turn()
         assert not tool._sent_in_turn
 
+<<<<<<< HEAD
 
 @pytest.mark.asyncio
 async def test_message_tool_preserves_thread_id_for_same_target() -> None:
@@ -195,3 +197,14 @@ async def test_message_tool_preserves_thread_id_for_same_target() -> None:
     assert len(sent) == 1
     assert sent[0].metadata["message_id"] == "msg1"
     assert sent[0].metadata["message_thread_id"] == 42
+=======
+    def test_schema_discourages_current_chat_replies(self) -> None:
+        tool = MessageTool()
+
+        assert "Do not use this for the normal reply in the current chat" in tool.description
+        assert "generate_image creates images in the current chat" in tool.description
+        assert (
+            "Do not use this for a normal reply in the current chat"
+            in tool.parameters["properties"]["content"]["description"]
+        )
+>>>>>>> origin/main

@@ -142,8 +142,13 @@ class GitStore:
                 self._run_git("commit", "-m", "init: nanobot memory store")
             logger.info("Git store initialized at {}", self._workspace)
             return True
+<<<<<<< HEAD
         except Exception as exc:
             logger.warning("Git store init failed for {}: {}", self._workspace, exc)
+=======
+        except Exception:
+            logger.exception("Git store init failed for {}", self._workspace)
+>>>>>>> origin/main
             return False
 
     def auto_commit(self, message: str) -> str | None:
@@ -177,7 +182,7 @@ class GitStore:
             sha = self._run_git("rev-parse", "--short=8", "HEAD")
             return sha.stdout.strip() or None
         except Exception:
-            logger.warning("Git auto-commit failed: {}", message)
+            logger.exception("Git auto-commit failed: {}", message)
             return None
 
     def _resolve_sha(self, short_sha: str) -> bytes | None:
@@ -290,7 +295,7 @@ class GitStore:
                 entries.append(CommitInfo(sha=sha[:8], message=msg, timestamp=ts))
             return entries
         except Exception:
-            logger.warning("Git log failed")
+            logger.exception("Git log failed")
             return []
 
     def line_ages(self, file_path: str) -> list[LineAge]:
@@ -312,6 +317,7 @@ class GitStore:
             try:
                 from dulwich import porcelain
 
+<<<<<<< HEAD
                 annotated = porcelain.annotate(str(self._workspace), file_path)
                 if annotated:
                     return _compute_line_ages(annotated)
@@ -319,6 +325,12 @@ class GitStore:
                 logger.warning(
                     "Git line_ages annotate failed for {}; falling back to git blame", file_path
                 )
+=======
+            annotated = porcelain.annotate(str(self._workspace), file_path)
+        except Exception:
+            logger.exception("Git line_ages annotate failed for {}", file_path)
+            return []
+>>>>>>> origin/main
 
         return self._line_ages_from_git_blame(file_path)
 
@@ -339,7 +351,7 @@ class GitStore:
             cp = self._run_git("diff", sha1, sha2, "--", *self._tracked_files)
             return cp.stdout if cp.returncode == 0 else ""
         except Exception:
-            logger.warning("Git diff_commits failed")
+            logger.exception("Git diff_commits failed")
             return ""
 
     def find_commit(self, short_sha: str, max_entries: int = 20) -> CommitInfo | None:
@@ -401,7 +413,7 @@ class GitStore:
                     return None
             return self.auto_commit(f"revert: undo {target}")
         except Exception:
-            logger.warning("Git revert failed for {}", commit)
+            logger.exception("Git revert failed for {}", commit)
             return None
 
     @staticmethod

@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from nanobot.agent.hook import AgentHook
+from nanobot.agent.hook import AgentHook, SDKCaptureHook
 from nanobot.agent.loop import AgentLoop
-from nanobot.bus.queue import MessageBus
+from nanobot.providers.image_generation import image_gen_provider_configs
 
 
 @dataclass(slots=True)
@@ -60,6 +60,7 @@ class Nanobot:
         if workspace is not None:
             config.agents.defaults.workspace = str(Path(workspace).expanduser().resolve())
 
+<<<<<<< HEAD
         provider = _make_provider(config)
         bus = MessageBus()
         defaults = config.agents.defaults
@@ -87,6 +88,11 @@ class Nanobot:
             consolidation_ratio=defaults.consolidation_ratio,
             tools_config=config.tools,
             image_generation_provider=config.get_image_generation_provider(),
+=======
+        loop = AgentLoop.from_config(
+            config,
+            image_generation_provider_configs=image_gen_provider_configs(config),
+>>>>>>> origin/main
         )
         return cls(loop)
 
@@ -105,9 +111,10 @@ class Nanobot:
                 Different keys get independent history.
             hooks: Optional lifecycle hooks for this run.
         """
+        capture = SDKCaptureHook()
         prev = self._loop._extra_hooks
-        if hooks is not None:
-            self._loop._extra_hooks = list(hooks)
+        base_hooks = list(hooks) if hooks is not None else list(prev or [])
+        self._loop._extra_hooks = [capture, *base_hooks]
         try:
             response = await self._loop.process_direct(
                 message,
@@ -117,11 +124,10 @@ class Nanobot:
             self._loop._extra_hooks = prev
 
         content = (response.content if response else None) or ""
-        return RunResult(content=content, tools_used=[], messages=[])
+        return RunResult(
+            content=content,
+            tools_used=capture.tools_used,
+            messages=capture.messages,
+        )
 
 
-def _make_provider(config: Any) -> Any:
-    """Create the LLM provider from config (extracted from CLI)."""
-    from nanobot.providers.factory import make_provider
-
-    return make_provider(config)

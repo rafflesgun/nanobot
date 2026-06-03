@@ -4,12 +4,26 @@ import json
 import logging
 from pathlib import Path
 
+<<<<<<< HEAD
 from nanobot.config.loader import get_config_path
 from nanobot.utils.helpers import ensure_dir, get_workspace_path
 
 __all__ = ["get_workspace_path", "load_temperature_overrides", "save_temperature_overrides"]
 
 logger = logging.getLogger(__name__)
+=======
+from nanobot.utils.helpers import ensure_dir
+>>>>>>> origin/main
+
+
+def get_config_path() -> Path:
+    """Get the configuration file path (lazy import to break circular dependency).
+
+    Delegates to ``nanobot.config.loader.get_config_path`` at call time so
+    that importing this module never triggers a circular import during startup.
+    """
+    from nanobot.config.loader import get_config_path as _loader_get_config_path
+    return _loader_get_config_path()
 
 
 def get_data_dir() -> Path:
@@ -32,6 +46,7 @@ def get_logs_dir() -> Path:
     return get_runtime_subdir("logs")
 
 
+<<<<<<< HEAD
 def get_media_dir(channel: str | None = None, workspace: str | Path | None = None) -> Path:
     """Get the media directory, optionally for a specific channel.
     
@@ -115,6 +130,17 @@ def save_temperature_overrides(temperature_overrides: dict[str, float]) -> None:
     overrides = load_overrides()
     overrides["temperature_overrides"] = temperature_overrides
     save_overrides(overrides)
+=======
+def get_webui_dir() -> Path:
+    """Return the directory for WebUI-only persisted display threads (JSON)."""
+    return get_runtime_subdir("webui")
+
+
+def get_workspace_path(workspace: str | None = None) -> Path:
+    """Resolve and ensure the agent workspace path."""
+    path = Path(workspace).expanduser() if workspace else Path.home() / ".nanobot" / "workspace"
+    return ensure_dir(path)
+>>>>>>> origin/main
 
 
 def is_default_workspace(workspace: str | Path | None) -> bool:

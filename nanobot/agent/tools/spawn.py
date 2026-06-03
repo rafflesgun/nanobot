@@ -1,15 +1,44 @@
 """Spawn tool for creating background subagents."""
 
+from __future__ import annotations
+
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
+<<<<<<< HEAD
 from nanobot.agent.tools.base import Tool
+=======
+from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.context import ContextAware, RequestContext
+from nanobot.agent.tools.schema import NumberSchema, StringSchema, tool_parameters_schema
+from nanobot.security.workspace_access import current_workspace_scope
+>>>>>>> origin/main
 
 if TYPE_CHECKING:
     from nanobot.agent.subagent import SubagentManager
 
 
+<<<<<<< HEAD
 class SpawnTool(Tool):
+=======
+@tool_parameters(
+    tool_parameters_schema(
+        task=StringSchema("The task for the subagent to complete"),
+        label=StringSchema("Optional short label for the task (for display)"),
+        temperature=NumberSchema(
+            description=(
+                "Optional sampling temperature for the subagent "
+                "(0.0 = deterministic, higher = more creative). "
+                "Defaults to the provider's configured temperature."
+            ),
+            minimum=0.0,
+            maximum=2.0,
+        ),
+        required=["task"],
+    )
+)
+class SpawnTool(Tool, ContextAware):
+>>>>>>> origin/main
     """Tool to spawn a subagent for background task execution."""
 
     def __init__(self, manager: "SubagentManager"):
@@ -17,6 +46,7 @@ class SpawnTool(Tool):
         self._origin_channel: ContextVar[str] = ContextVar("spawn_origin_channel", default="cli")
         self._origin_chat_id: ContextVar[str] = ContextVar("spawn_origin_chat_id", default="direct")
         self._session_key: ContextVar[str] = ContextVar("spawn_session_key", default="cli:direct")
+<<<<<<< HEAD
         self._origin_thread_id: ContextVar[int | None] = ContextVar(
             "spawn_origin_thread_id", default=None
         )
@@ -45,6 +75,23 @@ class SpawnTool(Tool):
         )
         self._origin_thread_id.set(thread_id)
         self._model_override.set(model_override)
+=======
+        self._origin_message_id: ContextVar[str | None] = ContextVar(
+            "spawn_origin_message_id",
+            default=None,
+        )
+
+    @classmethod
+    def create(cls, ctx: Any) -> Tool:
+        return cls(manager=ctx.subagent_manager)
+
+    def set_context(self, ctx: RequestContext) -> None:
+        """Set the origin context for subagent announcements."""
+        self._origin_channel.set(ctx.channel)
+        self._origin_chat_id.set(ctx.chat_id)
+        self._session_key.set(ctx.session_key or f"{ctx.channel}:{ctx.chat_id}")
+        self._origin_message_id.set(ctx.message_id)
+>>>>>>> origin/main
 
     @property
     def name(self) -> str:
@@ -70,6 +117,7 @@ class SpawnTool(Tool):
             )
         return description
 
+<<<<<<< HEAD
     @property
     def parameters(self) -> dict[str, Any]:
         return {
@@ -91,10 +139,13 @@ class SpawnTool(Tool):
             "required": ["task"],
         }
 
+=======
+>>>>>>> origin/main
     async def execute(
         self,
         task: str,
         label: str | None = None,
+<<<<<<< HEAD
         subagent_id: str | None = None,
         **kwargs: Any,
     ) -> str:
@@ -121,3 +172,27 @@ class SpawnTool(Tool):
                 origin_chat_id=self._origin_chat_id.get(),
                 session_key=self._session_key.get(),
             )
+=======
+        temperature: float | None = None,
+        **kwargs: Any,
+    ) -> str:
+        """Spawn a subagent to execute the given task."""
+        running = self._manager.get_running_count()
+        limit = self._manager.max_concurrent_subagents
+        if running >= limit:
+            return (
+                f"Cannot spawn subagent: concurrency limit reached "
+                f"({running}/{limit} running). Wait for a running subagent "
+                f"to complete before spawning a new one."
+            )
+        return await self._manager.spawn(
+            task=task,
+            label=label,
+            origin_channel=self._origin_channel.get(),
+            origin_chat_id=self._origin_chat_id.get(),
+            session_key=self._session_key.get(),
+            origin_message_id=self._origin_message_id.get(),
+            temperature=temperature,
+            workspace_scope=current_workspace_scope(),
+        )
+>>>>>>> origin/main
