@@ -5,10 +5,11 @@ def test_image_generation_config_defaults() -> None:
     cfg = ImageGenerationToolConfig()
 
     assert cfg.enabled is False
-    assert cfg.provider == "openai"
-    assert cfg.model == "gpt-image-1"
-    assert cfg.size == "1024x1024"
-    assert cfg.quality == "auto"
+    assert cfg.provider == "openrouter"
+    assert cfg.model == "openai/gpt-5.4-image-2"
+    assert cfg.default_aspect_ratio == "1:1"
+    assert cfg.default_image_size == "1K"
+    assert cfg.max_images_per_turn == 4
 
 
 def test_tools_image_generation_accepts_camel_case() -> None:
@@ -29,8 +30,8 @@ def test_tools_image_generation_accepts_camel_case() -> None:
     assert cfg.tools.image_generation.enabled is True
     assert cfg.tools.image_generation.provider == "openai"
     assert cfg.tools.image_generation.model == "gpt-image-1"
-    assert cfg.tools.image_generation.size == "1024x1536"
-    assert cfg.tools.image_generation.quality == "high"
+    assert cfg.tools.image_generation.default_aspect_ratio == "1:1"
+    assert cfg.tools.image_generation.default_image_size == "1K"
 
 
 def test_image_generation_config_accepts_custom_openai_compatible_provider() -> None:

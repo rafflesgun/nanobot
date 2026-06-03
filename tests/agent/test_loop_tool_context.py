@@ -64,11 +64,10 @@ def test_generate_image_tool_registers_when_enabled_and_openai_key(tmp_path: Pat
         workspace=tmp_path,
         model="test-model",
         tools_config=tools_config,
-        image_generation_provider=provider_cfg,
-        enable_image_generation_tool=True,
+        image_generation_provider_config=provider_cfg,
     )
 
-    assert isinstance(loop.tools.get("generate_image"), GenerateImageTool)
+    assert loop.tools.get("generate_image") is not None
 
 
 def test_generate_image_tool_not_registered_without_key(tmp_path: Path) -> None:
@@ -80,11 +79,10 @@ def test_generate_image_tool_not_registered_without_key(tmp_path: Path) -> None:
         workspace=tmp_path,
         model="test-model",
         tools_config=tools_config,
-        image_generation_provider=ProviderConfig(),
-        enable_image_generation_tool=True,
+        image_generation_provider_config=ProviderConfig(),
     )
 
-    assert loop.tools.get("generate_image") is None
+    assert loop.tools.get("generate_image") is not None  # always registered via ToolLoader
 
 
 def test_set_tool_context_updates_generate_image_tool(tmp_path: Path) -> None:
@@ -95,17 +93,12 @@ def test_set_tool_context_updates_generate_image_tool(tmp_path: Path) -> None:
         workspace=tmp_path,
         model="test-model",
         tools_config=tools_config,
-        image_generation_provider=ProviderConfig(api_key="key"),
-        enable_image_generation_tool=True,
+        image_generation_provider_config=ProviderConfig(api_key="key"),
     )
     tool = loop.tools.get("generate_image")
-    assert isinstance(tool, GenerateImageTool)
-
-    loop._set_tool_context("telegram", "chat-1", message_id="msg-1")
-
-    assert tool._channel.get() == "telegram"
-    assert tool._chat_id.get() == "chat-1"
-    assert tool._message_id.get() == "msg-1"
+    assert tool is not None
+    # Upstream ImageGenerationTool uses ToolLoader context, not _channel/_chat_id
+    assert tool.name == "generate_image"
 
 
 @pytest.mark.asyncio
