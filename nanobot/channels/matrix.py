@@ -12,19 +12,12 @@ from urllib.parse import quote, urlparse
 
 from pydantic import Field
 
-<<<<<<< HEAD
-import nh3
-from mistune import create_markdown
-
-try:
-=======
 from nanobot.security.workspace_policy import is_path_within
 
 try:
     import aiohttp
     import nh3
     from mistune import create_markdown
->>>>>>> origin/main
     from nio import (
         AsyncClient,
         AsyncClientConfig,
@@ -45,98 +38,15 @@ try:
         RoomSendResponse,
         RoomTypingError,
         SyncError,
-<<<<<<< HEAD
-        UploadError,
-        RoomSendResponse,
-=======
         ToDeviceError,
         UploadError,
->>>>>>> origin/main
     )
     from nio.crypto.attachments import decrypt_attachment
     from nio.exceptions import EncryptionError
-    _NIO_IMPORT_ERROR: ImportError | None = None
 except ImportError as e:
-    _NIO_IMPORT_ERROR = e
-
-    class _NioDependencyMissingMixin:
-        def __init__(self, *args, **kwargs) -> None:
-            raise ImportError(
-                "Matrix dependencies not installed. Run: pip install nanobot-ai[matrix]"
-            ) from _NIO_IMPORT_ERROR
-
-    class AsyncClient(_NioDependencyMissingMixin):  # type: ignore[no-redef]
-        pass
-
-    class AsyncClientConfig:  # type: ignore[no-redef]
-        def __init__(self, **kwargs) -> None:
-            for key, value in kwargs.items():
-                setattr(self, key, value)
-
-    class ContentRepositoryConfigError(Exception):  # type: ignore[no-redef]
-        pass
-
-    class LoginResponse:  # type: ignore[no-redef]
-        pass
-
-    class RoomSendResponse:  # type: ignore[no-redef]
-        pass
-
-    class DownloadError(Exception):  # type: ignore[no-redef]
-        pass
-
-    class InviteEvent:  # type: ignore[no-redef]
-        pass
-
-    class JoinError(Exception):  # type: ignore[no-redef]
-        pass
-
-    class MatrixRoom:  # type: ignore[no-redef]
-        pass
-
-    class MemoryDownloadResponse:  # type: ignore[no-redef]
-        def __init__(
-            self,
-            *,
-            body: bytes,
-            content_type: str | None = None,
-            filename: str | None = None,
-        ) -> None:
-            self.body = body
-            self.content_type = content_type
-            self.filename = filename
-
-    class RoomEncryptedMedia:  # type: ignore[no-redef]
-        pass
-
-    class RoomMessage:  # type: ignore[no-redef]
-        pass
-
-    class RoomMessageMedia(RoomMessage):  # type: ignore[no-redef]
-        pass
-
-    class RoomMessageText(RoomMessage):  # type: ignore[no-redef]
-        pass
-
-    class RoomSendError(Exception):  # type: ignore[no-redef]
-        pass
-
-    class RoomTypingError(Exception):  # type: ignore[no-redef]
-        pass
-
-    class SyncError(Exception):  # type: ignore[no-redef]
-        pass
-
-    class UploadError(Exception):  # type: ignore[no-redef]
-        pass
-
-    class EncryptionError(Exception):  # type: ignore[no-redef]
-        pass
-
-    def decrypt_attachment(*args, **kwargs):  # type: ignore[no-redef]
-        raise ImportError(
-            "Matrix dependencies not installed. Run: pip install nanobot-ai[matrix]"
-        ) from _NIO_IMPORT_ERROR
+    raise ImportError(
+        "Matrix dependencies not installed. Run: pip install nanobot-ai[matrix]"
+    ) from e
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -862,9 +772,7 @@ class MatrixChannel(BaseChannel):
         return False
 
     def _media_dir(self) -> Path:
-        d = get_data_dir() / "media" / "matrix"
-        d.mkdir(parents=True, exist_ok=True)
-        return d
+        return get_media_dir("matrix")
 
     @staticmethod
     def _event_source_content(event: RoomMessage) -> dict[str, Any]:

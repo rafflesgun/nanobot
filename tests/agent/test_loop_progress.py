@@ -10,7 +10,6 @@ import nanobot.agent.runner as runner_module
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.providers.base import GenerationSettings
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.session.webui_turns import WebuiTurnCoordinator
 from nanobot.utils.progress_events import (
@@ -284,81 +283,6 @@ class TestToolEventProgress:
         assert finish["result"] == "file.txt"
 
     @pytest.mark.asyncio
-<<<<<<< HEAD
-    async def test_streamed_max_iterations_publishes_final_message(self, tmp_path: Path) -> None:
-        """Synthetic max-iteration content was not streamed, so it must be sent normally."""
-        bus = MessageBus()
-        provider = MagicMock()
-        provider.get_default_model.return_value = "test-model"
-        provider.generation = GenerationSettings(max_tokens=0)
-        provider.estimate_prompt_tokens.return_value = (100, "test-counter")
-        loop = AgentLoop(
-            bus=bus,
-            provider=provider,
-            workspace=tmp_path,
-            model="test-model",
-            max_iterations=0,
-        )
-
-        msg = InboundMessage(
-            channel="telegram",
-            sender_id="u1",
-            chat_id="chat1",
-            content="do a complex task",
-            metadata={"_wants_stream": True},
-        )
-        await loop._dispatch(msg)
-
-        outbound = []
-        while bus.outbound_size > 0:
-            outbound.append(await bus.consume_outbound())
-
-        assert len(outbound) == 1
-        assert outbound[0].content.startswith("I reached the maximum number of tool call iterations")
-        assert outbound[0].metadata.get("_streamed") is not True
-
-    @pytest.mark.asyncio
-    async def test_streamed_max_iterations_finalization_publishes_final_message(
-        self, tmp_path: Path
-    ) -> None:
-        """The no-tool finalization retry is not streamed, so Telegram must send it normally."""
-        bus = MessageBus()
-        provider = MagicMock()
-        provider.get_default_model.return_value = "test-model"
-        provider.generation = GenerationSettings(max_tokens=0)
-        provider.estimate_prompt_tokens.return_value = (100, "test-counter")
-
-        async def chat_stream_with_retry(*, on_content_delta, **kwargs):
-            return LLMResponse(
-                content="still working",
-                tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
-            )
-
-        async def chat_with_retry(*, tools, **kwargs):
-            return LLMResponse(content="final summary from gathered evidence", tool_calls=[])
-
-        provider.chat_stream_with_retry = chat_stream_with_retry
-        provider.chat_with_retry = chat_with_retry
-        loop = AgentLoop(
-            bus=bus,
-            provider=provider,
-            workspace=tmp_path,
-            model="test-model",
-            max_iterations=1,
-        )
-        loop.tools.get_definitions = MagicMock(return_value=[])
-        loop.tools.prepare_call = MagicMock(return_value=(None, {"path": "."}, None))
-        loop.tools.execute = AsyncMock(return_value="tool result")
-
-        msg = InboundMessage(
-            channel="telegram",
-            sender_id="u1",
-            chat_id="chat1",
-            content="do a complex task",
-            metadata={"_wants_stream": True},
-        )
-        await loop._dispatch(msg)
-=======
     async def test_bus_progress_forwards_file_edit_events_without_channel_branch(self, tmp_path: Path) -> None:
         bus = MessageBus()
         provider = MagicMock()
@@ -457,19 +381,11 @@ class TestToolEventProgress:
             content="/goal create goal file",
             metadata={"_wants_stream": True},
         ))
->>>>>>> origin/main
 
         outbound = []
         while bus.outbound_size > 0:
             outbound.append(await bus.consume_outbound())
 
-<<<<<<< HEAD
-        final_messages = [m for m in outbound if m.content == "final summary from gathered evidence"]
-        assert len(final_messages) == 1
-        assert final_messages[0].metadata.get("_streamed") is not True
-
-    async def test_bus_progress_streams_provider_deltas_for_codex_style_provider(
-=======
         edit_events = [
             event
             for msg in outbound
@@ -491,7 +407,6 @@ class TestToolEventProgress:
 
     @pytest.mark.asyncio
     async def test_non_streaming_channel_does_not_publish_codex_progress_deltas(
->>>>>>> origin/main
         self,
         tmp_path: Path,
     ) -> None:
@@ -629,8 +544,6 @@ class TestToolEventProgress:
         assert progress[0][0] == 'custom_tool("foo.txt")'
         assert all(item[0] != "I will inspect it." for item in progress)
 
-<<<<<<< HEAD
-=======
     @pytest.mark.asyncio
     async def test_websocket_dispatch_publishes_final_turn_end_marker(self, tmp_path: Path) -> None:
         bus = MessageBus()
@@ -870,4 +783,3 @@ class TestToolEventProgress:
         assert len(outbound) == 1
         assert outbound[0].content == "Done"
         assert (outbound[0].metadata or {}).get("_turn_end") is not True
->>>>>>> origin/main

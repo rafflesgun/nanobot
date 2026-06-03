@@ -24,16 +24,6 @@ class Base(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
 
-<<<<<<< HEAD
-class WhatsAppConfig(Base):
-    """WhatsApp channel configuration."""
-
-    enabled: bool = False
-    bridge_url: str = "ws://localhost:3001"
-    bridge_token: str = ""  # Shared token for bridge auth (optional, recommended)
-    allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers
-
-
 class TTSConfig(Base):
     """TTS configuration for all channels."""
 
@@ -44,218 +34,44 @@ class TTSConfig(Base):
     pitch: str = "+0%"
     volume: str = "+0%"
 
-    # ── Per-provider credentials (independent of LLM keys) ──
     openai_api_key: str | None = None
-    riva_api_key: str | None = None  # mainly for NVIDIA Cloud Functions
+    riva_api_key: str | None = None
 
-    # OpenAI-specific parameters
     openai_model: str = "tts-1"
     openai_quality: str = "low"
     openai_speed: float = 1.0
 
-    # NVIDIA Riva / NVCF specific
     riva_server_url: str = "localhost:50051"
     riva_use_ssl: bool = False
     riva_ssl_cert: str | None = None
-    riva_function_id: str | None = None  # NVCF function ID when using cloud
+    riva_function_id: str | None = None
 
 
 class TelegramConfig(Base):
-    """Telegram channel configuration."""
+    """Telegram channel configuration compatibility schema."""
 
     enabled: bool = False
-    token: str = ""  # Bot token from @BotFather
-    allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs or usernames
-    proxy: str | None = (
-        None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
-    )
-    reply_to_message: bool = False  # If true, bot replies quote the original message
+    token: str = ""
+    mode: Literal["polling", "webhook"] = "polling"
+    allow_from: list[str] = Field(default_factory=list)
+    proxy: str | None = None
+    reply_to_message: bool = False
     react_emoji: str | list[str] = Field(default_factory=lambda: ["⚡️", "👌", "👀", "🔥", "👍"])
-    group_policy: Literal["open", "mention"] = (
-        "mention"  # "mention" responds when @mentioned or replied to, "open" responds to all
-    )
+    group_policy: Literal["open", "mention"] = "mention"
     connection_pool_size: int = 32
     pool_timeout: float = 5.0
     streaming: bool = True
+    inline_keyboards: bool = False
+    stream_edit_interval: float = Field(default=1.0, ge=0.1)
+    webhook_url: str = ""
+    webhook_listen_host: str = "127.0.0.1"
+    webhook_listen_port: int = Field(default=8081, ge=1, le=65535)
+    webhook_path: str = "/telegram"
+    webhook_secret_token: str = ""
+    webhook_max_connections: int = Field(default=4, ge=1, le=100)
     tts: TTSConfig = Field(default_factory=TTSConfig)
 
 
-class FeishuConfig(Base):
-    """Feishu/Lark channel configuration using WebSocket long connection."""
-
-    enabled: bool = False
-    app_id: str = ""  # App ID from Feishu Open Platform
-    app_secret: str = ""  # App Secret from Feishu Open Platform
-    encrypt_key: str = ""  # Encrypt Key for event subscription (optional)
-    verification_token: str = ""  # Verification Token for event subscription (optional)
-    allow_from: list[str] = Field(default_factory=list)  # Allowed user open_ids
-    react_emoji: str = (
-        "THUMBSUP"  # Emoji type for message reactions (e.g. THUMBSUP, OK, DONE, SMILE)
-    )
-
-
-class DingTalkConfig(Base):
-    """DingTalk channel configuration using Stream mode."""
-
-    enabled: bool = False
-    client_id: str = ""  # AppKey
-    client_secret: str = ""  # AppSecret
-    allow_from: list[str] = Field(default_factory=list)  # Allowed staff_ids
-
-
-class DiscordConfig(Base):
-    """Discord channel configuration."""
-
-    enabled: bool = False
-    token: str = ""  # Bot token from Discord Developer Portal
-    allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs
-    gateway_url: str = "wss://gateway.discord.gg/?v=10&encoding=json"
-    intents: int = 37377  # GUILDS + GUILD_MESSAGES + DIRECT_MESSAGES + MESSAGE_CONTENT
-    group_policy: Literal["mention", "open"] = "mention"
-
-
-class MatrixConfig(Base):
-    """Matrix (Element) channel configuration."""
-
-    enabled: bool = False
-    homeserver: str = "https://matrix.org"
-    access_token: str = ""
-    user_id: str = ""  # @bot:matrix.org
-    device_id: str = ""
-    e2ee_enabled: bool = True  # Enable Matrix E2EE support (encryption + encrypted room handling).
-    sync_stop_grace_seconds: int = (
-        2  # Max seconds to wait for sync_forever to stop gracefully before cancellation fallback.
-    )
-    max_media_bytes: int = (
-        20 * 1024 * 1024
-    )  # Max attachment size accepted for Matrix media handling (inbound + outbound).
-    allow_from: list[str] = Field(default_factory=list)
-    group_policy: Literal["open", "mention", "allowlist"] = "open"
-    group_allow_from: list[str] = Field(default_factory=list)
-    allow_room_mentions: bool = False
-
-
-class EmailConfig(Base):
-    """Email channel configuration (IMAP inbound + SMTP outbound)."""
-
-    enabled: bool = False
-    consent_granted: bool = False  # Explicit owner permission to access mailbox data
-
-    # IMAP (receive)
-    imap_host: str = ""
-    imap_port: int = 993
-    imap_username: str = ""
-    imap_password: str = ""
-    imap_mailbox: str = "INBOX"
-    imap_use_ssl: bool = True
-
-    # SMTP (send)
-    smtp_host: str = ""
-    smtp_port: int = 587
-    smtp_username: str = ""
-    smtp_password: str = ""
-    smtp_use_tls: bool = True
-    smtp_use_ssl: bool = False
-    from_address: str = ""
-
-    # Behavior
-    auto_reply_enabled: bool = (
-        True  # If false, inbound email is read but no automatic reply is sent
-    )
-    poll_interval_seconds: int = 30
-    mark_seen: bool = True
-    max_body_chars: int = 12000
-    subject_prefix: str = "Re: "
-    allow_from: list[str] = Field(default_factory=list)  # Allowed sender email addresses
-
-
-class MochatMentionConfig(Base):
-    """Mochat mention behavior configuration."""
-
-    require_in_groups: bool = False
-
-
-class MochatGroupRule(Base):
-    """Mochat per-group mention requirement."""
-
-    require_mention: bool = False
-
-
-class MochatConfig(Base):
-    """Mochat channel configuration."""
-
-    enabled: bool = False
-    base_url: str = "https://mochat.io"
-    socket_url: str = ""
-    socket_path: str = "/socket.io"
-    socket_disable_msgpack: bool = False
-    socket_reconnect_delay_ms: int = 1000
-    socket_max_reconnect_delay_ms: int = 10000
-    socket_connect_timeout_ms: int = 10000
-    refresh_interval_ms: int = 30000
-    watch_timeout_ms: int = 25000
-    watch_limit: int = 100
-    retry_delay_ms: int = 500
-    max_retry_attempts: int = 0  # 0 means unlimited retries
-    claw_token: str = ""
-    agent_user_id: str = ""
-    sessions: list[str] = Field(default_factory=list)
-    panels: list[str] = Field(default_factory=list)
-    allow_from: list[str] = Field(default_factory=list)
-    mention: MochatMentionConfig = Field(default_factory=MochatMentionConfig)
-    groups: dict[str, MochatGroupRule] = Field(default_factory=dict)
-    reply_delay_mode: str = "non-mention"  # off | non-mention
-    reply_delay_ms: int = 120000
-
-
-class SlackDMConfig(Base):
-    """Slack DM policy configuration."""
-
-    enabled: bool = True
-    policy: str = "open"  # "open" or "allowlist"
-    allow_from: list[str] = Field(default_factory=list)  # Allowed Slack user IDs
-
-
-class SlackConfig(Base):
-    """Slack channel configuration."""
-
-    enabled: bool = False
-    mode: str = "socket"  # "socket" supported
-    webhook_path: str = "/slack/events"
-    bot_token: str = ""  # xoxb-...
-    app_token: str = ""  # xapp-...
-    user_token_read_only: bool = True
-    reply_in_thread: bool = True
-    react_emoji: str = "eyes"
-    allow_from: list[str] = Field(default_factory=list)  # Allowed Slack user IDs (sender-level)
-    group_policy: str = "mention"  # "mention", "open", "allowlist"
-    group_allow_from: list[str] = Field(default_factory=list)  # Allowed channel IDs if allowlist
-    dm: SlackDMConfig = Field(default_factory=SlackDMConfig)
-
-
-class QQConfig(Base):
-    """QQ channel configuration using botpy SDK."""
-
-    enabled: bool = False
-    app_id: str = ""  # 机器人 ID (AppID) from q.qq.com
-    secret: str = ""  # 机器人密钥 (AppSecret) from q.qq.com
-    allow_from: list[str] = Field(
-        default_factory=list
-    )  # Allowed user openids (empty = public access)
-
-
-class WecomConfig(Base):
-    """WeCom (Enterprise WeChat) AI Bot channel configuration."""
-
-    enabled: bool = False
-    bot_id: str = ""  # Bot ID from WeCom AI Bot platform
-    secret: str = ""  # Bot Secret from WeCom AI Bot platform
-    allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs
-    welcome_message: str = ""  # Welcome message for enter_chat event
-
-
-=======
->>>>>>> origin/main
 class ChannelsConfig(Base):
     """Configuration for chat channels.
 
@@ -268,16 +84,10 @@ class ChannelsConfig(Base):
 
     send_progress: bool = True  # stream agent's text progress to the channel
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
-<<<<<<< HEAD
-    show_usage: bool = False  # show token usage hints in responses
-    send_max_retries: int = Field(
-        default=3, ge=0, le=10
-    )  # Max delivery attempts (initial send included)
-=======
     show_reasoning: bool = True  # surface model reasoning when channel implements it
     extract_document_text: bool = True  # extract text from document attachments before sending to the model
+    show_usage: bool = False  # show token usage hints in responses
     send_max_retries: int = Field(default=3, ge=0, le=10)  # Max delivery attempts (initial send included)
->>>>>>> origin/main
     transcription_provider: str = "groq"  # Voice transcription backend: "groq" or "openai"
     transcription_language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")  # Optional ISO-639-1 hint for audio transcription
 
@@ -356,9 +166,6 @@ class AgentDefaults(Base):
     workspace: str = "~/.nanobot/workspace"
     model_preset: str | None = None  # Active preset name — takes precedence over fields below
     model: str = "anthropic/claude-opus-4-5"
-    fallback_models: list[str] = Field(
-        default_factory=list
-    )  # Fallback models tried in order on failure
     provider: str = (
         "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
     )
@@ -366,24 +173,12 @@ class AgentDefaults(Base):
     context_window_tokens: int = 65_536
     context_block_limit: int | None = None
     temperature: float = 0.1
-    fallback_models: list[FallbackCandidate] = Field(default_factory=list)
+    fallback_models: list[str] = Field(default_factory=list)
     max_tool_iterations: int = 200
     max_concurrent_subagents: int = Field(default=1, ge=1)
     max_tool_result_chars: int = 16_000
-    max_repeat_lookups: int = (
-        2  # Max times same tool call allowed before blocking (prevents infinite loops)
-    )
+    max_repeat_lookups: int = 2
     provider_retry_mode: Literal["standard", "persistent"] = "standard"
-<<<<<<< HEAD
-    reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
-    timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
-    unified_session: bool = (
-        False  # Share one session across all channels (single-user multi-device)
-    )
-    disabled_skills: list[str] = Field(
-        default_factory=list
-    )  # Skill names to exclude from loading (e.g. ["summarize", "skill-creator"])
-=======
     tool_hint_max_length: int = Field(
         default=40,
         ge=20,
@@ -397,7 +192,6 @@ class AgentDefaults(Base):
     bot_icon: str = "🐈"  # Short icon (emoji or text) shown next to the bot name in CLI; "" to omit
     unified_session: bool = False  # Share one session across all channels (single-user multi-device)
     disabled_skills: list[str] = Field(default_factory=list)  # Skill names to exclude from loading (e.g. ["summarize", "skill-creator"])
->>>>>>> origin/main
     session_ttl_minutes: int = Field(
         default=0,
         ge=0,
@@ -416,7 +210,6 @@ class AgentDefaults(Base):
         serialization_alias="consolidationRatio",
     )  # Consolidation target ratio (0.5 = 50% of budget retained after compression)
     dream: DreamConfig = Field(default_factory=DreamConfig)
-    reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
 
 
 class AgentsConfig(Base):
@@ -475,14 +268,8 @@ class ProvidersConfig(Base):
     """Configuration for LLM providers."""
 
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
-<<<<<<< HEAD
-    azure_openai: ProviderConfig = Field(
-        default_factory=ProviderConfig
-    )  # Azure OpenAI (model = deployment name)
-=======
     azure_openai: ProviderConfig = Field(default_factory=ProviderConfig)  # Azure OpenAI (model = deployment name)
     bedrock: BedrockProviderConfig = Field(default_factory=BedrockProviderConfig)  # AWS Bedrock Converse
->>>>>>> origin/main
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
     openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -500,9 +287,7 @@ class ProvidersConfig(Base):
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
     minimax: ProviderConfig = Field(default_factory=ProviderConfig)
-    minimax_anthropic: ProviderConfig = Field(
-        default_factory=ProviderConfig
-    )  # MiniMax Anthropic endpoint (thinking)
+    minimax_anthropic: ProviderConfig = Field(default_factory=ProviderConfig)  # MiniMax Anthropic endpoint (thinking)
     mistral: ProviderConfig = Field(default_factory=ProviderConfig)
     stepfun: ProviderConfig = Field(default_factory=ProviderConfig)  # Step Fun (阶跃星辰)
     xiaomi_mimo: ProviderConfig = Field(default_factory=ProviderConfig)  # Xiaomi MIMO (小米)
@@ -512,24 +297,12 @@ class ProvidersConfig(Base):
     siliconflow: ProviderConfig = Field(default_factory=ProviderConfig)  # SiliconFlow (硅基流动)
     novita: ProviderConfig = Field(default_factory=ProviderConfig)  # Novita AI
     volcengine: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine (火山引擎)
-    volcengine_coding_plan: ProviderConfig = Field(
-        default_factory=ProviderConfig
-    )  # VolcEngine Coding Plan
-    byteplus: ProviderConfig = Field(
-        default_factory=ProviderConfig
-    )  # BytePlus (VolcEngine international)
-    byteplus_coding_plan: ProviderConfig = Field(
-        default_factory=ProviderConfig
-    )  # BytePlus Coding Plan
+    volcengine_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine Coding Plan
+    byteplus: ProviderConfig = Field(default_factory=ProviderConfig)  # BytePlus (VolcEngine international)
+    byteplus_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)  # BytePlus Coding Plan
+    openai_codex: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # OpenAI Codex (OAuth)
+    github_copilot: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # Github Copilot (OAuth)
     qianfan: ProviderConfig = Field(default_factory=ProviderConfig)  # Qianfan (百度千帆)
-<<<<<<< HEAD
-    openai_codex: ProviderConfig = Field(
-        default_factory=ProviderConfig, exclude=True
-    )  # OpenAI Codex (OAuth)
-    github_copilot: ProviderConfig = Field(
-        default_factory=ProviderConfig, exclude=True
-    )  # Github Copilot (OAuth)
-=======
     nvidia: ProviderConfig = Field(default_factory=ProviderConfig)  # NVIDIA NIM (nvapi- keys)
 
     @model_validator(mode="after")
@@ -541,7 +314,6 @@ class ProvidersConfig(Base):
             if isinstance(provider, ProviderConfig) and provider.api_type != "auto":
                 raise ValueError("providers.<name>.api_type is only supported for providers.openai")
         return self
->>>>>>> origin/main
 
 
 class HeartbeatConfig(Base):
@@ -555,9 +327,9 @@ class HeartbeatConfig(Base):
 class ApiConfig(Base):
     """OpenAI-compatible API server configuration."""
 
-    host: str = "127.0.0.1"
+    host: str = "127.0.0.1"  # Safer default: local-only bind.
     port: int = 8900
-    timeout: float = 120.0
+    timeout: float = 120.0  # Per-request timeout in seconds.
 
 
 class GatewayConfig(Base):
@@ -568,50 +340,6 @@ class GatewayConfig(Base):
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
 
-<<<<<<< HEAD
-class WebSearchConfig(Base):
-    """Web search tool configuration."""
-
-    provider: str = "brave"  # brave, tavily, duckduckgo, searxng, jina, kagi, olostep
-    api_key: str = ""
-    base_url: str = ""  # SearXNG base URL
-    max_results: int = 5
-    timeout: float = 30
-
-
-class WebFetchConfig(Base):
-    """Web fetch tool configuration."""
-
-    use_jina_reader: bool = True
-
-
-class WebToolsConfig(Base):
-    """Web tools configuration."""
-
-    enable: bool = True
-    proxy: str | None = (
-        None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
-    )
-    user_agent: str | None = None
-    search: WebSearchConfig = Field(default_factory=WebSearchConfig)
-    fetch: WebFetchConfig = Field(default_factory=WebFetchConfig)
-
-
-class ExecToolConfig(Base):
-    """Shell exec tool configuration."""
-
-    enable: bool = True
-    timeout: int = 60
-    path_append: str = ""
-    sandbox: str = ""
-    sandbox: str = ""  # sandbox backend: "" (none) or "bwrap"
-    allowed_env_keys: list[str] = Field(
-        default_factory=list
-    )  # Env var names to pass through to subprocess (e.g. ["GOPATH", "JAVA_HOME"])
-
-
-=======
->>>>>>> origin/main
 class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""
 
@@ -623,22 +351,7 @@ class MCPServerConfig(Base):
     url: str = ""  # HTTP/SSE: endpoint URL
     headers: dict[str, str] = Field(default_factory=dict)  # HTTP/SSE: custom headers
     tool_timeout: int = 30  # seconds before a tool call is cancelled
-    enabled_tools: list[str] = Field(
-        default_factory=lambda: ["*"]
-    )  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all tools; [] = no tools
-
-
-class WorkspaceRestrictionConfig(Base):
-    """Configuration for workspace restriction."""
-
-    enabled: bool = False  # If true, restrict all tool access to workspace directory
-    extra_write: list[str] = Field(
-        default_factory=list
-    )  # Additional paths allowed for writing and reading when enabled
-    extra_read: list[str] = Field(
-        default_factory=list
-    )  # Additional paths allowed for reading when enabled
-
+    enabled_tools: list[str] = Field(default_factory=lambda: ["*"])  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all tools; [] = no tools
 
 
 def _lazy_default(module_path: str, class_name: str) -> Any:
@@ -648,39 +361,17 @@ def _lazy_default(module_path: str, class_name: str) -> Any:
     return getattr(module, class_name)()
 
 
-class ImageGenerationToolConfig(Base):
-    """Image generation tool configuration."""
+class WorkspaceRestrictionConfig(Base):
+    """Configuration for workspace restriction."""
 
     enabled: bool = False
-    provider: Literal["openai", "custom"] = "openai"
-    model: str = "gpt-image-1"
-    size: Literal[
-        "auto",
-        "1024x1024",
-        "1024x1536",
-        "1536x1024",
-        "256x256",
-        "512x512",
-        "1792x1024",
-        "1024x1792",
-    ] = "1024x1024"
-    quality: Literal["auto", "low", "medium", "high", "standard", "hd"] = "auto"
+    extra_read: list[str] = Field(default_factory=list)
+    extra_write: list[str] = Field(default_factory=list)
 
 
 class ToolsConfig(Base):
     """Tools configuration.
 
-<<<<<<< HEAD
-    web: WebToolsConfig = Field(default_factory=WebToolsConfig)
-    exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
-    restrict_to_workspace: WorkspaceRestrictionConfig = Field(
-        default_factory=WorkspaceRestrictionConfig
-    )
-    my: MyToolConfig = Field(default_factory=MyToolConfig)
-    image_generation: ImageGenerationToolConfig = Field(
-        default_factory=ImageGenerationToolConfig
-    )
-=======
     Field types for tool-specific sub-configs are resolved via model_rebuild()
     at the bottom of this file to avoid circular imports (tool modules import
     Base from schema.py).
@@ -693,7 +384,9 @@ class ToolsConfig(Base):
     image_generation: ImageGenerationToolConfig = Field(
         default_factory=lambda: _lazy_default("nanobot.agent.tools.image_generation", "ImageGenerationToolConfig"),
     )
-    restrict_to_workspace: bool = False  # policy intent: keep tool access inside workspace when possible
+    restrict_to_workspace: WorkspaceRestrictionConfig = Field(
+        default_factory=WorkspaceRestrictionConfig
+    )
     webui_allow_local_service_access: bool = Field(
         default=True,
         validation_alias=AliasChoices(
@@ -703,9 +396,8 @@ class ToolsConfig(Base):
             "allow_local_preview_access",
         ),
     )  # allow WebUI Full Access shell checks against localhost services; legacy allowLocalPreviewAccess still reads
->>>>>>> origin/main
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
-    ssrf_whitelist: list[str] = Field(default_factory=list)
+    ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
 
 
 class Config(BaseSettings):
@@ -734,9 +426,6 @@ class Config(BaseSettings):
         name = self.agents.defaults.model_preset
         if name and name != "default" and name not in self.model_presets:
             raise ValueError(f"model_preset {name!r} not found in model_presets")
-        for fallback in self.agents.defaults.fallback_models:
-            if isinstance(fallback, str) and fallback not in self.model_presets:
-                raise ValueError(f"fallback_models entry {fallback!r} not found in model_presets")
         return self
 
     def resolve_default_preset(self) -> ModelPresetConfig:
@@ -763,24 +452,15 @@ class Config(BaseSettings):
         return Path(self.agents.defaults.workspace).expanduser()
 
     def _match_provider(
-<<<<<<< HEAD
-        self, model: str | None = None, agent: AgentDefaults | None = None
-=======
         self, model: str | None = None,
         *,
         preset: ModelPresetConfig | None = None,
->>>>>>> origin/main
     ) -> tuple["ProviderConfig | None", str | None]:
         """Match provider config and its registry name. Returns (config, spec_name)."""
         from nanobot.providers.registry import PROVIDERS, find_by_name
 
-<<<<<<< HEAD
-        resolved_agent = agent or self.agents.defaults
-        forced = resolved_agent.provider
-=======
         resolved = preset or self.resolve_preset()
         forced = resolved.provider
->>>>>>> origin/main
         if forced != "auto":
             spec = find_by_name(forced)
             if spec:
@@ -788,11 +468,7 @@ class Config(BaseSettings):
                 return (p, spec.name) if p else (None, None)
             return None, None
 
-<<<<<<< HEAD
-        model_lower = (model or resolved_agent.model).lower()
-=======
         model_lower = (model or resolved.model).lower()
->>>>>>> origin/main
         model_normalized = model_lower.replace("-", "_")
         model_prefix = model_lower.split("/", 1)[0] if "/" in model_lower else ""
         normalized_prefix = model_prefix.replace("-", "_")
@@ -844,35 +520,6 @@ class Config(BaseSettings):
         return None, None
 
     def get_provider(
-<<<<<<< HEAD
-        self, model: str | None = None, agent: AgentDefaults | None = None
-    ) -> ProviderConfig | None:
-        """Get matched provider config (api_key, api_base, extra_headers). Falls back to first available."""
-        p, _ = self._match_provider(model, agent=agent)
-        return p
-
-    def get_provider_name(
-        self, model: str | None = None, agent: AgentDefaults | None = None
-    ) -> str | None:
-        """Get the registry name of the matched provider (e.g. "deepseek", "openrouter")."""
-        _, name = self._match_provider(model, agent=agent)
-        return name
-
-    def get_api_key(
-        self, model: str | None = None, agent: AgentDefaults | None = None
-    ) -> str | None:
-        """Get API key for the given model. Falls back to first available key."""
-        p = self.get_provider(model, agent=agent)
-        return p.api_key if p else None
-
-    def get_api_base(
-        self, model: str | None = None, agent: AgentDefaults | None = None
-    ) -> str | None:
-        """Get API base URL for the given model. Falls back to the provider default when present."""
-        from nanobot.providers.registry import find_by_name
-
-        p, name = self._match_provider(model, agent=agent)
-=======
         self,
         model: str | None = None,
         *,
@@ -912,7 +559,6 @@ class Config(BaseSettings):
         from nanobot.providers.registry import find_by_name
 
         p, name = self._match_provider(model, preset=preset)
->>>>>>> origin/main
         if p and p.api_base:
             return p.api_base
         if name:
@@ -920,11 +566,6 @@ class Config(BaseSettings):
             if spec and spec.default_api_base:
                 return spec.default_api_base
         return None
-
-    def get_image_generation_provider(self) -> ProviderConfig | None:
-        """Get provider config for the image generation tool."""
-        provider_name = self.tools.image_generation.provider
-        return getattr(self.providers, provider_name, None)
 
     model_config = ConfigDict(env_prefix="NANOBOT_", env_nested_delimiter="__")
 

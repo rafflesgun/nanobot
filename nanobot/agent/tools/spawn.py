@@ -5,22 +5,15 @@ from __future__ import annotations
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
-<<<<<<< HEAD
-from nanobot.agent.tools.base import Tool
-=======
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.context import ContextAware, RequestContext
 from nanobot.agent.tools.schema import NumberSchema, StringSchema, tool_parameters_schema
 from nanobot.security.workspace_access import current_workspace_scope
->>>>>>> origin/main
 
 if TYPE_CHECKING:
     from nanobot.agent.subagent import SubagentManager
 
 
-<<<<<<< HEAD
-class SpawnTool(Tool):
-=======
 @tool_parameters(
     tool_parameters_schema(
         task=StringSchema("The task for the subagent to complete"),
@@ -34,11 +27,11 @@ class SpawnTool(Tool):
             minimum=0.0,
             maximum=2.0,
         ),
+        subagent_id=StringSchema("Optional configured subagent profile to use for this task"),
         required=["task"],
     )
 )
 class SpawnTool(Tool, ContextAware):
->>>>>>> origin/main
     """Tool to spawn a subagent for background task execution."""
 
     def __init__(self, manager: "SubagentManager"):
@@ -46,38 +39,16 @@ class SpawnTool(Tool, ContextAware):
         self._origin_channel: ContextVar[str] = ContextVar("spawn_origin_channel", default="cli")
         self._origin_chat_id: ContextVar[str] = ContextVar("spawn_origin_chat_id", default="direct")
         self._session_key: ContextVar[str] = ContextVar("spawn_session_key", default="cli:direct")
-<<<<<<< HEAD
-        self._origin_thread_id: ContextVar[int | None] = ContextVar(
-            "spawn_origin_thread_id", default=None
-        )
-        self._model_override: ContextVar[str | None] = ContextVar(
-            "spawn_model_override", default=None
-        )
-
-    def set_context(
-        self,
-        channel: str,
-        chat_id: str,
-        effective_key: str | None = None,
-        model_override: str | None = None,
-        thread_id: int | None = None,
-    ) -> None:
-        """Set the origin context for subagent announcements."""
-        self._origin_channel.set(channel)
-        self._origin_chat_id.set(chat_id)
-        self._session_key.set(
-            effective_key
-            or (
-                f"{channel}:{chat_id}:topic:{thread_id}"
-                if thread_id is not None
-                else f"{channel}:{chat_id}"
-            )
-        )
-        self._origin_thread_id.set(thread_id)
-        self._model_override.set(model_override)
-=======
         self._origin_message_id: ContextVar[str | None] = ContextVar(
             "spawn_origin_message_id",
+            default=None,
+        )
+        self._origin_thread_id: ContextVar[int | None] = ContextVar(
+            "spawn_origin_thread_id",
+            default=None,
+        )
+        self._model_override: ContextVar[str | None] = ContextVar(
+            "spawn_model_override",
             default=None,
         )
 
@@ -85,13 +56,38 @@ class SpawnTool(Tool, ContextAware):
     def create(cls, ctx: Any) -> Tool:
         return cls(manager=ctx.subagent_manager)
 
-    def set_context(self, ctx: RequestContext) -> None:
+    def set_context(
+        self,
+        ctx: RequestContext | str,
+        chat_id: str | None = None,
+        effective_key: str | None = None,
+        model_override: str | None = None,
+        thread_id: int | None = None,
+    ) -> None:
         """Set the origin context for subagent announcements."""
-        self._origin_channel.set(ctx.channel)
-        self._origin_chat_id.set(ctx.chat_id)
-        self._session_key.set(ctx.session_key or f"{ctx.channel}:{ctx.chat_id}")
-        self._origin_message_id.set(ctx.message_id)
->>>>>>> origin/main
+        if isinstance(ctx, RequestContext):
+            metadata = ctx.metadata or {}
+            thread_id = ctx.thread_id or metadata.get("message_thread_id")
+            model_override = metadata.get("_model_override")
+            channel = ctx.channel
+            chat = ctx.chat_id
+            effective_key = ctx.session_key or (
+                f"{channel}:{chat}:topic:{thread_id}" if thread_id is not None else f"{channel}:{chat}"
+            )
+            message_id = ctx.message_id
+        else:
+            channel = ctx
+            chat = chat_id or "direct"
+            effective_key = effective_key or (
+                f"{channel}:{chat}:topic:{thread_id}" if thread_id is not None else f"{channel}:{chat}"
+            )
+            message_id = None
+        self._origin_channel.set(channel)
+        self._origin_chat_id.set(chat)
+        self._session_key.set(effective_key)
+        self._origin_message_id.set(message_id)
+        self._origin_thread_id.set(thread_id)
+        self._model_override.set(model_override)
 
     @property
     def name(self) -> str:
@@ -99,58 +95,42 @@ class SpawnTool(Tool, ContextAware):
 
     @property
     def description(self) -> str:
-        description = (
+        desc = (
             "Spawn a subagent to handle a task in the background. "
             "Use this for complex or time-consuming tasks that can run independently. "
             "The subagent will complete the task and report back when done. "
             "For deliverables or existing projects, inspect the workspace first "
             "and use a dedicated subdirectory when helpful."
         )
-        profiles = self._manager.list_profiles()
+        with_profiles = getattr(self._manager, "list_profiles", None)
+        profiles = with_profiles() if callable(with_profiles) else []
         if profiles:
-            advertised = "; ".join(
-                f"{profile['id']}: {profile.get('description') or profile.get('label') or 'configured profile'}"
-                for profile in profiles
+            profile_text = "; ".join(
+                f"{p.get('id')}: {p.get('description') or p.get('label') or ''}".strip()
+                for p in profiles
+                if p.get("id")
             )
-            description += (
-                f" Available configured subagents: {advertised}. Use subagent_id to select one."
-            )
-        return description
+            desc += f" Available configured subagents: {profile_text}. Use subagent_id to select one."
+        return desc
 
-<<<<<<< HEAD
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "task": {
-                    "type": "string",
-                    "description": "The task for the subagent to complete",
-                },
-                "label": {
-                    "type": "string",
-                    "description": "Optional short label for the task (for display)",
-                },
-                "subagent_id": {
-                    "type": "string",
-                    "description": "Optional configured subagent profile to use for this task",
-                },
-            },
-            "required": ["task"],
-        }
-
-=======
->>>>>>> origin/main
     async def execute(
         self,
         task: str,
         label: str | None = None,
-<<<<<<< HEAD
+        temperature: float | None = None,
         subagent_id: str | None = None,
         **kwargs: Any,
     ) -> str:
         """Spawn a subagent to execute the given task."""
-        spawn_kwargs: dict[str, Any] = {
+        running = self._manager.get_running_count()
+        limit = self._manager.max_concurrent_subagents
+        if isinstance(running, int) and isinstance(limit, int) and running >= limit:
+            return (
+                f"Cannot spawn subagent: concurrency limit reached "
+                f"({running}/{limit} running). Wait for a running subagent "
+                f"to complete before spawning a new one."
+            )
+        call_kwargs: dict[str, Any] = {
             "task": task,
             "label": label,
             "origin_channel": self._origin_channel.get(),
@@ -160,39 +140,10 @@ class SpawnTool(Tool, ContextAware):
             "subagent_id": subagent_id,
             "model_override": self._model_override.get(),
         }
-        try:
-            return await self._manager.spawn(**spawn_kwargs)
-        except TypeError as exc:
-            if "unexpected keyword argument" not in str(exc):
-                raise
-            return await self._manager.spawn(
-                task=task,
-                label=label,
-                origin_channel=self._origin_channel.get(),
-                origin_chat_id=self._origin_chat_id.get(),
-                session_key=self._session_key.get(),
-            )
-=======
-        temperature: float | None = None,
-        **kwargs: Any,
-    ) -> str:
-        """Spawn a subagent to execute the given task."""
-        running = self._manager.get_running_count()
-        limit = self._manager.max_concurrent_subagents
-        if running >= limit:
-            return (
-                f"Cannot spawn subagent: concurrency limit reached "
-                f"({running}/{limit} running). Wait for a running subagent "
-                f"to complete before spawning a new one."
-            )
-        return await self._manager.spawn(
-            task=task,
-            label=label,
-            origin_channel=self._origin_channel.get(),
-            origin_chat_id=self._origin_chat_id.get(),
-            session_key=self._session_key.get(),
-            origin_message_id=self._origin_message_id.get(),
-            temperature=temperature,
-            workspace_scope=current_workspace_scope(),
-        )
->>>>>>> origin/main
+        if self._origin_message_id.get() is not None:
+            call_kwargs["origin_message_id"] = self._origin_message_id.get()
+        if temperature is not None:
+            call_kwargs["temperature"] = temperature
+        if current_workspace_scope() is not None:
+            call_kwargs["workspace_scope"] = current_workspace_scope()
+        return await self._manager.spawn(**call_kwargs)

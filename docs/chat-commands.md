@@ -15,21 +15,11 @@ These commands work inside chat channels and interactive agent sessions:
 | `/dream-log <sha>` | Show a specific Dream memory change |
 | `/dream-restore` | List recent Dream memory versions |
 | `/dream-restore <sha>` | Restore memory to the state before a specific change |
-<<<<<<< HEAD
-| `/recall <query>` | Search prior sessions for related work |
-| `/workflow list` | List workspace-local instruction-only workflows |
-| `/workflow show <name>` | Show a local workflow checklist without starting step mode |
-| `/workflow run <name>` | Show a local workflow checklist |
-| `/workflow step <name>` | Start step-by-step workflow mode |
-| `/workflow next` | Continue the active step-by-step workflow |
-| `/workflow abort` | Abort the active step-by-step workflow |
-=======
 | `/pairing` | List pending pairing requests |
 | `/pairing approve <code>` | Approve a pairing code |
 | `/pairing deny <code>` | Deny a pending pairing request |
 | `/pairing revoke <user_id>` | Revoke a previously approved user on the current channel |
 | `/pairing revoke <channel> <user_id>` | Revoke a previously approved user on a specific channel |
->>>>>>> origin/main
 | `/help` | Show available in-chat commands |
 
 ## Pairing

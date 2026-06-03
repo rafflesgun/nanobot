@@ -121,9 +121,6 @@ class NanobotDingTalkHandler(CallbackHandler):
             sender_id = chatbot_msg.sender_staff_id or chatbot_msg.sender_id
             sender_name = chatbot_msg.sender_nick or "Unknown"
 
-<<<<<<< HEAD
-            logger.info("Received DingTalk message from {} ({}): {}", sender_name, sender_id, content)
-=======
             conversation_type = message.data.get("conversationType")
             conversation_id = (
                 message.data.get("conversationId")
@@ -131,7 +128,6 @@ class NanobotDingTalkHandler(CallbackHandler):
             )
 
             self.channel.logger.info("Received message from {} ({}): {}", sender_name, sender_id, content)
->>>>>>> origin/main
 
             # Forward to Nanobot via _on_message (non-blocking).
             # Store reference to prevent GC before task completes.
@@ -140,8 +136,8 @@ class NanobotDingTalkHandler(CallbackHandler):
                     content,
                     sender_id,
                     sender_name,
-                    conversation_type=message.data.get("conversationType"),
-                    conversation_id=message.data.get("conversationId"),
+                    conversation_type,
+                    conversation_id,
                 )
             )
             self.channel._background_tasks.add(task)
@@ -174,8 +170,8 @@ class DingTalkChannel(BaseChannel):
     Uses WebSocket to receive events via `dingtalk-stream` SDK.
     Uses direct HTTP API to send messages (SDK is mainly for receiving).
 
-    Note: Currently only supports private (1:1) chat. Group messages are
-    received but replies are sent back as private messages to the sender.
+    Supports both private (1:1) and group chats.
+    Group chat_id is stored with a "group:" prefix to route replies back.
     """
 
     name = "dingtalk"
@@ -548,16 +544,18 @@ class DingTalkChannel(BaseChannel):
             self.logger.warning("HTTP client not initialized, cannot send")
             return False
 
-        is_group_chat = chat_id.startswith("group:")
-        if is_group_chat:
+        headers = {"x-acs-dingtalk-access-token": token}
+        if chat_id.startswith("group:"):
+            # Group chat
             url = "https://api.dingtalk.com/v1.0/robot/groupMessages/send"
             payload = {
                 "robotCode": self.config.client_id,
-                "openConversationId": chat_id.split(":", 1)[1],
+                "openConversationId": chat_id[6:],  # Remove "group:" prefix,
                 "msgKey": msg_key,
                 "msgParam": json.dumps(msg_param, ensure_ascii=False),
             }
         else:
+            # Private chat
             url = "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend"
             payload = {
                 "robotCode": self.config.client_id,
@@ -565,7 +563,6 @@ class DingTalkChannel(BaseChannel):
                 "msgKey": msg_key,
                 "msgParam": json.dumps(msg_param, ensure_ascii=False),
             }
-        headers = {"x-acs-dingtalk-access-token": token}
 
         try:
             resp = await self._http.post(url, json=payload, headers=headers)
@@ -694,19 +691,12 @@ class DingTalkChannel(BaseChannel):
         permission checks before publishing to the bus.
         """
         try:
-<<<<<<< HEAD
-            logger.info("DingTalk inbound: {} from {}", content, sender_name)
-            chat_id = sender_id
-            if str(conversation_type or "") == "2" and conversation_id:
-                chat_id = f"group:{conversation_id}"
-=======
             self.logger.info("inbound: {} from {}", content, sender_name)
             is_group = conversation_type == "2" and conversation_id
             chat_id = f"group:{conversation_id}" if is_group else sender_id
             session_key = None
             if is_group and self.config.group_user_isolation:
                 session_key = f"{self.name}:group:{conversation_id}:{sender_id}"
->>>>>>> origin/main
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=chat_id,
@@ -715,7 +705,6 @@ class DingTalkChannel(BaseChannel):
                     "sender_name": sender_name,
                     "platform": "dingtalk",
                     "conversation_type": conversation_type,
-                    "conversation_id": conversation_id,
                 },
                 session_key=session_key,
             )

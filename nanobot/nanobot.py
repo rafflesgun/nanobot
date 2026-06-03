@@ -58,41 +58,13 @@ class Nanobot:
 
         config: Config = resolve_config_env_vars(load_config(resolved))
         if workspace is not None:
-            config.agents.defaults.workspace = str(Path(workspace).expanduser().resolve())
+            config.agents.defaults.workspace = str(
+                Path(workspace).expanduser().resolve()
+            )
 
-<<<<<<< HEAD
-        provider = _make_provider(config)
-        bus = MessageBus()
-        defaults = config.agents.defaults
-
-        loop = AgentLoop(
-            bus=bus,
-            provider=provider,
-            workspace=config.workspace_path,
-            model=defaults.model,
-            fallback_models=defaults.fallback_models,
-            max_iterations=defaults.max_tool_iterations,
-            context_window_tokens=defaults.context_window_tokens,
-            context_block_limit=defaults.context_block_limit,
-            max_tool_result_chars=defaults.max_tool_result_chars,
-            provider_retry_mode=defaults.provider_retry_mode,
-            web_config=config.tools.web,
-            exec_config=config.tools.exec,
-            restrict_to_workspace=config.tools.restrict_to_workspace,
-            mcp_servers=config.tools.mcp_servers,
-            agents_config=config.agents,
-            timezone=defaults.timezone,
-            unified_session=defaults.unified_session,
-            disabled_skills=defaults.disabled_skills,
-            session_ttl_minutes=defaults.session_ttl_minutes,
-            consolidation_ratio=defaults.consolidation_ratio,
-            tools_config=config.tools,
-            image_generation_provider=config.get_image_generation_provider(),
-=======
         loop = AgentLoop.from_config(
             config,
             image_generation_provider_configs=image_gen_provider_configs(config),
->>>>>>> origin/main
         )
         return cls(loop)
 
@@ -117,8 +89,7 @@ class Nanobot:
         self._loop._extra_hooks = [capture, *base_hooks]
         try:
             response = await self._loop.process_direct(
-                message,
-                session_key=session_key,
+                message, session_key=session_key,
             )
         finally:
             self._loop._extra_hooks = prev

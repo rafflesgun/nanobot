@@ -42,9 +42,7 @@ _CRON_PARAMETERS = tool_parameters_schema(
         description="Whether to deliver the execution result to the user channel (default true)",
         default=True,
     ),
-    job_id=StringSchema(
-        "REQUIRED when action='remove'. Job ID to remove (obtain via action='list')."
-    ),
+    job_id=StringSchema("REQUIRED when action='remove'. Job ID to remove (obtain via action='list')."),
     required=["action"],
     description=(
         "Action-specific parameters: add requires a non-empty message plus one schedule "
@@ -65,41 +63,10 @@ class CronTool(Tool, ContextAware):
         self._default_timezone = default_timezone
         self._channel_var: ContextVar[str] = ContextVar("cron_channel", default="")
         self._chat_id_var: ContextVar[str] = ContextVar("cron_chat_id", default="")
-        self._thread_id_var: ContextVar[int | None] = ContextVar("cron_thread_id", default=None)
         self._metadata: ContextVar[dict] = ContextVar("cron_metadata", default={})
         self._session_key: ContextVar[str] = ContextVar("cron_session_key", default="")
+        self._thread_id_var: ContextVar[int | None] = ContextVar("cron_thread_id", default=None)
         self._in_cron_context: ContextVar[bool] = ContextVar("cron_in_context", default=False)
-
-<<<<<<< HEAD
-    def set_context(
-        self,
-        channel: str,
-        chat_id: str,
-        thread_id: int | None = None,
-        metadata: dict | None = None, session_key: str | None = None,
-    ) -> None:
-        """Set the current session context for delivery."""
-        self._channel_var.set(channel)
-        self._chat_id_var.set(chat_id)
-        self._thread_id_var.set(thread_id)
-        self._metadata.set(metadata or {})
-        self._session_key.set(session_key or f"{channel}:{chat_id}")
-=======
-    @classmethod
-    def enabled(cls, ctx: Any) -> bool:
-        return ctx.cron_service is not None
-
-    @classmethod
-    def create(cls, ctx: Any) -> Tool:
-        return cls(cron_service=ctx.cron_service, default_timezone=ctx.timezone)
-
-    def set_context(self, ctx: RequestContext) -> None:
-        """Set the current session context for delivery."""
-        self._channel.set(ctx.channel)
-        self._chat_id.set(ctx.chat_id)
-        self._metadata.set(ctx.metadata)
-        self._session_key.set(ctx.session_key or f"{ctx.channel}:{ctx.chat_id}")
->>>>>>> origin/main
 
     @property
     def _channel(self) -> str:
@@ -112,6 +79,42 @@ class CronTool(Tool, ContextAware):
     @property
     def _thread_id(self) -> int | None:
         return self._thread_id_var.get()
+
+    @classmethod
+    def enabled(cls, ctx: Any) -> bool:
+        return ctx.cron_service is not None
+
+    @classmethod
+    def create(cls, ctx: Any) -> Tool:
+        return cls(cron_service=ctx.cron_service, default_timezone=ctx.timezone)
+
+    def set_context(
+        self,
+        ctx: RequestContext | str,
+        chat_id: str | None = None,
+        *,
+        thread_id: int | None = None,
+        metadata: dict | None = None,
+        session_key: str | None = None,
+    ) -> None:
+        """Set the current session context for delivery."""
+        if isinstance(ctx, RequestContext):
+            metadata = ctx.metadata
+            thread_id = ctx.thread_id or metadata.get("message_thread_id")
+            session_key = ctx.session_key or f"{ctx.channel}:{ctx.chat_id}"
+            channel = ctx.channel
+            chat = ctx.chat_id
+        else:
+            channel = ctx
+            chat = chat_id or ""
+            metadata = metadata or {}
+            session_key = session_key or f"{channel}:{chat}"
+
+        self._channel_var.set(channel)
+        self._chat_id_var.set(chat)
+        self._metadata.set(metadata)
+        self._session_key.set(session_key)
+        self._thread_id_var.set(thread_id)
 
     def set_cron_context(self, active: bool):
         """Mark whether the tool is executing inside a cron job callback."""
@@ -199,10 +202,10 @@ class CronTool(Tool, ContextAware):
             return (
                 "Error: cron action='add' requires a non-empty 'message' parameter "
                 "describing what to do when the job triggers "
-                '(e.g. the reminder text). Retry including message="...".'
+                "(e.g. the reminder text). Retry including message=\"...\"."
             )
-        channel = self._channel_var.get()
-        chat_id = self._chat_id_var.get()
+        channel = self._channel
+        chat_id = self._chat_id
         if not channel or not chat_id:
             return "Error: no session context (channel/chat_id)"
         if tz and not cron_expr:
@@ -244,10 +247,10 @@ class CronTool(Tool, ContextAware):
             deliver=deliver,
             channel=channel,
             to=chat_id,
-            thread_id=self._thread_id_var.get(),
             delete_after_run=delete_after,
             channel_meta=self._metadata.get(),
             session_key=self._session_key.get() or None,
+            thread_id=self._thread_id,
         )
         return f"Created job '{job.name}' (id: {job.id})"
 
@@ -320,5 +323,8 @@ class CronTool(Tool, ContextAware):
                     "This is a system-managed Dream memory consolidation job for long-term memory.\n"
                     "It remains visible so you can inspect it, but it cannot be removed."
                 )
-            return f"Cannot remove job `{job_id}`.\nThis is a protected system-managed cron job."
+            return (
+                f"Cannot remove job `{job_id}`.\n"
+                "This is a protected system-managed cron job."
+            )
         return f"Job {job_id} not found"

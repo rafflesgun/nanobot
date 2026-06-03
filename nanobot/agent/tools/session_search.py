@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextvars import ContextVar
+from pathlib import Path
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
@@ -10,8 +11,8 @@ from nanobot.session.search import SessionSearchService
 
 
 class SessionSearchTool(Tool):
-    def __init__(self, workspace) -> None:
-        self._service = SessionSearchService(workspace)
+    def __init__(self, workspace: Any = None) -> None:
+        self._service = SessionSearchService(workspace or Path.cwd())
         self._session_key: ContextVar[str | None] = ContextVar("session_search_key", default=None)
 
     def set_context(self, session_key: str | None = None, **_: Any) -> None:

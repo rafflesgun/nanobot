@@ -1,7 +1,6 @@
 """CLI commands for nanobot."""
 
 import asyncio
-import json
 import os
 import select
 import signal
@@ -72,22 +71,11 @@ class SafeFileHistory(FileHistory):
     """
 
     def store_string(self, string: str) -> None:
-<<<<<<< HEAD
-        safe = string.encode("utf-8", errors="surrogateescape").decode("utf-8", errors="replace")
-        super().store_string(safe)
-
-
-from nanobot.cli.stream import StreamRenderer, ThinkingSpinner
-from nanobot.config.paths import get_workspace_path, is_default_workspace
-from nanobot.config.schema import Config
-from nanobot.doctor.service import DoctorService
-=======
         super().store_string(_sanitize_surrogates(string))
 from nanobot.cli.stream import StreamRenderer, ThinkingSpinner
 from nanobot.config.paths import get_workspace_path, is_default_workspace
 from nanobot.config.schema import Config
 from nanobot.utils.evaluator import evaluate_response
->>>>>>> origin/main
 from nanobot.utils.helpers import sync_workspace_templates
 from nanobot.utils.restart import (
     consume_restart_notice_from_env,
@@ -248,9 +236,10 @@ def _response_renderable(content: str, render_markdown: bool, metadata: dict | N
 
 async def _print_interactive_line(text: str) -> None:
     """Print async interactive updates with prompt_toolkit-safe Rich styling."""
-
     def _write() -> None:
-        ansi = _render_interactive_ansi(lambda c: c.print(f"  [dim]↳ {text}[/dim]"))
+        ansi = _render_interactive_ansi(
+            lambda c: c.print(f"  [dim]↳ {text}[/dim]")
+        )
         print_formatted_text(ANSI(ansi), end="")
 
     await run_in_terminal(_write)
@@ -262,7 +251,6 @@ async def _print_interactive_response(
     metadata: dict | None = None,
 ) -> None:
     """Print async interactive replies with prompt_toolkit-safe Rich styling."""
-
     def _write() -> None:
         content = response or ""
         ansi = _render_interactive_ansi(
@@ -429,7 +417,9 @@ def version_callback(value: bool):
 
 @app.callback()
 def main(
-    version: bool = typer.Option(None, "--version", "-v", callback=version_callback, is_eager=True),
+    version: bool = typer.Option(
+        None, "--version", "-v", callback=version_callback, is_eager=True
+    ),
 ):
     """nanobot - Personal AI Assistant."""
     pass
@@ -608,13 +598,6 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
     return loaded
 
 
-def _apply_docker_gateway_defaults(config: Config) -> None:
-    extra = config.channels.model_extra or {}
-    websocket = dict(extra.get("websocket") or {})
-    websocket.update({"enabled": True, "host": "0.0.0.0", "port": 8765})
-    config.channels = config.channels.model_copy(update={"websocket": websocket})
-
-
 def _warn_deprecated_config_keys(config_path: Path | None) -> None:
     """Hint users to remove obsolete keys from their config file."""
     import json
@@ -655,9 +638,7 @@ def _migrate_cron_store(config: "Config") -> None:
 def serve(
     port: int | None = typer.Option(None, "--port", "-p", help="API server port"),
     host: str | None = typer.Option(None, "--host", "-H", help="Bind address"),
-    timeout: float | None = typer.Option(
-        None, "--timeout", "-t", help="Per-request timeout (seconds)"
-    ),
+    timeout: float | None = typer.Option(None, "--timeout", "-t", help="Per-request timeout (seconds)"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show nanobot runtime logs"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
@@ -689,35 +670,6 @@ def serve(
     sync_workspace_templates(runtime_config.workspace_path)
     bus = MessageBus()
     session_manager = SessionManager(runtime_config.workspace_path)
-<<<<<<< HEAD
-    agent_loop = AgentLoop(
-        bus=bus,
-        provider=provider,
-        workspace=runtime_config.workspace_path,
-        model=runtime_config.agents.defaults.model,
-        fallback_models=runtime_config.agents.defaults.fallback_models,
-        max_iterations=runtime_config.agents.defaults.max_tool_iterations,
-        context_window_tokens=runtime_config.agents.defaults.context_window_tokens,
-        context_block_limit=runtime_config.agents.defaults.context_block_limit,
-        max_tool_result_chars=runtime_config.agents.defaults.max_tool_result_chars,
-        provider_retry_mode=runtime_config.agents.defaults.provider_retry_mode,
-        web_config=runtime_config.tools.web,
-        exec_config=runtime_config.tools.exec,
-        restrict_to_workspace=runtime_config.tools.restrict_to_workspace,
-        session_manager=session_manager,
-        mcp_servers=runtime_config.tools.mcp_servers,
-        channels_config=runtime_config.channels,
-        agents_config=runtime_config.agents,
-        timezone=runtime_config.agents.defaults.timezone,
-        unified_session=runtime_config.agents.defaults.unified_session,
-        disabled_skills=runtime_config.agents.defaults.disabled_skills,
-        session_ttl_minutes=runtime_config.agents.defaults.session_ttl_minutes,
-        consolidation_ratio=runtime_config.agents.defaults.consolidation_ratio,
-        max_messages=runtime_config.agents.defaults.max_messages,
-        tools_config=runtime_config.tools,
-        image_generation_provider=runtime_config.get_image_generation_provider(),
-    )
-=======
     try:
         agent_loop = AgentLoop.from_config(
             runtime_config, bus,
@@ -727,7 +679,6 @@ def serve(
     except ValueError as exc:
         console.print(f"[red]Error: {exc}[/red]")
         raise typer.Exit(1) from exc
->>>>>>> origin/main
 
     model_name, preset_tag = _model_display(runtime_config)
     console.print(f"{__logo__} Starting OpenAI-compatible API server")
@@ -784,7 +735,6 @@ def gateway(
             filter=lambda record: record["extra"].setdefault("channel", "-") or True,
         )
     cfg = _load_runtime_config(config, workspace)
-    _apply_docker_gateway_defaults(cfg)
     _run_gateway(cfg, port=port)
 
 
@@ -929,20 +879,14 @@ def _run_gateway(
 ) -> None:
     """Shared gateway runtime; ``open_browser_url`` opens a tab once channels are up."""
     from nanobot.agent.tools.cron import CronTool
-    from nanobot.agent.tools.image_generation import GenerateImageTool
     from nanobot.agent.tools.message import MessageTool
     from nanobot.bus.queue import MessageBus
     from nanobot.bus.runtime_events import RuntimeEventBus
     from nanobot.channels.manager import ChannelManager
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
-<<<<<<< HEAD
-    from nanobot.heartbeat.service import HeartbeatService
-    from nanobot.providers.factory import ProviderSnapshot, load_provider_snapshot, provider_signature
-=======
     from nanobot.providers.factory import build_provider_snapshot, load_provider_snapshot
     from nanobot.providers.image_generation import image_gen_provider_configs
->>>>>>> origin/main
     from nanobot.session.manager import SessionManager
     from nanobot.session.webui_turns import WebuiTurnCoordinator
 
@@ -951,22 +895,12 @@ def _run_gateway(
     console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
-<<<<<<< HEAD
-    provider = _make_provider(config)
-    provider_snapshot = ProviderSnapshot(
-        provider=provider,
-        model=config.agents.defaults.model,
-        context_window_tokens=config.agents.defaults.context_window_tokens,
-        signature=provider_signature(config),
-    )
-=======
     runtime_events = RuntimeEventBus()
     try:
         provider_snapshot = build_provider_snapshot(config)
     except ValueError as exc:
         console.print(f"[red]Error: {exc}[/red]")
         raise typer.Exit(1) from exc
->>>>>>> origin/main
     session_manager = SessionManager(config.workspace_path)
 
     # Preserve existing single-workspace installs, but keep custom workspaces clean.
@@ -978,37 +912,14 @@ def _run_gateway(
     cron = CronService(cron_store_path)
 
     # Create agent with cron service
-<<<<<<< HEAD
-    agent = AgentLoop(
-        bus=bus,
-        provider=provider,
-        workspace=config.workspace_path,
-        fallback_models=config.agents.defaults.fallback_models,
-=======
     agent = AgentLoop.from_config(
         config, bus,
         provider=provider_snapshot.provider,
->>>>>>> origin/main
         model=provider_snapshot.model,
         context_window_tokens=provider_snapshot.context_window_tokens,
         cron_service=cron,
         session_manager=session_manager,
-<<<<<<< HEAD
-        mcp_servers=config.tools.mcp_servers,
-        channels_config=config.channels,
-        agents_config=config.agents,
-        timezone=config.agents.defaults.timezone,
-        unified_session=config.agents.defaults.unified_session,
-        disabled_skills=config.agents.defaults.disabled_skills,
-        session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
-        consolidation_ratio=config.agents.defaults.consolidation_ratio,
-        max_messages=config.agents.defaults.max_messages,
-        tools_config=config.tools,
-        image_generation_provider=config.get_image_generation_provider(),
-        enable_image_generation_tool=True,
-=======
         image_generation_provider_configs=image_gen_provider_configs(config),
->>>>>>> origin/main
         provider_snapshot_loader=load_provider_snapshot,
         runtime_events=runtime_events,
         provider_signature=provider_snapshot.signature,
@@ -1064,10 +975,6 @@ def _run_gateway(
     message_tool = getattr(agent, "tools", {}).get("message")
     if isinstance(message_tool, MessageTool):
         message_tool.set_send_callback(_deliver_to_channel)
-
-    image_tool = getattr(agent, "tools", {}).get("generate_image")
-    if isinstance(image_tool, GenerateImageTool):
-        image_tool.set_send_callback(_deliver_to_channel)
 
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
@@ -1169,7 +1076,6 @@ def _run_gateway(
                 session_key=f"cron:{job.id}",
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to or "direct",
-                thread_id=job.payload.thread_id,
                 on_progress=_silent,
             )
         finally:
@@ -1185,25 +1091,15 @@ def _run_gateway(
 
         if job.payload.deliver and job.payload.to and response:
             should_notify = await evaluate_response(
-<<<<<<< HEAD
-                response,
-                reminder_note,
-                provider,
-                agent.model,
-=======
                 response, reminder_note, agent.provider, agent.model,
->>>>>>> origin/main
             )
             if should_notify:
-                metadata = dict(job.payload.channel_meta)
-                if job.payload.thread_id is not None:
-                    metadata["message_thread_id"] = job.payload.thread_id
                 await _deliver_to_channel(
                     OutboundMessage(
                         channel=job.payload.channel or "cli",
                         chat_id=job.payload.to,
                         content=response,
-                        metadata=metadata,
+                        metadata=dict(job.payload.channel_meta),
                     ),
                     record=True,
                     session_key=job.payload.session_key,
@@ -1302,37 +1198,20 @@ def _run_gateway(
         console.print(f"[green]✓[/green] Health endpoint: http://{host}:{health_port}/health")
         async with server:
             await server.serve_forever()
-<<<<<<< HEAD
-
-    # Register Dream system job (always-on, idempotent on restart)
-=======
     # Register Dream system job (idempotent on restart)
->>>>>>> origin/main
     dream_cfg = config.agents.defaults.dream
     if dream_cfg.model_override:
         agent.dream.model = dream_cfg.model_override
     agent.dream.max_batch_size = dream_cfg.max_batch_size
     agent.dream.max_iterations = dream_cfg.max_iterations
     agent.dream.annotate_line_ages = dream_cfg.annotate_line_ages
-<<<<<<< HEAD
-    from nanobot.cron.types import CronJob, CronPayload
-
-    cron.register_system_job(
-        CronJob(
-=======
     from nanobot.cron.types import CronJob, CronPayload, CronSchedule
     if dream_cfg.enabled:
         cron.register_system_job(CronJob(
->>>>>>> origin/main
             id="dream",
             name="dream",
             schedule=dream_cfg.build_schedule(config.agents.defaults.timezone),
             payload=CronPayload(kind="system_event"),
-<<<<<<< HEAD
-        )
-    )
-    console.print(f"[green]✓[/green] Dream: {dream_cfg.describe_schedule()}")
-=======
         ))
         console.print(f"[green]✓[/green] Dream: {dream_cfg.describe_schedule()}")
     else:
@@ -1350,14 +1229,12 @@ def _run_gateway(
             ),
             payload=CronPayload(kind="system_event"),
         ))
->>>>>>> origin/main
 
     async def _open_browser_when_ready() -> None:
         """Wait for the gateway to bind, then point the user's browser at the webui."""
         if not open_browser_url:
             return
         import webbrowser
-
         # Channels start asynchronously; a short poll lets us avoid racing the bind.
         for _ in range(40):  # ~4s max
             try:
@@ -1374,9 +1251,7 @@ def _run_gateway(
             webbrowser.open(open_browser_url)
             console.print(f"[green]✓[/green] Opened browser at {open_browser_url}")
         except Exception as e:
-            console.print(
-                f"[yellow]Could not open browser ({e}); visit {open_browser_url}[/yellow]"
-            )
+            console.print(f"[yellow]Could not open browser ({e}); visit {open_browser_url}[/yellow]")
 
     async def run():
         try:
@@ -1423,12 +1298,8 @@ def agent(
     session_id: str = typer.Option("cli:direct", "--session", "-s", help="Session ID"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
-    markdown: bool = typer.Option(
-        True, "--markdown/--no-markdown", help="Render assistant output as Markdown"
-    ),
-    logs: bool = typer.Option(
-        False, "--logs/--no-logs", help="Show nanobot runtime logs during chat"
-    ),
+    markdown: bool = typer.Option(True, "--markdown/--no-markdown", help="Render assistant output as Markdown"),
+    logs: bool = typer.Option(False, "--logs/--no-logs", help="Show nanobot runtime logs during chat"),
 ):
     """Interact with the agent directly."""
     from loguru import logger
@@ -1455,35 +1326,6 @@ def agent(
     else:
         logger.disable("nanobot")
 
-<<<<<<< HEAD
-    agent_loop = AgentLoop(
-        bus=bus,
-        provider=provider,
-        workspace=config.workspace_path,
-        model=config.agents.defaults.model,
-        fallback_models=config.agents.defaults.fallback_models,
-        max_iterations=config.agents.defaults.max_tool_iterations,
-        context_window_tokens=config.agents.defaults.context_window_tokens,
-        web_config=config.tools.web,
-        context_block_limit=config.agents.defaults.context_block_limit,
-        max_tool_result_chars=config.agents.defaults.max_tool_result_chars,
-        provider_retry_mode=config.agents.defaults.provider_retry_mode,
-        exec_config=config.tools.exec,
-        cron_service=cron,
-        restrict_to_workspace=config.tools.restrict_to_workspace,
-        mcp_servers=config.tools.mcp_servers,
-        channels_config=config.channels,
-        agents_config=config.agents,
-        timezone=config.agents.defaults.timezone,
-        unified_session=config.agents.defaults.unified_session,
-        disabled_skills=config.agents.defaults.disabled_skills,
-        session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
-        consolidation_ratio=config.agents.defaults.consolidation_ratio,
-        max_messages=config.agents.defaults.max_messages,
-        tools_config=config.tools,
-        image_generation_provider=config.get_image_generation_provider(),
-    )
-=======
     try:
         agent_loop = AgentLoop.from_config(
             config, bus,
@@ -1493,7 +1335,6 @@ def agent(
     except ValueError as exc:
         console.print(f"[red]Error: {exc}[/red]")
         raise typer.Exit(1) from exc
->>>>>>> origin/main
     restart_notice = consume_restart_notice_from_env()
     if restart_notice and should_show_cli_restart_notice(restart_notice, session_id):
         _print_agent_response(
@@ -1541,14 +1382,8 @@ def agent(
                 bot_icon=config.agents.defaults.bot_icon,
             )
             response = await agent_loop.process_direct(
-<<<<<<< HEAD
-                message,
-                session_id,
-                on_progress=_cli_progress,
-=======
                 message, session_id,
                 on_progress=_make_progress(renderer),
->>>>>>> origin/main
                 on_stream=renderer.on_delta,
                 on_stream_end=renderer.on_end,
             )
@@ -1569,16 +1404,9 @@ def agent(
     else:
         # Interactive mode — route through bus like other channels
         from nanobot.bus.events import InboundMessage
-
         _init_prompt_session()
-<<<<<<< HEAD
-        console.print(
-            f"{__logo__} Interactive mode [bold blue]({config.agents.defaults.model})[/bold blue] — type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit\n"
-        )
-=======
         _model, _preset_tag = _model_display(config)
         console.print(f"{__logo__} Interactive mode [bold blue]({_model})[/bold blue]{_preset_tag} — type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit\n")
->>>>>>> origin/main
 
         if ":" in session_id:
             cli_channel, cli_chat_id = session_id.split(":", 1)
@@ -1594,11 +1422,11 @@ def agent(
         signal.signal(signal.SIGINT, _handle_signal)
         signal.signal(signal.SIGTERM, _handle_signal)
         # SIGHUP is not available on Windows
-        if hasattr(signal, "SIGHUP"):
+        if hasattr(signal, 'SIGHUP'):
             signal.signal(signal.SIGHUP, _handle_signal)
         # Ignore SIGPIPE to prevent silent process termination when writing to closed pipes
         # SIGPIPE is not available on Windows
-        if hasattr(signal, "SIGPIPE"):
+        if hasattr(signal, 'SIGPIPE'):
             signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 
         async def run_interactive():
@@ -1681,15 +1509,13 @@ def agent(
                             bot_icon=config.agents.defaults.bot_icon,
                         )
 
-                        await bus.publish_inbound(
-                            InboundMessage(
-                                channel=cli_channel,
-                                sender_id="user",
-                                chat_id=cli_chat_id,
-                                content=user_input,
-                                metadata={"_wants_stream": True},
-                            )
-                        )
+                        await bus.publish_inbound(InboundMessage(
+                            channel=cli_channel,
+                            sender_id="user",
+                            chat_id=cli_chat_id,
+                            content=user_input,
+                            metadata={"_wants_stream": True},
+                        ))
 
                         await turn_done.wait()
 
@@ -1705,10 +1531,7 @@ def agent(
                                     content,
                                     render_markdown=markdown,
                                     metadata=meta,
-<<<<<<< HEAD
-=======
                                     **print_kwargs,
->>>>>>> origin/main
                                 )
                         elif renderer and not renderer.streamed:
                             await renderer.close()
@@ -1775,9 +1598,7 @@ def channels_status(
 @channels_app.command("login")
 def channels_login(
     channel_name: str = typer.Argument(..., help="Channel name (e.g. weixin, whatsapp)"),
-    force: bool = typer.Option(
-        False, "--force", "-f", help="Force re-authentication even if already logged in"
-    ),
+    force: bool = typer.Option(False, "--force", "-f", help="Force re-authentication even if already logged in"),
     config_path: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Authenticate with a channel via QR code or other interactive login."""
@@ -1867,12 +1688,8 @@ def status():
 
     console.print(f"{__logo__} nanobot Status\n")
 
-    console.print(
-        f"Config: {config_path} {'[green]✓[/green]' if config_path.exists() else '[red]✗[/red]'}"
-    )
-    console.print(
-        f"Workspace: {workspace} {'[green]✓[/green]' if workspace.exists() else '[red]✗[/red]'}"
-    )
+    console.print(f"Config: {config_path} {'[green]✓[/green]' if config_path.exists() else '[red]✗[/red]'}")
+    console.print(f"Workspace: {workspace} {'[green]✓[/green]' if workspace.exists() else '[red]✗[/red]'}")
 
     if config_path.exists():
         from nanobot.providers.registry import PROVIDERS
@@ -1895,93 +1712,7 @@ def status():
                     console.print(f"{spec.label}: [dim]not set[/dim]")
             else:
                 has_key = bool(p.api_key)
-                console.print(
-                    f"{spec.label}: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}"
-                )
-
-
-@app.command()
-def doctor(
-    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
-    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
-    live: bool = typer.Option(False, "--live", help="Run live checks when available"),
-    json_output: bool = typer.Option(False, "--json", help="Render the report as JSON"),
-):
-    """Run local doctor checks for nanobot."""
-    report = DoctorService().run(
-        config_path=_resolve_doctor_config_path(config),
-        workspace=_resolve_doctor_workspace_path(config, workspace),
-        live=live,
-    )
-
-    if json_output:
-        typer.echo(
-            json.dumps(
-                {
-                    **report.model_dump(mode="json"),
-                    "summary": report.summary,
-                }
-            )
-        )
-    else:
-        console.print("Nanobot Doctor\n")
-        current_section = None
-        for result in report.results:
-            if result.section != current_section:
-                if current_section is not None:
-                    console.print()
-                current_section = result.section
-                console.print(f"[bold]{result.section}[/bold]")
-
-            style, symbol = _doctor_status_style(result.status.value)
-            console.print(f"[{style}]{symbol}[/{style}] {result.check_id}: {result.message}")
-            if result.hint:
-                console.print(f"  [dim]Hint: {result.hint}[/dim]")
-
-        console.print()
-        summary = report.summary
-        console.print(
-            "Summary: "
-            f"[green]{summary['ok']} ok[/green], "
-            f"[yellow]{summary['warn']} warn[/yellow], "
-            f"[red]{summary['fail']} fail[/red]"
-        )
-
-    if report.has_failures:
-        raise typer.Exit(1)
-
-
-def _resolve_doctor_config_path(config: str | None) -> Path:
-    from nanobot.config.loader import get_config_path
-
-    if config:
-        return Path(config).expanduser().resolve(strict=False)
-    return get_config_path().resolve(strict=False)
-
-
-def _resolve_doctor_workspace_path(config: str | None, workspace: str | None) -> Path:
-    from nanobot.config.loader import load_config, set_config_path
-
-    resolved_config_path = _resolve_doctor_config_path(config)
-    if config:
-        set_config_path(resolved_config_path)
-
-    if workspace:
-        return Path(workspace).expanduser().resolve(strict=False)
-
-    try:
-        loaded = load_config(resolved_config_path if config else None)
-        return Path(loaded.workspace_path).expanduser().resolve(strict=False)
-    except Exception:
-        return Path(workspace).expanduser().resolve(strict=False) if workspace else Path(".").resolve()
-
-
-def _doctor_status_style(status: str) -> tuple[str, str]:
-    if status == "ok":
-        return "green", "✓"
-    if status == "warn":
-        return "yellow", "!"
-    return "red", "✗"
+                console.print(f"{spec.label}: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}")
 
 
 # ============================================================================
@@ -2010,15 +1741,6 @@ def _register_login(name: str):
     return decorator
 
 
-<<<<<<< HEAD
-@provider_app.command("login")
-def provider_login(
-    provider: str = typer.Argument(
-        ..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot')"
-    ),
-):
-    """Authenticate with an OAuth provider."""
-=======
 def _register_logout(name: str):
     """Register an OAuth logout handler."""
     def decorator(fn):
@@ -2029,7 +1751,6 @@ def _register_logout(name: str):
 
 def _resolve_oauth_provider(provider: str):
     """Resolve and validate an OAuth provider configuration."""
->>>>>>> origin/main
     from nanobot.providers.registry import PROVIDERS
 
     key = provider.replace("-", "_")
@@ -2090,9 +1811,7 @@ def _login_openai_codex() -> None:
         if not (token and token.access):
             console.print("[red]✗ Authentication failed[/red]")
             raise typer.Exit(1)
-        console.print(
-            f"[green]✓ Authenticated with OpenAI Codex[/green]  [dim]{token.account_id}[/dim]"
-        )
+        console.print(f"[green]✓ Authenticated with OpenAI Codex[/green]  [dim]{token.account_id}[/dim]")
     except ImportError:
         console.print("[red]oauth_cli_kit not installed. Run: pip install oauth-cli-kit[/red]")
         raise typer.Exit(1)

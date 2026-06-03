@@ -1,10 +1,3 @@
-FROM oven/bun:1.2.22 AS webui-builder
-
-WORKDIR /app
-COPY webui/ ./webui/
-WORKDIR /app/webui
-RUN bun install --frozen-lockfile && bun run build
-
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 # Install Node.js 20 for the WhatsApp bridge
@@ -31,13 +24,8 @@ RUN mkdir -p nanobot bridge && touch nanobot/__init__.py && \
 # Copy the full source and install
 COPY nanobot/ nanobot/
 COPY bridge/ bridge/
-<<<<<<< HEAD
-COPY --from=webui-builder /app/nanobot/web/dist nanobot/web/dist
-RUN uv pip install --system --no-cache .
-=======
 COPY webui/ webui/
 RUN NANOBOT_FORCE_WEBUI_BUILD=1 uv pip install --system --no-cache .
->>>>>>> origin/main
 
 # Build the WhatsApp bridge
 WORKDIR /app/bridge
@@ -57,11 +45,7 @@ RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh && chmod +x /usr/local/bin/ent
 USER nanobot
 ENV HOME=/home/nanobot
 
-<<<<<<< HEAD
-# Gateway default port and embedded WebUI/WebSocket port
-=======
 # Gateway health endpoint and optional WebUI/WebSocket channel ports
->>>>>>> origin/main
 EXPOSE 18790 8765
 
 ENTRYPOINT ["entrypoint.sh"]

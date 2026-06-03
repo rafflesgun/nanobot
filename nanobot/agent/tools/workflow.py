@@ -11,8 +11,8 @@ from nanobot.workflows.store import WorkflowStore
 
 
 class WorkflowListTool(Tool):
-    def __init__(self, workspace: Path) -> None:
-        self._store = WorkflowStore(Path(workspace))
+    def __init__(self, workspace: Path | None = None) -> None:
+        self._store = WorkflowStore(Path(workspace or Path.cwd()))
 
     @property
     def name(self) -> str:
@@ -58,11 +58,11 @@ class WorkflowListTool(Tool):
 class WorkflowRunTool(Tool):
     def __init__(
         self,
-        workspace: Path,
+        workspace: Path | None = None,
         store: WorkflowStore | None = None,
         progress: WorkflowProgressManager | None = None,
     ) -> None:
-        self._store = store or WorkflowStore(Path(workspace))
+        self._store = store or WorkflowStore(Path(workspace or Path.cwd()))
         self._progress = progress or WorkflowProgressManager(self._store)
         self._session_key: ContextVar[str] = ContextVar("workflow_session_key", default="cli:direct")
         self._completed: dict[str, str] = {}

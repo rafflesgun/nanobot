@@ -2,24 +2,10 @@
 nanobot - A lightweight AI agent framework
 """
 
-<<<<<<< HEAD
-import warnings
-from importlib.metadata import PackageNotFoundError, version as _pkg_version
-from pathlib import Path
-=======
->>>>>>> origin/main
 import tomllib
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
-
-
-warnings.filterwarnings(
-    "ignore",
-    category=SyntaxWarning,
-    module="pydub.utils",
-    message=r".*invalid escape sequence.*",
-)
 
 
 def _read_pyproject_version() -> str | None:
@@ -42,9 +28,6 @@ def _resolve_version() -> str:
 __version__ = _resolve_version()
 __logo__ = "🐈"
 
-<<<<<<< HEAD
-from nanobot.nanobot import Nanobot, RunResult
-=======
 _LAZY_EXPORTS = {
     "Nanobot": ".nanobot",
     "RunResult": ".nanobot",
@@ -63,4 +46,3 @@ def __getattr__(name: str):
 
 
 __all__ = ["Nanobot", "RunResult"]
->>>>>>> origin/main

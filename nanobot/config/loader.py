@@ -12,8 +12,6 @@ from pydantic import BaseModel
 
 from nanobot.config.schema import Config, _resolve_tool_config_refs
 
-<<<<<<< HEAD
-=======
 # Global variable to store current config path (for multi-instance support)
 _current_config_path: Path | None = None
 _schema_refs_ready = False
@@ -24,18 +22,12 @@ def set_config_path(path: Path) -> None:
     global _current_config_path
     _current_config_path = path
 
->>>>>>> origin/main
 
 def get_config_path() -> Path:
-    """Get the default configuration file path."""
+    """Get the configuration file path."""
+    if _current_config_path:
+        return _current_config_path
     return Path.home() / ".nanobot" / "config.json"
-
-
-def get_data_dir() -> Path:
-    """Get the nanobot data directory."""
-    from nanobot.utils.helpers import get_data_path
-
-    return get_data_path()
 
 
 def load_config(config_path: Path | None = None) -> Config:
@@ -48,16 +40,12 @@ def load_config(config_path: Path | None = None) -> Config:
     Returns:
         Loaded configuration object.
     """
-<<<<<<< HEAD
-    path = config_path or _config_path_override or _current_config_path or get_config_path()
-=======
     global _schema_refs_ready
     if not _schema_refs_ready:
         _resolve_tool_config_refs()
         _schema_refs_ready = True
 
     path = config_path or get_config_path()
->>>>>>> origin/main
 
     config = Config()
     if path.exists():
@@ -89,7 +77,7 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
         config: Configuration to save.
         config_path: Optional path to save to. Uses default if not provided.
     """
-    path = config_path or _config_path_override or _current_config_path or get_config_path()
+    path = config_path or get_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
 
     data = config.model_dump(mode="json", by_alias=True)
@@ -159,25 +147,19 @@ def _env_replace(match: re.Match[str]) -> str:
     name = match.group(1)
     value = os.environ.get(name)
     if value is None:
-        raise ValueError(f"Environment variable '{name}' referenced in config is not set")
+        raise ValueError(
+            f"Environment variable '{name}' referenced in config is not set"
+        )
     return value
 
 
 def _migrate_config(data: dict) -> dict:
     """Migrate old config formats to current."""
-    agents = data.get("agents", {})
-    defaults = agents.get("defaults", {}) if isinstance(agents, dict) else {}
-    if isinstance(defaults, dict) and "memoryWindow" in defaults:
-        defaults.pop("memoryWindow", None)
-        defaults.setdefault("contextWindowTokens", 65_536)
-    # Move tools.exec.restrictToWorkspace → tools.restrictToWorkspace.enabled
+    # Move tools.exec.restrictToWorkspace → tools.restrictToWorkspace
     tools = data.get("tools", {})
     exec_cfg = tools.get("exec", {})
-
-    # 1 tools.exec.restrictToWorkspace (bool) → tools.restrictToWorkspace.enabled
     if "restrictToWorkspace" in exec_cfg and "restrictToWorkspace" not in tools:
-        old_value = exec_cfg.pop("restrictToWorkspace")
-        tools["restrictToWorkspace"] = {"enabled": old_value}
+        tools["restrictToWorkspace"] = exec_cfg.pop("restrictToWorkspace")
 
     # Move tools.myEnabled / tools.mySet → tools.my.{enable, allowSet}.
     # The old flat keys shipped in the initial MyTool landing; wrapping them in a
@@ -193,24 +175,4 @@ def _migrate_config(data: dict) -> dict:
         else:
             tools.pop("mySet", None)
 
-    # 2 tools.restrictToWorkspace (bool) → tools.restrictToWorkspace.enabled
-    restrict_cfg = tools.get("restrictToWorkspace", {})
-    if isinstance(restrict_cfg, bool):
-        tools["restrictToWorkspace"] = {"enabled": restrict_cfg}
-
     return data
-
-
-_config_path_override: Path | None = None
-_current_config_path: Path | None = None
-
-
-def set_config_path(path: Path | str | None) -> None:
-    """Allow tests to override config location"""
-    global _config_path_override, _current_config_path
-    if path is None:
-        _config_path_override = None
-        _current_config_path = None
-    else:
-        _config_path_override = Path(path)
-        _current_config_path = _config_path_override

@@ -5,12 +5,7 @@ import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport } from "@/components/thread/ThreadViewport";
-<<<<<<< HEAD
-import { useNanobotStream } from "@/hooks/useNanobotStream";
-import { makeId } from "@/lib/id";
-=======
 import { useNanobotStream, type SendImage, type SendOptions } from "@/hooks/useNanobotStream";
->>>>>>> origin/main
 import { useSessionHistory } from "@/hooks/useSessions";
 import { fetchCliApps, fetchMcpPresets, fetchSettings, listSlashCommands } from "@/lib/api";
 import {
@@ -357,21 +352,8 @@ export function ThreadShell({
     const pending = pendingFirstRef.current;
     if (!pending) return;
     pendingFirstRef.current = null;
-<<<<<<< HEAD
-    client.sendMessage(chatId, pending);
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: makeId(),
-        role: "user",
-        content: pending,
-        createdAt: Date.now(),
-      },
-    ]);
-=======
     setScrollToBottomSignal((value) => value + 1);
     send(pending.content, pending.images, pending.options);
->>>>>>> origin/main
     setBooting(false);
   }, [chatId, send]);
 

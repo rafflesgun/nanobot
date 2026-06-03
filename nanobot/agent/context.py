@@ -57,15 +57,11 @@ class ContextBuilder:
     _MAX_HISTORY_CHARS = 32_000  # hard cap on recent history section size
     _RUNTIME_CONTEXT_END = "[/Runtime Context]"
 
-    def __init__(
-        self, workspace: Path, timezone: str | None = None, disabled_skills: list[str] | None = None
-    ):
+    def __init__(self, workspace: Path, timezone: str | None = None, disabled_skills: list[str] | None = None):
         self.workspace = workspace
         self.timezone = timezone
         self.memory = MemoryStore(workspace)
-        self.skills = SkillsLoader(
-            workspace, disabled_skills=set(disabled_skills) if disabled_skills else None
-        )
+        self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
 
     def build_system_prompt(
         self,
@@ -98,9 +94,7 @@ class ContextBuilder:
         if skills_summary:
             parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary))
 
-        entries = self.memory.read_unprocessed_history(
-            since_cursor=self.memory.get_last_dream_cursor()
-        )
+        entries = self.memory.read_unprocessed_history(since_cursor=self.memory.get_last_dream_cursor())
         if entries:
             capped = entries[-self._MAX_RECENT_HISTORY:]
             history_text = "\n".join(
@@ -134,40 +128,24 @@ class ContextBuilder:
         channel: str | None,
         chat_id: str | None,
         timezone: str | None = None,
-<<<<<<< HEAD
-        thread_id: int | str | None = None,
-        session_summary: str | None = None,
-=======
         sender_id: str | None = None,
+        thread_id: int | str | None = None,
         supplemental_lines: Sequence[str] | None = None,
->>>>>>> origin/main
     ) -> str:
         """Build untrusted runtime metadata block appended after user content."""
         lines = [f"Current Time: {current_time_str(timezone)}"]
         if channel and chat_id:
-<<<<<<< HEAD
-            lines.append(f"Channel: {channel}")
+            lines += [f"Channel: {channel}"]
             if channel == "telegram":
-                normalized_thread_id = 0 if thread_id is None else thread_id
-                lines.append(f"Thread ID: {normalized_thread_id}")
+                lines.append(f"Thread ID: {thread_id if thread_id is not None else 0}")
+            elif thread_id is not None:
+                lines.append(f"Thread ID: {thread_id}")
             lines.append(f"Chat ID: {chat_id}")
-        if session_summary:
-            lines += ["", "[Resumed Session]", session_summary]
-        return (
-            ContextBuilder._RUNTIME_CONTEXT_TAG
-            + "\n"
-            + "\n".join(lines)
-            + "\n"
-            + ContextBuilder._RUNTIME_CONTEXT_END
-        )
-=======
-            lines += [f"Channel: {channel}", f"Chat ID: {chat_id}"]
         if sender_id:
             lines += [f"Sender ID: {sender_id}"]
         if supplemental_lines:
             lines.extend(supplemental_lines)
         return ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines) + "\n" + ContextBuilder._RUNTIME_CONTEXT_END
->>>>>>> origin/main
 
     @staticmethod
     def _merge_message_content(left: Any, right: Any) -> str | list[dict[str, Any]]:
@@ -176,10 +154,7 @@ class ContextBuilder:
 
         def _to_blocks(value: Any) -> list[dict[str, Any]]:
             if isinstance(value, list):
-                return [
-                    item if isinstance(item, dict) else {"type": "text", "text": str(item)}
-                    for item in value
-                ]
+                return [item if isinstance(item, dict) else {"type": "text", "text": str(item)} for item in value]
             if value is None:
                 return []
             return [{"type": "text", "text": str(value)}]
@@ -227,8 +202,6 @@ class ContextBuilder:
         skip_runtime_lines: bool = False,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
-<<<<<<< HEAD
-=======
         root = workspace or self.workspace
         extra = [
             *goal_state_runtime_lines(session_metadata),
@@ -237,18 +210,16 @@ class ContextBuilder:
             extra.extend(runtime_lines(runtime_state, inbound_message, root, skip=skip_runtime_lines))
         if current_runtime_lines:
             extra.extend(line for line in current_runtime_lines if line)
->>>>>>> origin/main
+        if thread_id is None and inbound_message is not None:
+            metadata = getattr(inbound_message, "metadata", {}) or {}
+            thread_id = metadata.get("message_thread_id")
         runtime_ctx = self._build_runtime_context(
             channel,
             chat_id,
             self.timezone,
-<<<<<<< HEAD
-            thread_id=thread_id,
-            session_summary=session_summary,
-=======
             sender_id=sender_id,
+            thread_id=thread_id,
             supplemental_lines=extra or None,
->>>>>>> origin/main
         )
         user_content = self._build_user_content(current_message, media)
 
@@ -295,49 +266,12 @@ class ContextBuilder:
             if not mime or not mime.startswith("image/"):
                 continue
             b64 = base64.b64encode(raw).decode()
-            images.append(
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:{mime};base64,{b64}"},
-                    "_meta": {"path": str(p)},
-                }
-            )
+            images.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:{mime};base64,{b64}"},
+                "_meta": {"path": str(p)},
+            })
 
         if not images:
             return text
         return images + [{"type": "text", "text": text}]
-<<<<<<< HEAD
-
-    def add_tool_result(
-        self,
-        messages: list[dict[str, Any]],
-        tool_call_id: str,
-        tool_name: str,
-        result: Any,
-    ) -> list[dict[str, Any]]:
-        """Add a tool result to the message list."""
-        messages.append(
-            {"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": result}
-        )
-        return messages
-
-    def add_assistant_message(
-        self,
-        messages: list[dict[str, Any]],
-        content: str | None,
-        tool_calls: list[dict[str, Any]] | None = None,
-        reasoning_content: str | None = None,
-        thinking_blocks: list[dict] | None = None,
-    ) -> list[dict[str, Any]]:
-        """Add an assistant message to the message list."""
-        messages.append(
-            build_assistant_message(
-                content,
-                tool_calls=tool_calls,
-                reasoning_content=reasoning_content,
-                thinking_blocks=thinking_blocks,
-            )
-        )
-        return messages
-=======
->>>>>>> origin/main

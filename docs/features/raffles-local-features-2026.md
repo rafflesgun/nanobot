@@ -4,7 +4,8 @@ This document records features developed on `raffles/local`
 that survived the merge with `origin/main` on 13 March 2026  
 the merge with upstream/main on 2 April 2026,
 and the merge with `origin/main` on 27 April 2026,
-and the merge with `upstream/main` on 1 May 2026.
+the merge with `upstream/main` on 1 May 2026,
+and the merge with `origin/main` on 3 June 2026 (493 commits, wholesale upstream take + local feature re-addition).
 
 Goal: help future merge conflict resolution (human or agent)  
 understand intended behavior quickly.
@@ -18,10 +19,10 @@ understand intended behavior quickly.
 | Group commands via @mention                 | ✅     | channels/telegram.py → _on_message                     | manual                                 | `@BotName /command` → text message path       |
 | Configured subagents via `spawn(subagent_id)` | ✅   | config/schema.py, cli/commands.py, agent/loop.py, agent/subagent.py, agent/tools/spawn.py | tests/agent/test_configured_subagents.py, tests/agent/test_task_cancel.py | named `agents.*` profiles inherit from `agents.defaults` |
 | Ordered fallback models on provider errors  | ✅     | agent/loop.py, config/schema.py, cli/commands.py, agent/subagent.py | tests/agent/test_fallback_models.py, tests/config/test_config_migration.py | `fallback_models: []` (list, tried in order, includes bare `429` and plain `temporarily unavailable`) |
-| "Thinking…" placeholder (PM only)           | ✅     | channels/telegram.py → _send_thinking_message          | tests/test_thinking_message.py         | skipped when `is_group == True`               |
-| Typing indicator & ACK reaction             | ✅     | channels/telegram.py                                   | tests/test_typing_ack.py               | typing per chat+thread, `react_emoji` can be str or list |
-| Heartbeat results → DM / private only       | ✅     | cli/commands.py, heartbeat/service.py                  | test_heartbeat_service.py + targeted tests | skips negative IDs and topic sub-sessions  |
-| Heartbeat runs stateless by default         | ✅     | cli/commands.py, config/schema.py, agent/loop.py, heartbeat/service.py | tests/agent/test_heartbeat_service.py, tests/cli/test_commands.py | `heartbeat.keep_recent_messages = 0` |
+| "Thinking…" placeholder (PM only)           | ⚠️     | channels/telegram.py                                   | tests/test_thinking_message.py         | methods need adaptation to upstream refactored stream/edit APIs |
+| Typing indicator & ACK reaction             | ✅     | channels/telegram.py                                   | tests/test_typing_ack.py               | restored via _add_ack_reaction, _pick_react_emoji, comp_key typing |
+| Heartbeat results → DM / private only       | ⚠️     | cli/commands.py                                        | test_heartbeat_service.py + targeted tests | upstream removed heartbeat service; cron-based heartbeat needs DM-only routing re-added |
+| Heartbeat runs stateless by default         | ✅     | config/schema.py, agent/loop.py                        | tests/cli/test_commands.py             | `heartbeat.keep_recent_messages = 0` restored |
 | Heartbeat session bounded by content+tail   | ✅     | cli/commands.py, session/manager.py                    | session history regressions            | `prune_by_content_length(4000)` + keep_recent |
 | Cron reminders are evaluator-biased to notify | ✅   | cli/commands.py, utils/evaluator.py                    | tests/cli/test_commands.py, tests/agent/test_evaluator.py | scheduled reminder context passed to evaluator |
 | Media downloads → workspace/media/          | ✅     | channels/telegram.py, config/paths.py                  | tests/test_media_download.py, tests/test_simple_features.py | falls back to `~/.nanobot/media` when no workspace |
@@ -30,10 +31,10 @@ understand intended behavior quickly.
 | SDK retries disabled + surfaced to progress | ✅     | providers/base.py, providers/*, agent/loop.py         | tests/providers/test_provider_retry.py, tests/agent/test_task_cancel.py | provider SDK retries forced to `0`; retry logs include request id/model/inflight and agent gate occupancy |
 | Fine-grained workspace allowlist for tools   | ✅     | config/schema.py, config/loader.py, cli/commands.py, agent/loop.py, agent/subagent.py, agent/tools/shell.py | tests/config/test_config_migration.py, tests/tools/test_exec_security.py | `restrictToWorkspace = { enabled, extraRead, extraWrite }` |
 | Telegram forwarded message debounce         | ✅     | channels/telegram.py                                   | tests/channels/test_telegram_channel.py | 80ms lane = `chat_id:thread_id`              |
-| **TTS voice notes (Edge + OpenAI + Riva)**  | ✅     | providers/tts.py, tts/manager.py, channels/telegram.py, utils/audio.py | tests/test_tts.py (new)                | `tts.enabled = false` (default), text sent before TTS, 30s timeout, overrides persist across restart |
-| **/trace command - AI thinking visibility** | ✅     | channels/telegram.py                                   | tests/test_trace_command_additional.py | `_trace_enabled[chat_id] = false` (default, chat-scoped not topic-scoped) |
-| **/stats command - token usage visibility** | ✅     | channels/telegram.py, utils/stats.py                   | tests/test_telegram_stats_command.py   | `/stats`, `/stats topic`, `/stats all`          |
-| **/status shows session model override**   | ✅     | command/builtin.py, utils/helpers.py                   | tests/cli/test_restart_command.py      | shows `gpt-4o (default: claude-opus-4)` when overridden |
+| **TTS voice notes (Edge + OpenAI + Riva)**  | ✅     | providers/tts.py, tts/manager.py, channels/telegram.py, utils/audio.py | tests/test_tts.py                      | schema/config restored; Telegram-local /tts command handler needs re-adding |
+| **/trace command - AI thinking visibility** | ⚠️     | channels/telegram.py                                   | tests/test_trace_command_additional.py | handler and trace dispatch need re-adding after upstream streaming refactor |
+| **/stats command - token usage visibility** | ⚠️     | channels/telegram.py, utils/stats.py                   | tests/test_telegram_stats_command.py   | handler needs re-adding after upstream refactor |
+| **/status shows session model override**   | ⚠️     | command/builtin.py, utils/helpers.py                   | tests/cli/test_restart_command.py      | model_override passing restored in cmd_status; needs local AgentLoop._model_overrides |
 | **Builtin commands preserve topic context** | ✅   | command/builtin.py, channels/telegram.py              | tests/test_telegram_builtin_commands_topic.py | `/new`, `/stop`, `/restart`, `/status`, `/help` |
 | **Channel Info includes Telegram thread_id** | ✅  | agent/context.py, agent/loop.py                       | tests/agent/test_context_prompt_cache.py, tests/agent/test_loop_save_turn.py | Telegram runtime block shows `Thread ID` above `Chat ID`; non-topic = `0` |
 | **Cron jobs preserve topic thread_id**     | ✅     | agent/loop.py, agent/tools/cron.py                    | tests/test_cron_topic_delivery.py      | thread_id passed through _run_agent_loop |

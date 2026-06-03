@@ -407,9 +407,7 @@ def _is_localhost(connection: Any) -> bool:
     # ``::ffff:127.0.0.1`` is loopback in IPv6-mapped form.
     if host.startswith("::ffff:"):
         host = host[7:]
-    if host in _LOCALHOSTS:
-        return True
-    return False
+    return host in _LOCALHOSTS
 
 
 def _http_response(
@@ -832,11 +830,6 @@ class WebSocketChannel(BaseChannel):
             if now > expiry:
                 self._api_tokens.pop(token_key, None)
 
-<<<<<<< HEAD
-    def _handle_webui_bootstrap(self, connection: Any) -> Response:
-        if not self._allows_webui_bootstrap(connection):
-            return _http_error(403, "webui bootstrap is localhost-only")
-=======
     def _handle_bootstrap(self, connection: Any, request: Any) -> Response:
         # When a secret is configured (token_issue_secret or static token),
         # validate it regardless of source IP.  This secures deployments
@@ -848,7 +841,6 @@ class WebSocketChannel(BaseChannel):
         elif not _is_localhost(connection):
             # No secret configured: only allow localhost (local dev mode).
             return _http_error(403, "bootstrap is localhost-only")
->>>>>>> origin/main
         # Cap outstanding tokens to avoid runaway growth from a misbehaving client.
         self._purge_expired_issued_tokens()
         self._purge_expired_api_tokens()
@@ -880,12 +872,6 @@ class WebSocketChannel(BaseChannel):
             }
         )
 
-<<<<<<< HEAD
-    def _allows_webui_bootstrap(self, connection: Any) -> bool:
-        if _is_localhost(connection):
-            return True
-        return self.config.host in {"0.0.0.0", "::"}
-=======
     def _bootstrap_ws_url(self, request: Any) -> str:
         """Absolute WS URL clients should prefer over a dev-server proxy."""
         headers = getattr(request, "headers", {}) or {}
@@ -898,7 +884,6 @@ class WebSocketChannel(BaseChannel):
         secure = proto in {"https", "wss"} or bool(self.config.ssl_certfile.strip())
         scheme = "wss" if secure else "ws"
         return f"{scheme}://{host}{self._expected_path()}"
->>>>>>> origin/main
 
     def _handle_sessions_list(self, request: WsRequest) -> Response:
         if not self._check_api_token(request):

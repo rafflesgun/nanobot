@@ -14,8 +14,6 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.utils.helpers import build_status_content
 from nanobot.utils.restart import set_restart_notice_to_env
-from nanobot.workflows.progress import WorkflowProgressManager
-from nanobot.workflows.store import WorkflowStore
 
 
 @dataclass(frozen=True)
@@ -125,26 +123,17 @@ async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
     """Cancel all active tasks and subagents for the session."""
     loop = ctx.loop
     msg = ctx.msg
-<<<<<<< HEAD
     if hasattr(loop, "_cancel_active_tasks"):
-        total = await loop._cancel_active_tasks(msg.session_key)
+        total = await loop._cancel_active_tasks(ctx.key)
     else:
-        tasks = [t for t in loop._active_tasks.get(msg.session_key, []) if not t.done()]
-        for task in tasks:
-            task.cancel()
-        subagents = await loop.subagents.cancel_by_session(msg.session_key)
-        total = len(tasks) + subagents
-=======
-    total = await loop._cancel_active_tasks(ctx.key)
->>>>>>> origin/main
+        tasks = loop._active_tasks.get(ctx.key, [])
+        total = sum(1 for t in tasks if not getattr(t, "done", lambda: False)())
+        with suppress(Exception):
+            total += await loop.subagents.cancel_by_session(ctx.key)
     content = f"Stopped {total} task(s)." if total else "No active task to stop."
-    # Preserve topic thread context so the reply stays in the correct topic
-    metadata = {
-        "message_thread_id": msg.metadata.get("message_thread_id"),
-        "command_response": True,  # Skip TTS for command responses
-    }
     return OutboundMessage(
-        channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=metadata
+        channel=msg.channel, chat_id=msg.chat_id, content=content,
+        metadata=dict(msg.metadata or {})
     )
 
 
@@ -162,13 +151,9 @@ async def cmd_restart(ctx: CommandContext) -> OutboundMessage:
         os.execv(sys.executable, [sys.executable, "-m", "nanobot"] + sys.argv[1:])
 
     asyncio.create_task(_do_restart())
-    # Preserve topic thread context so the reply stays in the correct topic
-    metadata = {
-        "message_thread_id": msg.metadata.get("message_thread_id"),
-        "command_response": True,  # Skip TTS for command responses
-    }
     return OutboundMessage(
-        channel=msg.channel, chat_id=msg.chat_id, content="Restarting...", metadata=metadata
+        channel=msg.channel, chat_id=msg.chat_id, content="Restarting...",
+        metadata=dict(msg.metadata or {})
     )
 
 
@@ -177,29 +162,17 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
     loop = ctx.loop
     session = ctx.session or loop.sessions.get_or_create(ctx.key)
     ctx_est = 0
-<<<<<<< HEAD
-    try:
-        ctx_est, _ = loop.memory_consolidator.estimate_session_prompt_tokens(session)
-    except Exception:
-        pass
-=======
+    consolidator = getattr(loop, "consolidator", None) or getattr(loop, "memory_consolidator", None)
     with suppress(Exception):
-        ctx_est, _ = loop.consolidator.estimate_session_prompt_tokens(session)
->>>>>>> origin/main
+        ctx_est, _ = consolidator.estimate_session_prompt_tokens(session)
     if ctx_est <= 0:
         ctx_est = loop._last_usage.get("prompt_tokens", 0)
-    model_override = loop._model_overrides.get(ctx.key)
-    # Preserve topic thread context so the reply stays in the correct topic
-    metadata = {"render_as": "text"}
-    if (thread_id := ctx.msg.metadata.get("message_thread_id")) is not None:
-        metadata["message_thread_id"] = thread_id
 
     # Fetch web search provider usage (best-effort, never blocks the response)
     search_usage_text: str | None = None
     # Never let usage fetch break /status
     with suppress(Exception):
         from nanobot.utils.searchusage import fetch_search_usage
-
         web_cfg = getattr(loop, "web_config", None)
         search_cfg = getattr(web_cfg, "search", None) if web_cfg else None
         if search_cfg is not None:
@@ -211,30 +184,22 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
     task_count = sum(1 for t in active_tasks if not t.done())
     with suppress(Exception):
         task_count += loop.subagents.get_running_count_by_session(ctx.key)
-<<<<<<< HEAD
-    except Exception:
-        pass
-    provider = getattr(loop, "provider", None)
-    generation = getattr(provider, "generation", None)
-=======
->>>>>>> origin/main
     return OutboundMessage(
         channel=ctx.msg.channel,
         chat_id=ctx.msg.chat_id,
         content=build_status_content(
-            version=__version__,
-            model=loop.model,
-            start_time=loop._start_time,
-            last_usage=loop._last_usage,
+            version=__version__, model=loop.model,
+            start_time=loop._start_time, last_usage=loop._last_usage,
             context_window_tokens=loop.context_window_tokens,
             session_msg_count=len(session.get_history(max_messages=0)),
             context_tokens_estimate=ctx_est,
-            model_override=model_override,
             search_usage_text=search_usage_text,
             active_task_count=task_count,
-            max_completion_tokens=getattr(generation, "max_tokens", 8192),
+            max_completion_tokens=getattr(
+                getattr(getattr(loop, "provider", None), "generation", None), "max_tokens", 8192
+            ),
         ),
-        metadata=metadata,
+        metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
     )
 
 
@@ -244,34 +209,23 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     if hasattr(loop, "_cancel_active_tasks"):
         await loop._cancel_active_tasks(ctx.key)
     else:
-        tasks = [t for t in loop._active_tasks.get(ctx.key, []) if not t.done()]
-        for task in tasks:
-            task.cancel()
-        await loop.subagents.cancel_by_session(ctx.key)
+        with suppress(Exception):
+            await loop.subagents.cancel_by_session(ctx.key)
     session = ctx.session or loop.sessions.get_or_create(ctx.key)
-    snapshot = session.messages[session.last_consolidated :]
+    snapshot = session.messages[session.last_consolidated:]
     session.clear()
     loop.sessions.save(session)
     loop.sessions.invalidate(session.key)
     if snapshot:
-        archive_owner = getattr(loop, "consolidator", None) or getattr(
-            loop, "memory_consolidator", None
-        )
-        archive = getattr(archive_owner, "archive", None) or getattr(
-            archive_owner, "archive_messages", None
-        )
-        if archive is not None:
-            loop._schedule_background(archive(snapshot))
-    # Preserve topic thread context so the reply stays in the correct topic
-    metadata = {
-        "message_thread_id": ctx.msg.metadata.get("message_thread_id"),
-        "command_response": True,  # Skip TTS for command responses
-    }
+        consolidator = getattr(loop, "consolidator", None) or getattr(loop, "memory_consolidator", None)
+        if hasattr(consolidator, "archive"):
+            loop._schedule_background(consolidator.archive(snapshot))
+        elif hasattr(consolidator, "archive_messages"):
+            loop._schedule_background(consolidator.archive_messages(snapshot))
     return OutboundMessage(
-        channel=ctx.msg.channel,
-        chat_id=ctx.msg.chat_id,
+        channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
         content="New session started.",
-        metadata=metadata,
+        metadata=dict(ctx.msg.metadata or {})
     )
 
 
@@ -307,6 +261,8 @@ def _model_command_status(loop) -> str:
 async def cmd_model(ctx: CommandContext) -> OutboundMessage:
     """Show or switch model presets."""
     loop = ctx.loop
+    if hasattr(loop, "_handle_model_command"):
+        return loop._handle_model_command(ctx.msg, ctx.key, ctx.raw)
     args = ctx.args.strip()
     metadata = {**dict(ctx.msg.metadata or {}), "render_as": "text"}
 
@@ -377,135 +333,14 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
         except Exception as e:
             elapsed = time.monotonic() - t0
             content = f"Dream failed after {elapsed:.1f}s: {e}"
-        await loop.bus.publish_outbound(
-            OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=content,
-            )
-        )
+        await loop.bus.publish_outbound(OutboundMessage(
+            channel=msg.channel, chat_id=msg.chat_id, content=content,
+        ))
 
     asyncio.create_task(_run_dream())
     return OutboundMessage(
-        channel=msg.channel,
-        chat_id=msg.chat_id,
-        content="Dreaming...",
+        channel=msg.channel, chat_id=msg.chat_id, content="Dreaming...",
     )
-
-
-async def cmd_recall(ctx: CommandContext) -> OutboundMessage:
-    """Search prior sessions for related work."""
-    from nanobot.session.search import SessionSearchService
-
-    query = ctx.args.strip()
-    if not query:
-        content = "Usage: `/recall <query>`"
-    else:
-        service = SessionSearchService(ctx.loop.workspace)
-        hits = service.search(query, limit=3, exclude_session_key=ctx.key)
-        if not hits:
-            content = f'No prior session matches found for "{query}".'
-        else:
-            lines = [f'## Session recall for "{query}"', ""]
-            for hit in hits:
-                lines.append(f"- Session: `{hit.session_key}`")
-                if hit.last_timestamp:
-                    lines.append(f"  Last activity: {hit.last_timestamp}")
-                lines.append(f"  Excerpt: {hit.excerpt}")
-                lines.append("")
-            content = "\n".join(lines).rstrip()
-    metadata = {"render_as": "text"}
-    if (thread_id := ctx.msg.metadata.get("message_thread_id")) is not None:
-        metadata["message_thread_id"] = thread_id
-    return OutboundMessage(
-        channel=ctx.msg.channel,
-        chat_id=ctx.msg.chat_id,
-        content=content,
-        metadata=metadata,
-    )
-
-
-def _workflow_usage() -> str:
-    return "Usage: `/workflow list|show <name>|run <name>|step <name>|next|abort`"
-
-
-def _workflow_progress(ctx: CommandContext) -> WorkflowProgressManager:
-    progress = getattr(ctx.loop, "_workflow_progress", None)
-    if progress is None:
-        progress = WorkflowProgressManager(WorkflowStore(ctx.loop.workspace))
-        setattr(ctx.loop, "_workflow_progress", progress)
-    return progress
-
-
-def _workflow_response(ctx: CommandContext, content: str) -> OutboundMessage:
-    metadata = {
-        "render_as": "text",
-        "message_thread_id": ctx.msg.metadata.get("message_thread_id"),
-        "command_response": True,
-    }
-    return OutboundMessage(
-        channel=ctx.msg.channel,
-        chat_id=ctx.msg.chat_id,
-        content=content,
-        metadata=metadata,
-    )
-
-
-def _format_workflow_list(ctx: CommandContext) -> str:
-    listing = WorkflowStore(ctx.loop.workspace).list()
-    lines = ["Workflows:"]
-    if listing.workflows:
-        for workflow in listing.workflows:
-            lines.append(f"- {workflow.name}: {workflow.description} ({workflow.step_count} steps)")
-    else:
-        lines.append("- No valid workflows found.")
-
-    if listing.invalid:
-        lines.extend(["", "Invalid workflows:"])
-        for invalid in listing.invalid:
-            lines.append(f"- {invalid.name}: {invalid.error}")
-
-    if listing.hint:
-        lines.extend(["", listing.hint])
-    return "\n".join(lines)
-
-
-async def cmd_workflow(ctx: CommandContext) -> OutboundMessage:
-    """Render instruction-only workflow commands without executing content."""
-    args = ctx.args.strip()
-    if not args:
-        return _workflow_response(ctx, _workflow_usage())
-
-    parts = args.split(maxsplit=1)
-    subcommand = parts[0].lower()
-    name = parts[1].strip() if len(parts) > 1 else ""
-    store = WorkflowStore(ctx.loop.workspace)
-
-    if subcommand == "list":
-        return _workflow_response(ctx, _format_workflow_list(ctx))
-
-    if subcommand in {"show", "run"}:
-        if not name:
-            return _workflow_response(ctx, _workflow_usage())
-        workflow, error = store.read(name)
-        content = error if error is not None or workflow is None else store.render_full(workflow)
-        return _workflow_response(ctx, content or "Unable to read workflow")
-
-    if subcommand == "step":
-        if not name:
-            return _workflow_response(ctx, _workflow_usage())
-        result = _workflow_progress(ctx).start(ctx.key, name)
-        return _workflow_response(ctx, result.output)
-
-    if subcommand == "next":
-        result = _workflow_progress(ctx).next(ctx.key)
-        return _workflow_response(ctx, result.output)
-
-    if subcommand == "abort":
-        result = _workflow_progress(ctx).abort(ctx.key)
-        return _workflow_response(ctx, result.output)
-
-    return _workflow_response(ctx, _workflow_usage())
 
 
 def _extract_changed_files(diff: str) -> list[str]:
@@ -540,32 +375,26 @@ def _format_dream_log_content(commit, diff: str, *, requested_sha: str | None = 
     lines = [
         "## Dream Update",
         "",
-        "Here is the selected Dream memory change."
-        if requested_sha
-        else "Here is the latest Dream memory change.",
+        "Here is the selected Dream memory change." if requested_sha else "Here is the latest Dream memory change.",
         "",
         f"- Commit: `{commit.sha}`",
         f"- Time: {commit.timestamp}",
         f"- Changed files: {files_line}",
     ]
     if diff:
-        lines.extend(
-            [
-                "",
-                f"Use `/dream-restore {commit.sha}` to undo this change.",
-                "",
-                "```diff",
-                diff.rstrip(),
-                "```",
-            ]
-        )
+        lines.extend([
+            "",
+            f"Use `/dream-restore {commit.sha}` to undo this change.",
+            "",
+            "```diff",
+            diff.rstrip(),
+            "```",
+        ])
     else:
-        lines.extend(
-            [
-                "",
-                "Dream recorded this version, but there is no file diff to display.",
-            ]
-        )
+        lines.extend([
+            "",
+            "Dream recorded this version, but there is no file diff to display.",
+        ])
     return "\n".join(lines)
 
 
@@ -578,13 +407,11 @@ def _format_dream_restore_list(commits: list) -> str:
     ]
     for c in commits:
         lines.append(f"- `{c.sha}` {c.timestamp} - {c.message.splitlines()[0]}")
-    lines.extend(
-        [
-            "",
-            "Preview a version with `/dream-log <sha>` before restoring it.",
-            "Restore a version with `/dream-restore <sha>`.",
-        ]
-    )
+    lines.extend([
+        "",
+        "Preview a version with `/dream-log <sha>` before restoring it.",
+        "Restore a version with `/dream-restore <sha>`.",
+    ])
     return "\n".join(lines)
 
 
@@ -603,10 +430,8 @@ async def cmd_dream_log(ctx: CommandContext) -> OutboundMessage:
         else:
             msg = "Dream history is not available because memory versioning is not initialized."
         return OutboundMessage(
-            channel=ctx.msg.channel,
-            chat_id=ctx.msg.chat_id,
-            content=msg,
-            metadata={"render_as": "text"},
+            channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+            content=msg, metadata={"render_as": "text"},
         )
 
     args = ctx.args.strip()
@@ -635,10 +460,8 @@ async def cmd_dream_log(ctx: CommandContext) -> OutboundMessage:
             content = "Dream memory has no saved versions yet."
 
     return OutboundMessage(
-        channel=ctx.msg.channel,
-        chat_id=ctx.msg.chat_id,
-        content=content,
-        metadata={"render_as": "text"},
+        channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+        content=content, metadata={"render_as": "text"},
     )
 
 
@@ -653,8 +476,7 @@ async def cmd_dream_restore(ctx: CommandContext) -> OutboundMessage:
     git = store.git
     if not git.is_initialized():
         return OutboundMessage(
-            channel=ctx.msg.channel,
-            chat_id=ctx.msg.chat_id,
+            channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
             content="Dream history is not available because memory versioning is not initialized.",
         )
 
@@ -684,10 +506,8 @@ async def cmd_dream_restore(ctx: CommandContext) -> OutboundMessage:
                 "It may not exist, or it may be the first saved version with no earlier state to restore."
             )
     return OutboundMessage(
-        channel=ctx.msg.channel,
-        chat_id=ctx.msg.chat_id,
-        content=content,
-        metadata={"render_as": "text"},
+        channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+        content=content, metadata={"render_as": "text"},
     )
 
 
@@ -804,83 +624,141 @@ async def cmd_pairing(ctx: CommandContext) -> OutboundMessage:
     )
 
 
-async def cmd_help(ctx: CommandContext) -> OutboundMessage:
-    """Return available slash commands."""
-    lines = [
-        "🐈 nanobot commands:",
-        "/new — Start a new conversation",
-        "/stop — Stop the current task",
-        "/restart — Restart the bot",
-        "/status — Show bot status",
-        "/dream — Manually trigger Dream consolidation",
-        "/dream-log — Show what the last Dream changed",
-        "/dream-restore — Revert memory to a previous state",
-        "/recall <query> — Search prior session history",
-        "/workflow list — List instruction-only workflows",
-        "/workflow show <name> — Show a workflow",
-        "/workflow run <name> — Show a workflow checklist",
-        "/workflow step <name> — Start step-by-step workflow mode",
-        "/workflow next — Show the next workflow step",
-        "/workflow abort — Stop step-by-step workflow mode",
-        "/model — Show current model",
-        "/model <model-id> — Switch model for this session",
-        "/model temp — Show temperature settings",
-        "/model temp <value> — Set temperature (0.0-2.0)",
-        "/help — Show available commands",
-    ]
-    # Preserve topic thread context so the reply stays in the correct topic
-    metadata = {
-        "render_as": "text",
-        "message_thread_id": ctx.msg.metadata.get("message_thread_id"),
-        "command_response": True,  # Skip TTS for command responses
-    }
+async def cmd_recall(ctx: CommandContext) -> OutboundMessage:
+    """Search prior sessions for related work."""
+    from nanobot.session.search import SessionSearchService
+
+    query = ctx.args.strip()
+    if not query:
+        content = "Usage: `/recall <query>`"
+    else:
+        service = SessionSearchService(ctx.loop.workspace)
+        hits = service.search(query, limit=3, exclude_session_key=ctx.key)
+        if not hits:
+            content = f'No prior session matches found for "{query}".'
+        else:
+            lines = [f'## Session recall for "{query}"', ""]
+            for hit in hits:
+                lines.append(f"- Session: `{hit.session_key}`")
+                if hit.last_timestamp:
+                    lines.append(f"  Last activity: {hit.last_timestamp}")
+                lines.append(f"  Excerpt: {hit.excerpt}")
+                lines.append("")
+            content = "\n".join(lines).rstrip()
+    metadata = {"render_as": "text"}
+    if (thread_id := ctx.msg.metadata.get("message_thread_id")) is not None:
+        metadata["message_thread_id"] = thread_id
     return OutboundMessage(
         channel=ctx.msg.channel,
         chat_id=ctx.msg.chat_id,
-        content="\n".join(lines),
+        content=content,
         metadata=metadata,
     )
 
 
-async def cmd_model(ctx: CommandContext) -> OutboundMessage:
-    """Delegate /model handling to the agent loop."""
-    return ctx.loop._handle_model_command(ctx.msg, ctx.key, ctx.raw)
+def _workflow_progress(ctx: CommandContext):
+    from nanobot.workflows.progress import WorkflowProgressManager
+    from nanobot.workflows.store import WorkflowStore
+
+    progress = getattr(ctx.loop, "_workflow_progress", None)
+    if progress is None:
+        progress = WorkflowProgressManager(WorkflowStore(ctx.loop.workspace))
+        setattr(ctx.loop, "_workflow_progress", progress)
+    return progress
+
+
+def _workflow_response(ctx: CommandContext, content: str) -> OutboundMessage:
+    metadata = {
+        "render_as": "text",
+        "message_thread_id": ctx.msg.metadata.get("message_thread_id"),
+        "command_response": True,
+    }
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content=content,
+        metadata=metadata,
+    )
+
+
+def _workflow_usage() -> str:
+    return "Usage: `/workflow list|show <name>|run <name>|step <name>|next|abort`"
+
+
+def _format_workflow_list(ctx: CommandContext) -> str:
+    from nanobot.workflows.store import WorkflowStore
+
+    listing = WorkflowStore(ctx.loop.workspace).list()
+    lines = ["Workflows:"]
+    if listing.workflows:
+        for workflow in listing.workflows:
+            lines.append(
+                f"- {workflow.name}: {workflow.description} ({workflow.step_count} steps)"
+            )
+    else:
+        lines.append("- No valid workflows found.")
+    if listing.invalid:
+        lines.extend(["", "Invalid workflows:"])
+        for invalid in listing.invalid:
+            lines.append(f"- {invalid.name}: {invalid.error}")
+    if listing.hint:
+        lines.extend(["", listing.hint])
+    return "\n".join(lines)
+
+
+async def cmd_workflow(ctx: CommandContext) -> OutboundMessage:
+    """Render instruction-only workflow commands without executing content."""
+    from nanobot.workflows.store import WorkflowStore
+
+    args = ctx.args.strip()
+    if not args:
+        return _workflow_response(ctx, _workflow_usage())
+    parts = args.split(maxsplit=1)
+    subcommand = parts[0].lower()
+    name = parts[1].strip() if len(parts) > 1 else ""
+    store = WorkflowStore(ctx.loop.workspace)
+    if subcommand == "list":
+        return _workflow_response(ctx, _format_workflow_list(ctx))
+    if subcommand in {"show", "run"}:
+        if not name:
+            return _workflow_response(ctx, _workflow_usage())
+        workflow, error = store.read(name)
+        content = (
+            error if error is not None or workflow is None else store.render_full(workflow)
+        )
+        return _workflow_response(ctx, content or "Unable to read workflow")
+    if subcommand == "step":
+        if not name:
+            return _workflow_response(ctx, _workflow_usage())
+        result = _workflow_progress(ctx).start(ctx.key, name)
+        return _workflow_response(ctx, result.output)
+    if subcommand == "next":
+        result = _workflow_progress(ctx).next(ctx.key)
+        return _workflow_response(ctx, result.output)
+    if subcommand == "abort":
+        result = _workflow_progress(ctx).abort(ctx.key)
+        return _workflow_response(ctx, result.output)
+    return _workflow_response(ctx, _workflow_usage())
+
+
+async def cmd_help(ctx: CommandContext) -> OutboundMessage:
+    """Return available slash commands."""
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content=build_help_text(),
+        metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
+    )
 
 
 def build_help_text() -> str:
     """Build canonical help text shared across channels."""
-<<<<<<< HEAD
-    lines = [
-        "🐈 nanobot commands:",
-        "/new — Stop current task and start a new conversation",
-        "/stop — Stop the current task",
-        "/restart — Restart the bot",
-        "/status — Show bot status",
-        "/history [n] — Show the last N conversation messages (default 10)",
-        "/dream — Manually trigger Dream consolidation",
-        "/dream-log — Show what the last Dream changed",
-        "/dream-restore — Revert memory to a previous state",
-        "/recall <query> — Search prior session history",
-        "/workflow list — List instruction-only workflows",
-        "/workflow show <name> — Show a workflow",
-        "/workflow run <name> — Show a workflow checklist",
-        "/workflow step <name> — Start step-by-step workflow mode",
-        "/workflow next — Show the next workflow step",
-        "/workflow abort — Stop step-by-step workflow mode",
-        "/model — Show current model",
-        "/model <model-id> — Switch model for this session",
-        "/model temp — Show temperature settings",
-        "/model temp <value> — Set temperature (0.0-2.0)",
-        "/help — Show available commands",
-    ]
-=======
     lines = ["🐈 nanobot commands:"]
     for spec in BUILTIN_COMMAND_SPECS:
         command = spec.command
         if spec.arg_hint:
             command = f"{command} {spec.arg_hint}"
         lines.append(f"{command} — {spec.description}")
->>>>>>> origin/main
     return "\n".join(lines)
 
 
@@ -890,12 +768,9 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.priority("/restart", cmd_restart)
     router.priority("/status", cmd_status)
     router.exact("/new", cmd_new)
-<<<<<<< HEAD
-=======
     router.exact("/status", cmd_status)
     router.exact("/model", cmd_model)
     router.prefix("/model ", cmd_model)
->>>>>>> origin/main
     router.exact("/history", cmd_history)
     router.prefix("/history ", cmd_history)
     router.exact("/goal", cmd_goal)
@@ -905,16 +780,10 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.prefix("/dream-log ", cmd_dream_log)
     router.exact("/dream-restore", cmd_dream_restore)
     router.prefix("/dream-restore ", cmd_dream_restore)
+    router.exact("/help", cmd_help)
+    router.exact("/pairing", cmd_pairing)
+    router.prefix("/pairing ", cmd_pairing)
     router.exact("/recall", cmd_recall)
     router.prefix("/recall ", cmd_recall)
     router.exact("/workflow", cmd_workflow)
     router.prefix("/workflow ", cmd_workflow)
-    router.exact("/model", cmd_model)
-    router.exact("/status", cmd_status)
-    router.exact("/help", cmd_help)
-<<<<<<< HEAD
-    router.prefix("/model ", cmd_model)
-=======
-    router.exact("/pairing", cmd_pairing)
-    router.prefix("/pairing ", cmd_pairing)
->>>>>>> origin/main

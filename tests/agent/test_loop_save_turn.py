@@ -8,10 +8,6 @@ from nanobot.agent.context import ContextBuilder
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
-<<<<<<< HEAD
-from nanobot.providers.base import GenerationSettings, LLMResponse
-from nanobot.session.manager import Session
-=======
 from nanobot.providers.base import LLMResponse
 from nanobot.session.goal_state import GOAL_STATE_KEY
 from nanobot.session.manager import Session, SessionManager
@@ -29,7 +25,6 @@ from nanobot.session.webui_turns import (
     maybe_generate_webui_title,
 )
 from nanobot.utils.llm_runtime import LLMRuntime
->>>>>>> origin/main
 
 
 def _mk_loop() -> AgentLoop:
@@ -219,21 +214,6 @@ def test_save_turn_keeps_image_placeholder_with_path_after_runtime_strip() -> No
 
     loop._save_turn(
         session,
-<<<<<<< HEAD
-        [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": runtime},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": "data:image/png;base64,abc"},
-                        "_meta": {"path": "/media/feishu/photo.jpg"},
-                    },
-                ],
-            }
-        ],
-=======
         [{
             "role": "user",
             "content": [
@@ -241,12 +221,9 @@ def test_save_turn_keeps_image_placeholder_with_path_after_runtime_strip() -> No
                 {"type": "text", "text": runtime},
             ],
         }],
->>>>>>> origin/main
         skip=0,
     )
-    assert session.messages[0]["content"] == [
-        {"type": "text", "text": "[image: /media/feishu/photo.jpg]"}
-    ]
+    assert session.messages[0]["content"] == [{"type": "text", "text": "[image: /media/feishu/photo.jpg]"}]
 
 
 def test_save_turn_keeps_image_placeholder_without_meta() -> None:
@@ -256,17 +233,6 @@ def test_save_turn_keeps_image_placeholder_without_meta() -> None:
 
     loop._save_turn(
         session,
-<<<<<<< HEAD
-        [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": runtime},
-                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
-                ],
-            }
-        ],
-=======
         [{
             "role": "user",
             "content": [
@@ -274,7 +240,6 @@ def test_save_turn_keeps_image_placeholder_without_meta() -> None:
                 {"type": "text", "text": runtime},
             ],
         }],
->>>>>>> origin/main
         skip=0,
     )
     assert session.messages[0]["content"] == [{"type": "text", "text": "[image]"}]
@@ -328,144 +293,6 @@ def test_save_turn_keeps_tool_results_under_16k() -> None:
     assert session.messages[0]["content"] == content
 
 
-<<<<<<< HEAD
-@pytest.mark.asyncio
-async def test_process_direct_persists_direct_user_message(tmp_path) -> None:
-    provider = MagicMock()
-    provider.get_default_model.return_value = "test-model"
-    provider.generation = GenerationSettings(max_tokens=0)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
-    provider.chat_stream_with_retry = AsyncMock(
-        return_value=LLMResponse(content="ok", tool_calls=[])
-    )
-
-    loop = AgentLoop(
-        bus=MessageBus(),
-        provider=provider,
-        workspace=tmp_path,
-        model="test-model",
-    )
-    loop.tools.get_definitions = MagicMock(return_value=[])
-
-    await loop.process_direct("hello direct", session_key="cli:test")
-
-    session = loop.sessions.get_or_create("cli:test")
-    assert session.messages[0]["role"] == "user"
-    assert session.messages[0]["content"] == "hello direct"
-    assert session.messages[1]["role"] == "assistant"
-    assert session.messages[1]["content"] == "ok"
-
-
-@pytest.mark.asyncio
-async def test_process_direct_surfaces_retry_progress(tmp_path) -> None:
-    provider = MagicMock()
-    provider.get_default_model.return_value = "test-model"
-    provider.generation = GenerationSettings(max_tokens=0)
-
-    async def _chat_with_retry(**kwargs):
-        kwargs["on_retry"](1, 3)
-        return LLMResponse(content="ok", tool_calls=[])
-
-    provider.chat_with_retry = _chat_with_retry
-    provider.chat_stream_with_retry = AsyncMock(
-        return_value=LLMResponse(content="ok", tool_calls=[])
-    )
-
-    loop = AgentLoop(
-        bus=MessageBus(),
-        provider=provider,
-        workspace=tmp_path,
-        model="test-model",
-    )
-    loop.tools.get_definitions = MagicMock(return_value=[])
-
-    progress: list[str] = []
-
-    async def _on_progress(text: str, *, tool_hint: bool = False) -> None:
-        progress.append(text)
-
-    await loop.process_direct("hello direct", session_key="cli:test", on_progress=_on_progress)
-    await asyncio.sleep(0)
-
-    assert "Retrying... (attempt 1/3)" in progress
-
-
-@pytest.mark.asyncio
-async def test_process_direct_keeps_zero_thread_id_in_metadata(tmp_path) -> None:
-    provider = MagicMock()
-    provider.get_default_model.return_value = "test-model"
-    provider.generation = GenerationSettings(max_tokens=0)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
-    provider.chat_stream_with_retry = AsyncMock(
-        return_value=LLMResponse(content="ok", tool_calls=[])
-    )
-
-    loop = AgentLoop(
-        bus=MessageBus(),
-        provider=provider,
-        workspace=tmp_path,
-        model="test-model",
-    )
-    loop.tools.get_definitions = MagicMock(return_value=[])
-    loop.memory_consolidator.maybe_consolidate_by_tokens = AsyncMock()  # type: ignore[method-assign]
-    original_build_messages = loop.context.build_messages
-    loop.context.build_messages = MagicMock(side_effect=original_build_messages)
-
-    result = await loop.process_direct(
-        "hello topic",
-        session_key="telegram:-100123:topic:0",
-        channel="telegram",
-        chat_id="-100123",
-        thread_id=0,
-    )
-
-    assert result is not None
-    assert result.metadata["message_thread_id"] == 0
-    assert any(
-        call.kwargs.get("thread_id") == 0 for call in loop.context.build_messages.call_args_list
-    )
-
-
-@pytest.mark.asyncio
-async def test_process_system_message_passes_thread_id_to_context_builder(tmp_path) -> None:
-    provider = MagicMock()
-    provider.get_default_model.return_value = "test-model"
-    provider.generation = GenerationSettings(max_tokens=0)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
-    provider.chat_stream_with_retry = AsyncMock(
-        return_value=LLMResponse(content="ok", tool_calls=[])
-    )
-
-    loop = AgentLoop(
-        bus=MessageBus(),
-        provider=provider,
-        workspace=tmp_path,
-        model="test-model",
-    )
-    loop.tools.get_definitions = MagicMock(return_value=[])
-    loop.memory_consolidator.maybe_consolidate_by_tokens = AsyncMock()  # type: ignore[method-assign]
-    loop._run_agent_loop = AsyncMock(
-        return_value=("ok", None, [{"role": "assistant", "content": "ok"}])
-    )  # type: ignore[method-assign]
-    original_build_messages = loop.context.build_messages
-    loop.context.build_messages = MagicMock(side_effect=original_build_messages)
-
-    result = await loop._process_message(
-        InboundMessage(
-            channel="system",
-            sender_id="system",
-            chat_id="telegram:-100123",
-            content="system task",
-            metadata={"message_id": "m1", "message_thread_id": 42},
-        )
-    )
-
-    assert result is not None
-    assert result.metadata["message_thread_id"] == 42
-    assert any(
-        call.kwargs.get("thread_id") == 42 for call in loop.context.build_messages.call_args_list
-    )
-=======
 def test_save_turn_stamps_latency_on_last_assistant() -> None:
     loop = _mk_loop()
     session = Session(key="test:latency")
@@ -483,7 +310,6 @@ def test_save_turn_stamps_latency_on_last_assistant() -> None:
     assert session.messages[-1]["role"] == "assistant"
     assert session.messages[-1]["content"] == "final answer"
     assert session.messages[-1]["latency_ms"] == 12345
->>>>>>> origin/main
 
 
 def test_restore_runtime_checkpoint_rehydrates_completed_and_pending_tools() -> None:
@@ -712,24 +538,20 @@ async def test_process_message_persists_media_only_turn_without_text(tmp_path: P
 
 
 @pytest.mark.asyncio
-async def test_process_message_does_not_duplicate_early_persisted_user_message(
-    tmp_path: Path,
-) -> None:
+async def test_process_message_does_not_duplicate_early_persisted_user_message(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
-    loop._run_agent_loop = AsyncMock(
-        return_value=(
-            "done",
-            None,
-            [
-                {"role": "system", "content": "system"},
-                {"role": "user", "content": "hello"},
-                {"role": "assistant", "content": "done"},
-            ],
-            "stop",
-            False,
-        )
-    )  # type: ignore[method-assign]
+    loop._run_agent_loop = AsyncMock(return_value=(
+        "done",
+        None,
+        [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "done"},
+        ],
+        "stop",
+        False,
+    ))  # type: ignore[method-assign]
 
     result = await loop._process_message(
         InboundMessage(channel="feishu", sender_id="u1", chat_id="c2", content="hello")
@@ -738,7 +560,10 @@ async def test_process_message_does_not_duplicate_early_persisted_user_message(
     assert result is not None
     assert result.content == "done"
     session = loop.sessions.get_or_create("feishu:c2")
-    assert [{k: v for k, v in m.items() if k in {"role", "content"}} for m in session.messages] == [
+    assert [
+        {k: v for k, v in m.items() if k in {"role", "content"}}
+        for m in session.messages
+    ] == [
         {"role": "user", "content": "hello"},
         {"role": "assistant", "content": "done"},
     ]
@@ -1076,33 +901,26 @@ def test_set_tool_context_uses_effective_key_for_spawn_tool(tmp_path: Path) -> N
 async def test_next_turn_after_crash_closes_pending_user_turn_before_new_input(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
-    loop.provider.chat_with_retry = AsyncMock(
-        return_value=MagicMock()
-    )  # unused because _run_agent_loop is stubbed
+    loop.provider.chat_with_retry = AsyncMock(return_value=MagicMock())  # unused because _run_agent_loop is stubbed
 
     session = loop.sessions.get_or_create("feishu:c3")
     session.add_message("user", "old question")
     session.metadata[AgentLoop._PENDING_USER_TURN_KEY] = True
     loop.sessions.save(session)
 
-    loop._run_agent_loop = AsyncMock(
-        return_value=(
-            "new answer",
-            None,
-            [
-                {"role": "system", "content": "system"},
-                {"role": "user", "content": "old question"},
-                {
-                    "role": "assistant",
-                    "content": "Error: Task interrupted before a response was generated.",
-                },
-                {"role": "user", "content": "new question"},
-                {"role": "assistant", "content": "new answer"},
-            ],
-            "stop",
-            False,
-        )
-    )  # type: ignore[method-assign]
+    loop._run_agent_loop = AsyncMock(return_value=(
+        "new answer",
+        None,
+        [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "old question"},
+            {"role": "assistant", "content": "Error: Task interrupted before a response was generated."},
+            {"role": "user", "content": "new question"},
+            {"role": "assistant", "content": "new answer"},
+        ],
+        "stop",
+        False,
+    ))  # type: ignore[method-assign]
 
     result = await loop._process_message(
         InboundMessage(channel="feishu", sender_id="u1", chat_id="c3", content="new question")
@@ -1111,12 +929,12 @@ async def test_next_turn_after_crash_closes_pending_user_turn_before_new_input(t
     assert result is not None
     assert result.content == "new answer"
     session = loop.sessions.get_or_create("feishu:c3")
-    assert [{k: v for k, v in m.items() if k in {"role", "content"}} for m in session.messages] == [
+    assert [
+        {k: v for k, v in m.items() if k in {"role", "content"}}
+        for m in session.messages
+    ] == [
         {"role": "user", "content": "old question"},
-        {
-            "role": "assistant",
-            "content": "Error: Task interrupted before a response was generated.",
-        },
+        {"role": "assistant", "content": "Error: Task interrupted before a response was generated."},
         {"role": "user", "content": "new question"},
         {"role": "assistant", "content": "new answer"},
     ]
@@ -1296,97 +1114,6 @@ async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_
 
 
 @pytest.mark.asyncio
-async def test_process_message_strips_leading_message_time_from_response(tmp_path: Path) -> None:
-    loop = _make_full_loop(tmp_path)
-    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
-    loop.provider.chat_with_retry = AsyncMock(
-        return_value=LLMResponse(
-            content="[Message Time: 2026-04-28T18:47:02.637891]\n\nVisible reply",
-            tool_calls=[],
-        )
-    )
-
-    response = await loop._process_message(
-        InboundMessage(
-            channel="telegram",
-            sender_id="user-1",
-            chat_id="chat-1",
-            content="hello",
-        )
-    )
-
-    assert response is not None
-    assert response.content == "Visible reply"
-    persisted = loop.sessions.get_or_create("telegram:chat-1")
-    assert persisted.messages[-1]["role"] == "assistant"
-    assert persisted.messages[-1]["content"] == "Visible reply"
-
-
-@pytest.mark.asyncio
-async def test_process_message_strips_leading_message_time_from_stream(tmp_path: Path) -> None:
-    loop = _make_full_loop(tmp_path)
-    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
-    streamed: list[str] = []
-
-    async def chat_stream_with_retry(*, on_content_delta, **_kwargs):
-        for delta in (
-            "[Message Time: 2026-04-28T18:47:02.637891]",
-            "\n[Message Time: 2026-04-28T18:43:28.058605]\n",
-            "Visible",
-            " reply",
-        ):
-            await on_content_delta(delta)
-        return LLMResponse(
-            content=(
-                "[Message Time: 2026-04-28T18:47:02.637891]\n"
-                "[Message Time: 2026-04-28T18:43:28.058605]\nVisible reply"
-            ),
-            tool_calls=[],
-        )
-
-    async def on_stream(delta: str) -> None:
-        streamed.append(delta)
-
-    loop.provider.chat_stream_with_retry = chat_stream_with_retry
-
-    response = await loop._process_message(
-        InboundMessage(
-            channel="telegram",
-            sender_id="user-1",
-            chat_id="chat-1",
-            content="hello",
-        ),
-        on_stream=on_stream,
-    )
-
-    assert response is not None
-    assert response.content == "Visible reply"
-    assert streamed == ["Visible", " reply"]
-
-
-@pytest.mark.parametrize(
-    "content",
-    [
-        "[Message Time: 2026-04-28T18:47:02.637891]\nVisible reply",
-        "[Message Time: 2026-04-28T18:47:02.637891]\n\nVisible reply",
-        "[Message Time: 2026-04-28 18:47]\nVisible reply",
-        (
-            "[Message Time: 2026-04-28T18:47:02.637891]\n"
-            "[Message Time: 2026-04-28T18:43:28.058605]\nVisible reply"
-        ),
-    ],
-)
-def test_strip_message_time_prefix_accepts_common_timestamp_shapes(content: str) -> None:
-    assert AgentLoop._strip_message_time_prefix(content) == "Visible reply"
-
-
-def test_strip_message_time_prefix_keeps_mid_message_reference() -> None:
-    content = "The note was [Message Time: 2026-04-28T18:47:02] in history."
-
-    assert AgentLoop._strip_message_time_prefix(content) == content
-
-
-@pytest.mark.asyncio
 async def test_multiple_subagent_followups_all_persist_as_standalone_history(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
@@ -1542,14 +1269,10 @@ async def test_system_subagent_followup_uses_thread_session_and_slack_metadata(t
     assert outbound is not None
     assert outbound.channel == "slack"
     assert outbound.chat_id == "C123"
-<<<<<<< HEAD
-    assert outbound.metadata == {"subagent_task_id": "sub-1", "slack": {"thread_ts": "1700.42"}}
-=======
     assert outbound.metadata == {
         "slack": {"thread_ts": "1700.42"},
         "origin_message_id": "msg-123",
     }
->>>>>>> origin/main
     assert "thread question" in seen["initial_messages"][1]["content"]
 
     loop.sessions.invalidate("slack:C123:1700.42")

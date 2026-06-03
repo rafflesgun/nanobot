@@ -15,20 +15,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator
 import tiktoken
 from loguru import logger
 
-<<<<<<< HEAD
-from nanobot.utils.prompt_templates import render_template
-from nanobot.utils.helpers import (
-    ensure_dir,
-    estimate_message_tokens,
-    estimate_prompt_tokens_chain,
-    strip_think,
-    truncate_text,
-)
-
-from nanobot.agent.runner import AgentRunSpec, AgentRunner
-=======
 from nanobot.agent.runner import AgentRunner, AgentRunSpec
->>>>>>> origin/main
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.session.manager import Session
 from nanobot.utils.gitstore import GitStore
@@ -50,7 +37,6 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # MemoryStore — pure file I/O layer
 # ---------------------------------------------------------------------------
-
 
 class MemoryStore:
     """Pure file I/O for memory files: MEMORY.md, history.jsonl, SOUL.md, USER.md."""
@@ -75,20 +61,9 @@ class MemoryStore:
         self._dream_cursor_file = self.memory_dir / ".dream_cursor"
         self._corruption_logged = False  # rate-limit non-int cursor warning
         self._oversize_logged = False  # rate-limit oversized-entry warning
-<<<<<<< HEAD
-        self._git = GitStore(
-            workspace,
-            tracked_files=[
-                "SOUL.md",
-                "USER.md",
-                "memory/MEMORY.md",
-            ],
-        )
-=======
         self._git = GitStore(workspace, tracked_files=[
             "SOUL.md", "USER.md", "memory/MEMORY.md", "memory/.dream_cursor",
         ])
->>>>>>> origin/main
         self._maybe_migrate_legacy_history()
 
     @property
@@ -158,17 +133,15 @@ class MemoryStore:
             match = self._LEGACY_TIMESTAMP_RE.match(chunk)
             if match:
                 timestamp = match.group(1)
-                remainder = chunk[match.end() :].lstrip()
+                remainder = chunk[match.end():].lstrip()
                 if remainder:
                     content = remainder
 
-            entries.append(
-                {
-                    "cursor": cursor,
-                    "timestamp": timestamp,
-                    "content": content,
-                }
-            )
+            entries.append({
+                "cursor": cursor,
+                "timestamp": timestamp,
+                "content": content,
+            })
         return entries
 
     def _split_legacy_history_chunks(self, text: str) -> list[str]:
@@ -209,7 +182,7 @@ class MemoryStore:
         match = self._LEGACY_TIMESTAMP_RE.match(first_nonempty)
         if not match:
             return False
-        return first_nonempty[match.end() :].lstrip().startswith("[RAW]")
+        return first_nonempty[match.end():].lstrip().startswith("[RAW]")
 
     def _legacy_fallback_timestamp(self) -> str:
         try:
@@ -353,7 +326,7 @@ class MemoryStore:
         entries = self._read_entries()
         if len(entries) <= self.max_history_entries:
             return
-        kept = entries[-self.max_history_entries :]
+        kept = entries[-self.max_history_entries:]
         self._write_entries(kept)
 
     # -- JSONL helpers -------------------------------------------------------
@@ -435,9 +408,7 @@ class MemoryStore:
         for message in messages:
             if not message.get("content"):
                 continue
-            tools = (
-                f" [tools: {', '.join(message['tools_used'])}]" if message.get("tools_used") else ""
-            )
+            tools = f" [tools: {', '.join(message['tools_used'])}]" if message.get("tools_used") else ""
             lines.append(
                 f"[{message.get('timestamp', '?')[:16]}] {message['role'].upper()}{tools}: {message['content']}"
             )
@@ -454,6 +425,7 @@ class MemoryStore:
         logger.warning(
             "Memory consolidation degraded: raw-archived {} messages", len(messages)
         )
+
 
 
 # ---------------------------------------------------------------------------
@@ -497,7 +469,9 @@ class Consolidator:
         self.consolidation_ratio = consolidation_ratio
         self._build_messages = build_messages
         self._get_tool_definitions = get_tool_definitions
-        self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
+        self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
+            weakref.WeakValueDictionary()
+        )
 
     def set_provider(
         self,
@@ -760,7 +734,7 @@ class Consolidator:
 
                 end_idx = boundary[0]
 
-                chunk = session.messages[session.last_consolidated : end_idx]
+                chunk = session.messages[session.last_consolidated:end_idx]
                 if not chunk:
                     break
 
@@ -939,21 +913,6 @@ class Dream:
         workspace = self.store.workspace
         # Allow reading builtin skills for reference during skill creation
         extra_read = [BUILTIN_SKILLS_DIR] if BUILTIN_SKILLS_DIR.exists() else None
-<<<<<<< HEAD
-        tools.register(
-            ReadFileTool(
-                workspace=workspace,
-                allowed_dir=workspace,
-                extra_allowed_dirs=extra_read,
-            )
-        )
-        tools.register(EditFileTool(workspace=workspace, allowed_dir=workspace))
-        # write_file resolves relative paths from workspace root, but can only
-        # write Dream-generated skill proposals under memory/skill-proposals/.
-        proposal_dir = workspace / "memory" / "skill-proposals"
-        proposal_dir.mkdir(parents=True, exist_ok=True)
-        tools.register(WriteFileTool(workspace=workspace, allowed_dir=proposal_dir))
-=======
         # Dream gets its own FileStates so its caches stay isolated from the
         # main loop's sessions (issue #3571).
         file_states = FileStates()
@@ -969,7 +928,6 @@ class Dream:
         skills_dir = workspace / "skills"
         skills_dir.mkdir(parents=True, exist_ok=True)
         tools.register(WriteFileTool(workspace=workspace, allowed_dir=skills_dir, file_states=file_states))
->>>>>>> origin/main
         return tools
 
     # -- skill listing --------------------------------------------------------
@@ -1030,9 +988,7 @@ class Dream:
         if len(lines) != len(ages):
             logger.debug(
                 "line_ages length mismatch for {} (lines={}, ages={}); skipping annotation",
-                file_path,
-                len(lines),
-                len(ages),
+                file_path, len(lines), len(ages),
             )
             return content
 
@@ -1062,10 +1018,7 @@ class Dream:
         batch = entries[: self.max_batch_size]
         logger.info(
             "Dream: processing {} entries (cursor {}→{}), batch={}",
-            len(entries),
-            last_cursor,
-            batch[-1]["cursor"],
-            len(batch),
+            len(entries), last_cursor, batch[-1]["cursor"], len(batch),
         )
 
         # Build history text for LLM — cap each entry so a legacy oversized
@@ -1102,7 +1055,9 @@ class Dream:
         )
 
         # Phase 1: Analyze (no skills list — dedup is Phase 2's job)
-        phase1_prompt = f"## Conversation History\n{history_text}\n\n{file_context}"
+        phase1_prompt = (
+            f"## Conversation History\n{history_text}\n\n{file_context}"
+        )
 
         try:
             phase1_response = await self.provider.chat_with_retry(
@@ -1131,8 +1086,9 @@ class Dream:
         existing_skills = self._list_existing_skills()
         skills_section = ""
         if existing_skills:
-            skills_section = "\n\n## Existing Skills\n" + "\n".join(
-                f"- {s}" for s in existing_skills
+            skills_section = (
+                "\n\n## Existing Skills\n"
+                + "\n".join(f"- {s}" for s in existing_skills)
             )
         phase2_prompt = f"## Analysis Result\n{analysis}\n\n{file_context}{skills_section}"
 
@@ -1151,28 +1107,20 @@ class Dream:
         ]
 
         try:
-            result = await self._runner.run(
-                AgentRunSpec(
-                    initial_messages=messages,
-                    tools=tools,
-                    model=self.model,
-                    max_iterations=self.max_iterations,
-                    max_tool_result_chars=self.max_tool_result_chars,
-                    fail_on_tool_error=False,
-                )
-            )
+            result = await self._runner.run(AgentRunSpec(
+                initial_messages=messages,
+                tools=tools,
+                model=self.model,
+                max_iterations=self.max_iterations,
+                max_tool_result_chars=self.max_tool_result_chars,
+                fail_on_tool_error=False,
+            ))
             logger.debug(
                 "Dream Phase 2 complete: stop_reason={}, tool_events={}",
-                result.stop_reason,
-                len(result.tool_events),
+                result.stop_reason, len(result.tool_events),
             )
-            for ev in result.tool_events or []:
-                logger.info(
-                    "Dream tool_event: name={}, status={}, detail={}",
-                    ev.get("name"),
-                    ev.get("status"),
-                    ev.get("detail", "")[:200],
-                )
+            for ev in (result.tool_events or []):
+                logger.info("Dream tool_event: name={}, status={}, detail={}", ev.get("name"), ev.get("status"), ev.get("detail", "")[:200])
         except Exception:
             logger.exception("Dream Phase 2 failed")
             result = None
@@ -1190,20 +1138,13 @@ class Dream:
             self.store.set_last_dream_cursor(new_cursor)
             logger.info(
                 "Dream done: {} change(s), cursor advanced to {}",
-                len(changelog),
-                new_cursor,
+                len(changelog), new_cursor,
             )
         else:
             reason = result.stop_reason if result else "exception"
             logger.warning(
-<<<<<<< HEAD
-                "Dream incomplete ({}): cursor advanced to {}",
-                reason,
-                new_cursor,
-=======
                 "Dream incomplete ({}): cursor NOT advanced, will retry next cron cycle",
                 reason,
->>>>>>> origin/main
             )
 
         self.store.compact_history()

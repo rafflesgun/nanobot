@@ -1,6 +1,5 @@
 """Tests for OpenAICompatProvider handling custom/direct endpoints."""
 
-import httpx
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -33,21 +32,17 @@ def test_custom_provider_parse_accepts_dict_response() -> None:
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
 
-    result = provider._parse(
-        {
-            "choices": [
-                {
-                    "message": {"content": "hello from dict"},
-                    "finish_reason": "stop",
-                }
-            ],
-            "usage": {
-                "prompt_tokens": 1,
-                "completion_tokens": 2,
-                "total_tokens": 3,
-            },
-        }
-    )
+    result = provider._parse({
+        "choices": [{
+            "message": {"content": "hello from dict"},
+            "finish_reason": "stop",
+        }],
+        "usage": {
+            "prompt_tokens": 1,
+            "completion_tokens": 2,
+            "total_tokens": 3,
+        },
+    })
 
     assert result.finish_reason == "stop"
     assert result.content == "hello from dict"
@@ -61,15 +56,6 @@ def test_custom_provider_parse_chunks_accepts_plain_text_chunks() -> None:
     assert result.content == "hello world"
 
 
-<<<<<<< HEAD
-def test_custom_provider_client_disables_sdk_retries_and_sets_timeout() -> None:
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_client:
-        OpenAICompatProvider(api_key="test-key", api_base="https://example.com/v1")
-
-    kwargs = mock_client.call_args.kwargs
-    assert kwargs["max_retries"] == 0
-    assert kwargs["timeout"] == 120.0
-=======
 def test_custom_provider_parse_chunks_deduplicates_parallel_tool_call_ids() -> None:
     chunks = [{
         "choices": [{
@@ -97,7 +83,6 @@ def test_custom_provider_parse_chunks_deduplicates_parallel_tool_call_ids() -> N
     assert ids[0] == "call_dup"
     assert len(ids) == 2
     assert len(set(ids)) == 2
->>>>>>> origin/main
 
 
 def test_local_provider_502_error_includes_reachability_hint() -> None:

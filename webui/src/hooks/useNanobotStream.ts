@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useClient } from "@/providers/ClientProvider";
-import { makeId } from "@/lib/id";
 import { toMediaAttachment } from "@/lib/media";
 import {
   mergeToolProgressEvents,
@@ -665,29 +664,6 @@ export function useNanobotStream(
       }
 
       if (ev.event === "delta") {
-<<<<<<< HEAD
-        const id = buffer.current?.messageId ?? makeId();
-        if (!buffer.current) {
-          buffer.current = { messageId: id, parts: [] };
-          setMessages((prev) => [
-            ...prev,
-            {
-              id,
-              role: "assistant",
-              content: "",
-              isStreaming: true,
-              createdAt: Date.now(),
-            },
-          ]);
-          setIsStreaming(true);
-        }
-        buffer.current.parts.push(ev.text);
-        const combined = buffer.current.parts.join("");
-        const targetId = buffer.current.messageId;
-        setMessages((prev) =>
-          prev.map((m) => (m.id === targetId ? { ...m, content: combined } : m)),
-        );
-=======
         if (suppressStreamUntilTurnEndRef.current) return;
         const chunk = typeof ev.text === "string" ? ev.text : "";
         if (!chunk) return;
@@ -706,7 +682,6 @@ export function useNanobotStream(
         setIsStreaming(true);
         pendingStreamEventsRef.current.push({ kind: "reasoning", text: chunk });
         schedulePendingStreamFlush();
->>>>>>> origin/main
         return;
       }
 
@@ -847,7 +822,7 @@ export function useNanobotStream(
             return [
               ...base,
               {
-                id: makeId(),
+                id: crypto.randomUUID(),
                 role: "tool",
                 kind: "trace",
                 content: lines[lines.length - 1],
@@ -926,11 +901,6 @@ export function useNanobotStream(
           return [
             ...base,
             {
-<<<<<<< HEAD
-              id: makeId(),
-              role: "assistant",
-              content,
-=======
               id: crypto.randomUUID(),
               role: "tool",
               kind: "trace",
@@ -938,7 +908,6 @@ export function useNanobotStream(
               traces: [],
               fileEdits: normalized,
               activitySegmentId: segmentId,
->>>>>>> origin/main
               createdAt: Date.now(),
             },
           ];
@@ -984,18 +953,6 @@ export function useNanobotStream(
 
       flushPendingStreamEvents();
       const previews = hasImages ? images!.map((i) => i.preview) : undefined;
-<<<<<<< HEAD
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: makeId(),
-          role: "user",
-          content,
-          createdAt: Date.now(),
-          ...(previews ? { images: previews } : {}),
-        },
-      ]);
-=======
       setMessages((prev) => {
         buffer.current = null;
         activeAssistantRef.current = null;
@@ -1017,7 +974,6 @@ export function useNanobotStream(
       // Mark streaming immediately so the UI shows the loading indicator
       // right away, before the first delta arrives from the server.
       setIsStreaming(true);
->>>>>>> origin/main
       const wireMedia = hasImages ? images!.map((i) => i.media) : undefined;
       if (options) {
         client.sendMessage(chatId, content, wireMedia, options);

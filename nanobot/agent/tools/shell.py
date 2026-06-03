@@ -167,40 +167,13 @@ class ExecTool(Tool):
         allow_local_preview_access: bool | None = None,
         sandbox: str = "",
         path_append: str = "",
-        allowed_dirs: list[Path] | None = None,
         allowed_env_keys: list[str] | None = None,
         session_manager: Any | None = None,
+        allowed_dirs: list[str | Path] | None = None,
     ):
         self.timeout = timeout
         self.working_dir = working_dir
         self.sandbox = sandbox
-<<<<<<< HEAD
-        self.deny_patterns = (
-            deny_patterns
-            or [
-                r"\brm\s+-[rf]{1,2}\b",  # rm -r, rm -rf, rm -fr
-                r"\bdel\s+/[fq]\b",  # del /f, del /q
-                r"\brmdir\s+/s\b",  # rmdir /s
-                r"(?:^|[;&|]\s*)format\b",  # format (as standalone command only)
-                r"\b(mkfs|diskpart)\b",  # disk operations
-                r"\bdd\s+if=",  # dd
-                r">\s*/dev/sd",  # write to disk
-                r"\b(shutdown|reboot|poweroff)\b",  # system power
-                r":\(\)\s*\{.*\};\s*:",  # fork bomb
-                # Block writes to nanobot internal state files (#2989).
-                # history.jsonl / .dream_cursor are managed by append_history();
-                # direct writes corrupt the cursor format and crash /dream.
-                r">>?\s*\S*(?:history\.jsonl|\.dream_cursor)",  # > / >> redirect
-                r"\btee\b[^|;&<>]*(?:history\.jsonl|\.dream_cursor)",  # tee / tee -a
-                r"\b(?:cp|mv)\b(?:\s+[^\s|;&<>]+)+\s+\S*(?:history\.jsonl|\.dream_cursor)",  # cp/mv target
-                r"\bdd\b[^|;&<>]*\bof=\S*(?:history\.jsonl|\.dream_cursor)",  # dd of=
-                r"\bsed\s+-i[^|;&<>]*(?:history\.jsonl|\.dream_cursor)",  # sed -i
-            ]
-        )
-        self.allow_patterns = allow_patterns or []
-        self.restrict_to_workspace = restrict_to_workspace
-        self.allowed_dirs = [Path(p).resolve() for p in (allowed_dirs or [])]
-=======
         self.deny_patterns = (deny_patterns or []) + [
             r"\brm\s+-[rf]{1,2}\b",          # rm -r, rm -rf, rm -fr
             r"\bdel\s+/[fq]\b",              # del /f, del /q
@@ -225,9 +198,9 @@ class ExecTool(Tool):
         if allow_local_preview_access is not None:
             webui_allow_local_service_access = allow_local_preview_access
         self.webui_allow_local_service_access = webui_allow_local_service_access
->>>>>>> origin/main
         self.path_append = path_append
         self.allowed_env_keys = allowed_env_keys or []
+        self.allowed_dirs = [Path(p).expanduser().resolve() for p in (allowed_dirs or [])]
         self._session_manager = session_manager or DEFAULT_EXEC_SESSION_MANAGER
 
     @property
@@ -270,19 +243,12 @@ class ExecTool(Tool):
         return True
 
     async def execute(
-<<<<<<< HEAD
-        self,
-        command: str,
-        working_dir: str | None = None,
-        timeout: int | None = None,
-=======
         self, command: str | None = None, cmd: str | None = None,
         working_dir: str | None = None, workdir: str | None = None,
         timeout: int | None = None, shell: str | None = None,
         login: bool | None = None, yield_time_ms: int | None = None,
         max_output_chars: int | None = None,
         max_output_tokens: int | None = None,
->>>>>>> origin/main
         **kwargs: Any,
     ) -> str:
         command = command or cmd
@@ -419,7 +385,8 @@ class ExecTool(Tool):
                     "Error: working_dir could not be resolved"
                     + _WORKSPACE_BOUNDARY_NOTE
                 )
-            if not is_path_within(requested, resolved_root):
+            allowed_roots = self.allowed_dirs or [resolved_root]
+            if not any(is_path_within(requested, root) for root in allowed_roots):
                 return (
                     "Error: working_dir is outside the configured workspace"
                     + _WORKSPACE_BOUNDARY_NOTE
@@ -469,19 +436,6 @@ class ExecTool(Tool):
 
     @staticmethod
     async def _spawn(
-<<<<<<< HEAD
-        command: str,
-        cwd: str,
-        env: dict[str, str],
-    ) -> asyncio.subprocess.Process:
-        """Launch *command* in a platform-appropriate shell."""
-        if _IS_WINDOWS:
-            comspec = env.get("COMSPEC", os.environ.get("COMSPEC", "cmd.exe"))
-            return await asyncio.create_subprocess_exec(
-                comspec,
-                "/c",
-                command,
-=======
         command: str, cwd: str, env: dict[str, str],
         shell_program: str | None = None,
         login: bool = True,
@@ -502,7 +456,6 @@ class ExecTool(Tool):
             return await asyncio.create_subprocess_shell(
                 command,
                 stdin=stdin,
->>>>>>> origin/main
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=cwd,
@@ -515,15 +468,8 @@ class ExecTool(Tool):
             args.append("-l")
         args.extend(["-c", command])
         return await asyncio.create_subprocess_exec(
-<<<<<<< HEAD
-            bash,
-            "-l",
-            "-c",
-            command,
-=======
             *args,
             stdin=stdin,
->>>>>>> origin/main
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
@@ -643,10 +589,6 @@ class ExecTool(Tool):
                 return "Error: Command blocked by allowlist filter (not in allowlist)"
 
         from nanobot.security.network import contains_internal_url
-<<<<<<< HEAD
-
-        if contains_internal_url(cmd):
-=======
         if contains_internal_url(
             cmd,
             allow_loopback=current_scope_allows_loopback(
@@ -654,7 +596,6 @@ class ExecTool(Tool):
             ),
         ):
             # The runner turns this marker into a non-retryable security hint.
->>>>>>> origin/main
             return "Error: Command blocked by safety guard (internal/private URL detected)"
 
         should_restrict = self.restrict_to_workspace if restrict_to_workspace is None else restrict_to_workspace
@@ -666,13 +607,8 @@ class ExecTool(Tool):
                 )
 
             cwd_path = Path(cwd).resolve()
-            cwd_allowed = [*self.allowed_dirs] if self.allowed_dirs else [cwd_path]
-            path_allowed = [*cwd_allowed, get_media_dir().resolve()]
-
-            def _within(path: Path, bases: list[Path]) -> bool:
-                return any(path == base or base in path.parents for base in bases)
-
-            if not _within(cwd_path, cwd_allowed):
+            allowed_roots = self.allowed_dirs or [cwd_path]
+            if self.allowed_dirs and not any(is_path_within(cwd_path, root) for root in allowed_roots):
                 return "Error: Command blocked by safety guard (working dir outside allowed dirs)"
 
             for raw in self._extract_absolute_paths(cmd):
@@ -687,23 +623,18 @@ class ExecTool(Tool):
                 except Exception:
                     continue
 
-<<<<<<< HEAD
-                if p.is_absolute() and not _within(p, path_allowed):
-                    return "Error: Command blocked by safety guard (path outside working dir)"
-=======
                 if self._is_benign_device_path(str(p)):
                     continue
 
                 media_path = get_media_dir().resolve()
                 if p.is_absolute() and not (
-                    is_path_within(p, cwd_path)
+                    any(is_path_within(p, root) for root in allowed_roots)
                     or is_path_within(p, media_path)
                 ):
                     return (
                         "Error: Command blocked by safety guard (path outside working dir)"
                         + _WORKSPACE_BOUNDARY_NOTE
                     )
->>>>>>> origin/main
 
         return None
 
@@ -718,20 +649,10 @@ class ExecTool(Tool):
     def _extract_absolute_paths(command: str) -> list[str]:
         # Windows: match drive-root paths like `C:\` as well as `C:\path\to\file`, and UNC paths like `\\server\share`
         # NOTE: `*` is required so `C:\` (nothing after the slash) is still extracted.
-<<<<<<< HEAD
-        win_paths = re.findall(r"[A-Za-z]:\\[^\s\"'|><;]*", command)
-        posix_paths = re.findall(
-            r"(?:^|[\s|>'\"])(/[^\s\"'>;|<]+)", command
-        )  # POSIX: /absolute only
-        home_paths = re.findall(
-            r"(?:^|[\s|>'\"])(~[^\s\"'>;|<]*)", command
-        )  # POSIX/Windows home shortcut: ~
-=======
         win_paths = re.findall(
             r"(?<![A-Za-z])(?:[A-Za-z]:[^\s\"'|><;]*|\\\\[^\s\"'|><;]+(?:\\[^\s\"'|><;]+)*)",
             command
         )
         posix_paths = re.findall(r"(?:^|[\s|>'\"])(/[^\s\"'>;|<]+)", command) # POSIX: /absolute only
         home_paths = re.findall(r"(?:^|[\s>'\"])(~[^\s\"'>;|<]*)", command) # POSIX/Windows home shortcut: ~
->>>>>>> origin/main
         return win_paths + posix_paths + home_paths

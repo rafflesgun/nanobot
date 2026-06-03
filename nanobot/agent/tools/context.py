@@ -19,6 +19,7 @@ class RequestContext:
     message_id: str | None = None
     session_key: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    thread_id: int | None = None
 
 
 @runtime_checkable

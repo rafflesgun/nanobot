@@ -56,10 +56,6 @@ docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot onboard
 vim ~/.nanobot/config.json
 
 # Run gateway (connects to enabled channels, e.g. Telegram/Discord/Mochat).
-<<<<<<< HEAD
-# The embedded WebUI is served by the WebSocket channel on port 8765.
-docker run -v ~/.nanobot:/home/nanobot/.nanobot -p 18790:18790 -p 8765:8765 nanobot gateway
-=======
 # Mirrors the security caps and port mappings declared in docker-compose.yml:
 #   - `--cap-drop ALL --cap-add SYS_ADMIN` + unconfined apparmor/seccomp are required
 #     when `tools.exec.sandbox: "bwrap"` is enabled (bwrap needs CAP_SYS_ADMIN for
@@ -73,7 +69,6 @@ docker run \
   -v ~/.nanobot:/home/nanobot/.nanobot \
   -p 18790:18790 -p 8765:8765 \
   nanobot gateway
->>>>>>> origin/main
 
 # Or run a single command
 docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot agent -m "Hello!"

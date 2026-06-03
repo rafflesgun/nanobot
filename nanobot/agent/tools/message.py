@@ -58,14 +58,10 @@ class MessageTool(Tool, ContextAware):
         restrict_to_workspace: bool = False,
     ):
         self._send_callback = send_callback
-<<<<<<< HEAD
-        self._workspace = Path(workspace).expanduser() if workspace is not None else get_workspace_path()
-=======
         self._workspace = (
             Path(workspace).expanduser() if workspace is not None else get_workspace_path()
         )
         self._restrict_to_workspace = restrict_to_workspace
->>>>>>> origin/main
         self._default_channel: ContextVar[str] = ContextVar(
             "message_default_channel", default=default_channel
         )
@@ -75,10 +71,6 @@ class MessageTool(Tool, ContextAware):
         self._default_message_id: ContextVar[str | None] = ContextVar(
             "message_default_message_id",
             default=default_message_id,
-        )
-        self._default_thread_id: ContextVar[int | None] = ContextVar(
-            "message_default_thread_id",
-            default=None,
         )
         self._default_metadata: ContextVar[dict[str, Any]] = ContextVar(
             "message_default_metadata",
@@ -98,22 +90,6 @@ class MessageTool(Tool, ContextAware):
             default=False,
         )
 
-<<<<<<< HEAD
-    def set_context(
-        self,
-        channel: str,
-        chat_id: str,
-        message_id: str | None = None,
-        thread_id: int | None = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> None:
-        """Set the current message context."""
-        self._default_channel.set(channel)
-        self._default_chat_id.set(chat_id)
-        self._default_message_id.set(message_id)
-        self._default_thread_id.set(thread_id)
-        self._default_metadata.set(metadata or {})
-=======
     @classmethod
     def create(cls, ctx: Any) -> Tool:
         send_callback = ctx.bus.publish_outbound if ctx.bus else None
@@ -129,7 +105,6 @@ class MessageTool(Tool, ContextAware):
         self._default_chat_id.set(ctx.chat_id)
         self._default_message_id.set(ctx.message_id)
         self._default_metadata.set(dict(ctx.metadata or {}))
->>>>>>> origin/main
 
     def set_send_callback(self, callback: Callable[[OutboundMessage], Awaitable[None]]) -> None:
         """Set the callback for sending messages."""
@@ -242,7 +217,6 @@ class MessageTool(Tool, ContextAware):
                 "(e.g. anon-…) are not chat ids."
             )
         chat_id = chat_id or default_chat_id
-        thread_id = kwargs.get("thread_id")
         # Only inherit default message_id when targeting the same channel+chat.
         # Cross-chat sends must not carry the original message_id, because
         # some channels (e.g. Feishu) use it to determine the target
@@ -251,11 +225,8 @@ class MessageTool(Tool, ContextAware):
         same_target = channel == default_channel and chat_id == default_chat_id
         if same_target:
             message_id = message_id or self._default_message_id.get()
-            if thread_id is None:
-                thread_id = self._default_thread_id.get()
         else:
             message_id = None
-            thread_id = None
 
         if not channel or not chat_id:
             return "Error: No target channel/chat specified"
@@ -270,15 +241,9 @@ class MessageTool(Tool, ContextAware):
                 return f"Error: media path is not allowed: {str(e)}"
 
         metadata = dict(self._default_metadata.get()) if same_target else {}
-        if message_id is not None:
+        if message_id:
             metadata["message_id"] = message_id
-<<<<<<< HEAD
-        if thread_id is not None:
-            metadata["message_thread_id"] = thread_id
-        if self._record_channel_delivery_var.get():
-=======
         if self._record_channel_delivery_var.get() or media:
->>>>>>> origin/main
             metadata["_record_channel_delivery"] = True
 
         msg = OutboundMessage(

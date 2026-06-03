@@ -56,7 +56,6 @@ class BaseChannel(ABC):
         try:
             if self.transcription_provider == "openai":
                 from nanobot.providers.transcription import OpenAITranscriptionProvider
-
                 provider = OpenAITranscriptionProvider(
                     api_key=self.transcription_api_key,
                     api_base=self.transcription_api_base or None,
@@ -64,7 +63,6 @@ class BaseChannel(ABC):
                 )
             else:
                 from nanobot.providers.transcription import GroqTranscriptionProvider
-
                 provider = GroqTranscriptionProvider(
                     api_key=self.transcription_api_key,
                     api_base=self.transcription_api_base or None,
@@ -117,9 +115,7 @@ class BaseChannel(ABC):
         """
         pass
 
-    async def send_delta(
-        self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None
-    ) -> None:
+    async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
         """Deliver a streaming text chunk.
 
         Override in subclasses to enable streaming. Implementations should
@@ -195,11 +191,7 @@ class BaseChannel(ABC):
     def supports_streaming(self) -> bool:
         """True when config enables streaming AND this subclass implements send_delta."""
         cfg = self.config
-        streaming = (
-            cfg.get("streaming", False)
-            if isinstance(cfg, dict)
-            else getattr(cfg, "streaming", False)
-        )
+        streaming = cfg.get("streaming", False) if isinstance(cfg, dict) else getattr(cfg, "streaming", False)
         return bool(streaming) and type(self).send_delta is not BaseChannel.send_delta
 
     def is_allowed(self, sender_id: str) -> bool:
@@ -210,17 +202,12 @@ class BaseChannel(ABC):
             allow_list = getattr(self.config, "allow_from", None) or []
         if "*" in allow_list:
             return True
-<<<<<<< HEAD
-        sender_str = str(sender_id)
-        return sender_str in allow_list
-=======
         # allowFrom entries are opaque tokens — must match exactly.
         if str(sender_id) in allow_list:
             return True
         if is_approved(self.name, str(sender_id)):
             return True
         return False
->>>>>>> origin/main
 
     async def _handle_message(
         self,
@@ -234,14 +221,6 @@ class BaseChannel(ABC):
     ) -> None:
         """Handle an incoming message: check permissions, issue pairing codes in DMs, or forward to bus."""
         if not self.is_allowed(sender_id):
-<<<<<<< HEAD
-            logger.warning(
-                "Access denied for sender {} on channel {}. "
-                "Add them to allowFrom list in config to grant access.",
-                sender_id,
-                self.name,
-            )
-=======
             if is_dm:
                 code = generate_code(self.name, str(sender_id))
                 await self.send(
@@ -262,7 +241,6 @@ class BaseChannel(ABC):
                     "Add them to allowFrom list in config to grant access.",
                     sender_id,
                 )
->>>>>>> origin/main
             return
 
         meta = metadata or {}

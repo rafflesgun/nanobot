@@ -19,7 +19,6 @@ from nanobot.utils.helpers import image_placeholder_text
 @dataclass
 class ToolCallRequest:
     """A tool call request from the LLM."""
-
     id: str
     name: str
     arguments: dict[str, Any]
@@ -42,16 +41,13 @@ class ToolCallRequest:
         if self.provider_specific_fields:
             tool_call["provider_specific_fields"] = self.provider_specific_fields
         if self.function_provider_specific_fields:
-            tool_call["function"]["provider_specific_fields"] = (
-                self.function_provider_specific_fields
-            )
+            tool_call["function"]["provider_specific_fields"] = self.function_provider_specific_fields
         return tool_call
 
 
 @dataclass
 class LLMResponse:
     """Response from an LLM provider."""
-
     content: str | None
     tool_calls: list[ToolCallRequest] = field(default_factory=list)
     finish_reason: str = "stop"
@@ -120,28 +116,24 @@ class LLMProvider(ABC):
     )
     _RETRYABLE_STATUS_CODES = frozenset({408, 409, 429})
     _TRANSIENT_ERROR_KINDS = frozenset({"timeout", "connection"})
-    _NON_RETRYABLE_429_ERROR_TOKENS = frozenset(
-        {
-            "insufficient_quota",
-            "quota_exceeded",
-            "quota_exhausted",
-            "billing_hard_limit_reached",
-            "insufficient_balance",
-            "credit_balance_too_low",
-            "billing_not_active",
-            "payment_required",
-        }
-    )
-    _RETRYABLE_429_ERROR_TOKENS = frozenset(
-        {
-            "rate_limit_exceeded",
-            "rate_limit_error",
-            "too_many_requests",
-            "request_limit_exceeded",
-            "requests_limit_exceeded",
-            "overloaded_error",
-        }
-    )
+    _NON_RETRYABLE_429_ERROR_TOKENS = frozenset({
+        "insufficient_quota",
+        "quota_exceeded",
+        "quota_exhausted",
+        "billing_hard_limit_reached",
+        "insufficient_balance",
+        "credit_balance_too_low",
+        "billing_not_active",
+        "payment_required",
+    })
+    _RETRYABLE_429_ERROR_TOKENS = frozenset({
+        "rate_limit_exceeded",
+        "rate_limit_error",
+        "too_many_requests",
+        "request_limit_exceeded",
+        "requests_limit_exceeded",
+        "overloaded_error",
+    })
     _NON_RETRYABLE_429_TEXT_MARKERS = (
         "insufficient_quota",
         "insufficient quota",
@@ -176,8 +168,6 @@ class LLMProvider(ABC):
         self.api_key = api_key
         self.api_base = api_base
         self.generation: GenerationSettings = GenerationSettings()
-        self._active_request_count = 0
-        self._request_seq = 0
 
     @staticmethod
     def _sanitize_empty_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -188,11 +178,7 @@ class LLMProvider(ABC):
 
             if isinstance(content, str) and not content:
                 clean = dict(msg)
-                clean["content"] = (
-                    None
-                    if (msg.get("role") == "assistant" and msg.get("tool_calls"))
-                    else "(empty)"
-                )
+                clean["content"] = None if (msg.get("role") == "assistant" and msg.get("tool_calls")) else "(empty)"
                 result.append(clean)
                 continue
 
@@ -389,7 +375,10 @@ class LLMProvider(ABC):
     def _is_retryable_429_response(cls, response: LLMResponse) -> bool:
         type_token = cls._normalize_error_token(response.error_type)
         code_token = cls._normalize_error_token(response.error_code)
-        semantic_tokens = {token for token in (type_token, code_token) if token is not None}
+        semantic_tokens = {
+            token for token in (type_token, code_token)
+            if token is not None
+        }
         if any(token in cls._NON_RETRYABLE_429_ERROR_TOKENS for token in semantic_tokens):
             return False
 
@@ -551,13 +540,9 @@ class LLMProvider(ABC):
         """
         _ = on_thinking_delta, on_tool_call_delta
         response = await self.chat(
-            messages=messages,
-            tools=tools,
-            model=model,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            reasoning_effort=reasoning_effort,
-            tool_choice=tool_choice,
+            messages=messages, tools=tools, model=model,
+            max_tokens=max_tokens, temperature=temperature,
+            reasoning_effort=reasoning_effort, tool_choice=tool_choice,
         )
         if on_content_delta and response.content:
             await on_content_delta(response.content)
@@ -585,7 +570,6 @@ class LLMProvider(ABC):
         on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         retry_mode: str = "standard",
-        on_retry: Callable[[int, int], None] | None = None,
         on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         """Call chat_stream() with retry on transient provider failures."""
@@ -606,27 +590,6 @@ class LLMProvider(ABC):
                 await on_content_delta(text)
 
         kw: dict[str, Any] = dict(
-<<<<<<< HEAD
-            messages=messages,
-            tools=tools,
-            model=model,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            reasoning_effort=reasoning_effort,
-            tool_choice=tool_choice,
-            on_content_delta=on_content_delta,
-        )
-        self._request_seq += 1
-        request_id = self._request_seq
-        self._active_request_count += 1
-        logger.debug(
-            "LLM request start id={} model={} stream={} retry_mode={} inflight={}",
-            request_id,
-            model,
-            True,
-            retry_mode,
-            self._active_request_count,
-=======
             messages=messages, tools=tools, model=model,
             max_tokens=max_tokens, temperature=temperature,
             reasoning_effort=reasoning_effort, tool_choice=tool_choice,
@@ -641,27 +604,7 @@ class LLMProvider(ABC):
             retry_mode=retry_mode,
             on_retry_wait=on_retry_wait,
             should_retry_guard=lambda: not has_streamed_content,
->>>>>>> origin/main
         )
-        try:
-            return await self._run_with_retry(
-                self._safe_chat_stream,
-                kw,
-                messages,
-                retry_mode=retry_mode,
-                on_retry=on_retry,
-                on_retry_wait=on_retry_wait,
-                request_id=request_id,
-            )
-        finally:
-            self._active_request_count = max(0, self._active_request_count - 1)
-            logger.debug(
-                "LLM request end id={} model={} stream={} inflight={}",
-                request_id,
-                model,
-                True,
-                self._active_request_count,
-            )
 
     async def chat_with_retry(
         self,
@@ -673,7 +616,6 @@ class LLMProvider(ABC):
         reasoning_effort: object = _SENTINEL,
         tool_choice: str | dict[str, Any] | None = None,
         retry_mode: str = "standard",
-        on_retry: Callable[[int, int], None] | None = None,
         on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         """Call chat() with retry on transient provider failures.
@@ -693,44 +635,17 @@ class LLMProvider(ABC):
             reasoning_effort = self.generation.reasoning_effort
 
         kw: dict[str, Any] = dict(
-            messages=messages,
-            tools=tools,
-            model=model,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            reasoning_effort=reasoning_effort,
-            tool_choice=tool_choice,
+            messages=messages, tools=tools, model=model,
+            max_tokens=max_tokens, temperature=temperature,
+            reasoning_effort=reasoning_effort, tool_choice=tool_choice,
         )
-        self._request_seq += 1
-        request_id = self._request_seq
-        self._active_request_count += 1
-        logger.debug(
-            "LLM request start id={} model={} stream={} retry_mode={} inflight={}",
-            request_id,
-            model,
-            False,
-            retry_mode,
-            self._active_request_count,
+        return await self._run_with_retry(
+            self._safe_chat,
+            kw,
+            messages,
+            retry_mode=retry_mode,
+            on_retry_wait=on_retry_wait,
         )
-        try:
-            return await self._run_with_retry(
-                self._safe_chat,
-                kw,
-                messages,
-                retry_mode=retry_mode,
-                on_retry=on_retry,
-                on_retry_wait=on_retry_wait,
-                request_id=request_id,
-            )
-        finally:
-            self._active_request_count = max(0, self._active_request_count - 1)
-            logger.debug(
-                "LLM request end id={} model={} stream={} inflight={}",
-                request_id,
-                model,
-                False,
-                self._active_request_count,
-            )
 
     @classmethod
     def _extract_retry_after(cls, content: str | None) -> float | None:
@@ -834,14 +749,8 @@ class LLMProvider(ABC):
         original_messages: list[dict[str, Any]],
         *,
         retry_mode: str,
-<<<<<<< HEAD
-        on_retry: Callable[[int, int], None] | None = None,
-        on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
-        request_id: int | None = None,
-=======
         on_retry_wait: Callable[[str], Awaitable[None]] | None,
         should_retry_guard: Callable[[], bool] | None = None,
->>>>>>> origin/main
     ) -> LLMResponse:
         attempt = 0
         delays = list(self._CHAT_RETRY_DELAYS)
@@ -855,16 +764,12 @@ class LLMProvider(ABC):
             if response.finish_reason != "error":
                 return response
             last_response = response
-<<<<<<< HEAD
-            error_key = (response.content or "").strip().lower() or None
-=======
             if should_retry_guard is not None and not should_retry_guard():
                 logger.warning(
                     "LLM stream failed after content was emitted; skipping retry"
                 )
                 return response
             error_key = ((response.content or "").strip().lower() or None)
->>>>>>> origin/main
             if error_key and error_key == last_error_key:
                 identical_error_count += 1
             else:
@@ -901,15 +806,14 @@ class LLMProvider(ABC):
 
             if not persistent and attempt > len(delays):
                 logger.warning(
-                    "LLM request failed id={} model={} inflight={} after {} retries, giving up: {}",
-                    request_id,
-                    kw.get("model"),
-                    self._active_request_count,
+                    "LLM request failed after {} retries, giving up: {}",
                     attempt,
                     (response.content or "")[:120].lower(),
                 )
                 if on_retry_wait:
-                    await on_retry_wait(f"Model request failed after {attempt} retries, giving up.")
+                    await on_retry_wait(
+                        f"Model request failed after {attempt} retries, giving up."
+                    )
                 break
 
             base_delay = delays[min(attempt - 1, len(delays) - 1)]
@@ -918,17 +822,12 @@ class LLMProvider(ABC):
                 delay = min(delay, self._PERSISTENT_MAX_DELAY)
 
             logger.warning(
-                "LLM transient error id={} model={} inflight={} (attempt {}{}), retrying in {}s: {}",
-                request_id,
-                kw.get("model"),
-                self._active_request_count,
+                "LLM transient error (attempt {}{}), retrying in {}s: {}",
                 attempt,
                 "+" if persistent and attempt > len(delays) else f"/{len(delays)}",
                 int(round(delay)),
                 (response.content or "")[:120].lower(),
             )
-            if on_retry:
-                on_retry(attempt, len(delays) if not persistent else attempt)
             await self._sleep_with_heartbeat(
                 delay,
                 attempt=attempt,
