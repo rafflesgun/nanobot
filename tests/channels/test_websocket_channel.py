@@ -1802,7 +1802,7 @@ def test_settings_payload_exposes_api_type_only_for_openai(monkeypatch, tmp_path
 def test_settings_payload_reports_workspace_sandbox(monkeypatch, tmp_path) -> None:
     config_path = tmp_path / "config.json"
     config = Config()
-    config.tools.restrict_to_workspace = True
+    config.tools.restrict_to_workspace.enabled = True
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     monkeypatch.setenv("NANOBOT_SANDBOX_ENFORCED", "macos_app_sandbox")

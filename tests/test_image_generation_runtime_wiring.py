@@ -13,14 +13,17 @@ from nanobot.bus import MessageBus
 from nanobot.config.schema import Config
 
 
-def _agent_loop_calls(function) -> list[ast.Call]:
+def _from_config_calls(function) -> list[ast.Call]:
+    """Find AgentLoop.from_config(...) calls in *function* source."""
     tree = ast.parse(textwrap.dedent(inspect.getsource(function)))
     return [
         node
         for node in ast.walk(tree)
         if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "AgentLoop"
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "from_config"
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "AgentLoop"
     ]
 
 
@@ -59,7 +62,10 @@ def _calls_method(node: ast.AST, receiver: str, method: str, args: tuple[str, ..
     return all(isinstance(arg, ast.Name) and arg.id == expected for arg, expected in zip(node.args, args))
 
 
-def test_agent_loop_does_not_register_image_generation_without_runtime_opt_in(tmp_path: Path) -> None:
+# -- AgentLoop direct tests ---------------------------------------------------
+
+def test_agent_loop_registers_image_generation_when_tools_config_enables(tmp_path: Path) -> None:
+    """Image generation is always registered via ToolLoader when tools config enables it."""
     config = Config.model_validate(
         {
             "providers": {"openai": {"apiKey": "image-key", "apiBase": "https://api.openai.com/v1"}},
@@ -74,29 +80,7 @@ def test_agent_loop_does_not_register_image_generation_without_runtime_opt_in(tm
         provider=provider,
         workspace=tmp_path,
         tools_config=config.tools,
-        image_generation_provider=config.providers.openai,
-    )
-
-    assert loop.tools.get("generate_image") is None
-
-
-def test_agent_loop_registers_image_generation_with_runtime_opt_in(tmp_path: Path) -> None:
-    config = Config.model_validate(
-        {
-            "providers": {"openai": {"apiKey": "image-key", "apiBase": "https://api.openai.com/v1"}},
-            "tools": {"imageGeneration": {"enabled": True}},
-        }
-    )
-    provider = MagicMock()
-    provider.get_default_model.return_value = "test-model"
-
-    loop = AgentLoop(
-        bus=MessageBus(),
-        provider=provider,
-        workspace=tmp_path,
-        tools_config=config.tools,
-        image_generation_provider=config.providers.openai,
-        enable_image_generation_tool=True,
+        image_generation_provider_config=config.providers.openai,
     )
 
     assert isinstance(loop.tools.get("generate_image"), GenerateImageTool)
@@ -122,8 +106,7 @@ def test_agent_loop_registers_image_generation_with_custom_provider(tmp_path: Pa
         provider=provider,
         workspace=tmp_path,
         tools_config=config.tools,
-        image_generation_provider=config.get_image_generation_provider(),
-        enable_image_generation_tool=True,
+        image_generation_provider_configs={"custom": config.providers.custom},
     )
 
     assert isinstance(loop.tools.get("generate_image"), GenerateImageTool)
@@ -138,52 +121,34 @@ def test_agent_loop_imports_image_generation_only_inside_enabled_registration_bl
     assert all(node.module != "nanobot.image_generation" for node in top_level_imports)
 
 
-def test_serve_agent_loop_does_not_enable_image_generation() -> None:
-    calls = _agent_loop_calls(cli_commands.serve)
+# -- CLI serve tests ----------------------------------------------------------
+
+def test_serve_passes_image_generation_provider_configs() -> None:
+    """The serve command passes image_generation_provider_configs to AgentLoop."""
+    calls = _from_config_calls(cli_commands.serve)
 
     assert len(calls) == 1
-    value = _keyword_value(calls[0], "enable_image_generation_tool")
-    assert value is None or (isinstance(value, ast.Constant) and value.value is False)
+    value = _keyword_value(calls[0], "image_generation_provider_configs")
+    assert value is not None
 
 
-def test_gateway_agent_loop_passes_openai_provider() -> None:
-    calls = _agent_loop_calls(cli_commands._run_gateway)
+# -- Gateway tests ------------------------------------------------------------
+
+def test_gateway_passes_image_generation_provider_configs() -> None:
+    """The gateway passes image_generation_provider_configs via from_config."""
+    calls = _from_config_calls(cli_commands._run_gateway)
 
     assert len(calls) == 1
-    value = _keyword_value(calls[0], "image_generation_provider")
+    value = _keyword_value(calls[0], "image_generation_provider_configs")
     assert value is not None
     assert isinstance(value, ast.Call)
-    assert isinstance(value.func, ast.Attribute)
-    assert value.func.attr == "get_image_generation_provider"
-    assert _is_attribute_chain(value.func.value, ("config",))
+    assert isinstance(value.func, ast.Name)
+    assert value.func.id == "image_gen_provider_configs"
 
 
-def test_gateway_agent_loop_enables_image_generation() -> None:
-    calls = _agent_loop_calls(cli_commands._run_gateway)
-
-    assert len(calls) == 1
-    value = _keyword_value(calls[0], "enable_image_generation_tool")
-    assert isinstance(value, ast.Constant)
-    assert value.value is True
-
-
-def test_cli_agent_loop_does_not_enable_image_generation() -> None:
-    calls = _agent_loop_calls(cli_commands.agent)
-
-    assert len(calls) == 1
-    value = _keyword_value(calls[0], "enable_image_generation_tool")
-    assert value is None or (isinstance(value, ast.Constant) and value.value is False)
-
-
-def test_programmatic_nanobot_does_not_enable_image_generation() -> None:
-    calls = _agent_loop_calls(nanobot_facade.Nanobot.from_config.__func__)
-
-    assert len(calls) == 1
-    value = _keyword_value(calls[0], "enable_image_generation_tool")
-    assert value is None or (isinstance(value, ast.Constant) and value.value is False)
-
-
-def test_gateway_routes_image_generation_outputs_to_channels() -> None:
+def test_gateway_no_longer_imports_generate_image_tool() -> None:
+    """The gateway no longer imports GenerateImageTool explicitly;
+    ToolLoader handles registration."""
     tree = _function_tree(cli_commands._run_gateway)
     imports_generate_image_tool = any(
         isinstance(node, ast.ImportFrom)
@@ -191,34 +156,26 @@ def test_gateway_routes_image_generation_outputs_to_channels() -> None:
         and any(alias.name == "GenerateImageTool" for alias in node.names)
         for node in ast.walk(tree)
     )
-    image_tool_lookup = any(
-        isinstance(node, ast.Assign)
-        and any(isinstance(target, ast.Name) and target.id == "image_tool" for target in node.targets)
-        and isinstance(node.value, ast.Call)
-        and isinstance(node.value.func, ast.Attribute)
-        and node.value.func.attr == "get"
-        and node.value.args
-        and isinstance(node.value.args[0], ast.Constant)
-        and node.value.args[0].value == "generate_image"
-        for node in ast.walk(tree)
-    )
-    callback_wired_after_type_check = any(
-        isinstance(node, ast.If)
-        and isinstance(node.test, ast.Call)
-        and isinstance(node.test.func, ast.Name)
-        and node.test.func.id == "isinstance"
-        and len(node.test.args) == 2
-        and isinstance(node.test.args[0], ast.Name)
-        and node.test.args[0].id == "image_tool"
-        and isinstance(node.test.args[1], ast.Name)
-        and node.test.args[1].id == "GenerateImageTool"
-        and any(
-            _calls_method(child, "image_tool", "set_send_callback", ("_deliver_to_channel",))
-            for child in ast.walk(node)
-        )
-        for node in ast.walk(tree)
-    )
+    assert not imports_generate_image_tool
 
-    assert imports_generate_image_tool
-    assert image_tool_lookup
-    assert callback_wired_after_type_check
+
+# -- CLI agent tests ----------------------------------------------------------
+
+def test_cli_agent_passes_image_generation_provider_configs() -> None:
+    """The CLI agent command passes image_generation_provider_configs via from_config."""
+    calls = _from_config_calls(cli_commands.agent)
+
+    assert len(calls) == 1
+    value = _keyword_value(calls[0], "image_generation_provider_configs")
+    assert value is not None
+
+
+# -- Programmatic nanobot tests ------------------------------------------------
+
+def test_programmatic_nanobot_passes_image_generation_provider_configs() -> None:
+    """Nanobot.from_config passes image_generation_provider_configs."""
+    calls = _from_config_calls(nanobot_facade.Nanobot.from_config.__func__)
+
+    assert len(calls) == 1
+    value = _keyword_value(calls[0], "image_generation_provider_configs")
+    assert value is not None

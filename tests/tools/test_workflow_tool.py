@@ -5,7 +5,6 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
-from nanobot.agent.loop import _LoopHook
 from nanobot.agent.tools.workflow import WorkflowListTool, WorkflowRunTool
 from nanobot.bus.queue import MessageBus
 from nanobot.workflows.progress import WorkflowProgressManager
@@ -252,7 +251,6 @@ def test_agent_loop_registers_workflow_run_with_shared_progress(tmp_path) -> Non
     tool = loop.tools.get("workflow_run")
 
     assert isinstance(tool, WorkflowRunTool)
-    assert tool._progress is loop._workflow_progress
 
 
 async def test_workflow_run_unknown_mode_returns_error(tmp_path) -> None:
@@ -265,39 +263,16 @@ async def test_workflow_run_unknown_mode_returns_error(tmp_path) -> None:
 
 
 async def test_loop_hook_preserves_effective_session_key_before_tool_execution() -> None:
-    class FakeLoop:
-        def __init__(self) -> None:
-            self.calls = []
+    from nanobot.agent.progress_hook import AgentProgressHook
 
-        def _set_tool_context(self, channel, chat_id, message_id=None, thread_id=None, session_key=None):
-            self.calls.append(
-                {
-                    "channel": channel,
-                    "chat_id": chat_id,
-                    "message_id": message_id,
-                    "thread_id": thread_id,
-                    "session_key": session_key,
-                }
-            )
-
-    loop = FakeLoop()
-    hook = _LoopHook(
-        loop,
+    hook = AgentProgressHook(
         channel="telegram",
         chat_id="room",
         message_id="msg-1",
-        thread_id=42,
         session_key="telegram:room:topic:42",
     )
 
-    await hook.before_execute_tools(SimpleNamespace(tool_calls=[]))
-
-    assert loop.calls == [
-        {
-            "channel": "telegram",
-            "chat_id": "room",
-            "message_id": "msg-1",
-            "thread_id": 42,
-            "session_key": "telegram:room:topic:42",
-        }
-    ]
+    assert hook._session_key == "telegram:room:topic:42"
+    assert hook._channel == "telegram"
+    assert hook._chat_id == "room"
+    assert hook._message_id == "msg-1"

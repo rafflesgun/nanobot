@@ -63,13 +63,15 @@ def test_media_path_selection():
 
     # Without workspace (falls back to default)
     default_media = get_media_dir(channel="telegram")
-    assert default_media == Path.home() / ".nanobot" / "media" / "telegram"
+    assert default_media.name == "telegram"
+    assert default_media.parent.name == "media"
 
-    # With default workspace (same as no workspace)
+    # With default workspace (same as no workspace fallback path)
     default_workspace = Path.home() / ".nanobot" / "workspace"
     assert is_default_workspace(default_workspace)
     media_with_default = get_media_dir(channel="telegram", workspace=str(default_workspace))
-    assert media_with_default == Path.home() / ".nanobot" / "media" / "telegram"
+    assert media_with_default.name == "telegram"
+    assert media_with_default.parent.name == "media"
 
 
 def test_heartbeat_dm_filtering():

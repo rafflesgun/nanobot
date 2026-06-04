@@ -105,12 +105,17 @@ async def test_bootstrap_returns_token_for_localhost(
 
 
 def test_bootstrap_allows_remote_when_bound_to_all_interfaces(bus: MagicMock) -> None:
-    channel = _ch(bus, host="0.0.0.0")
+    channel = _ch(bus, host="0.0.0.0", token="my-token")
 
     class _Connection:
         remote_address = ("8.8.8.8", 54321)
 
-    assert channel._allows_webui_bootstrap(_Connection()) is True
+    class _FakeReq:
+        headers = {"Authorization": "Bearer my-token"}
+        path = "/webui/bootstrap"
+
+    resp = channel._handle_bootstrap(_Connection(), _FakeReq())
+    assert resp.status_code == 200
 
 
 def test_bootstrap_rejects_remote_when_bound_to_loopback(bus: MagicMock) -> None:
@@ -119,7 +124,12 @@ def test_bootstrap_rejects_remote_when_bound_to_loopback(bus: MagicMock) -> None
     class _Connection:
         remote_address = ("8.8.8.8", 54321)
 
-    assert channel._allows_webui_bootstrap(_Connection()) is False
+    class _FakeReq:
+        headers = {}
+        path = "/webui/bootstrap"
+
+    resp = channel._handle_bootstrap(_Connection(), _FakeReq())
+    assert resp.status_code == 403
 
 
 @pytest.mark.asyncio

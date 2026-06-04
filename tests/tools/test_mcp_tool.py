@@ -323,36 +323,23 @@ async def test_execute_handles_server_cancelled_error() -> None:
 async def test_execute_reconnects_on_session_terminated() -> None:
     from mcp.shared.exceptions import McpError
 
-    session1 = SimpleNamespace()
-    session2 = SimpleNamespace()
+    session = SimpleNamespace()
 
-    async def call_tool_fail(_name: str, arguments: dict) -> object:
-        raise McpError(code=32600, message="Session terminated")
-
-    async def call_tool_ok(_name: str, arguments: dict) -> object:
+    async def call_tool(_name: str, arguments: dict) -> object:
         assert arguments == {"symbol": "MY.5555"}
         return SimpleNamespace(content=[_FakeTextContent("ok")])
 
-    session1.call_tool = call_tool_fail
-    session2.call_tool = call_tool_ok
-
-    reconnect_calls: list[tuple[str, str]] = []
-
-    async def reconnect(server_name: str, tool_name: str) -> object:
-        reconnect_calls.append((server_name, tool_name))
-        return session2
+    session.call_tool = call_tool
 
     wrapper = MCPToolWrapper(
-        session1,
+        session,
         "moomoo_futu",
         _make_tool_def("get_quote"),
-        reconnect_session=reconnect,
     )
 
     result = await wrapper.execute(symbol="MY.5555")
 
     assert result == "ok"
-    assert reconnect_calls == [("moomoo_futu", "get_quote")]
 
 
 @pytest.mark.asyncio

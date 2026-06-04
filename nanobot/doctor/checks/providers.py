@@ -18,7 +18,7 @@ _PROBE_TIMEOUT_S = 5.0
 def run_provider_checks(config: Config, *, live: bool) -> list[DoctorCheckResult]:
     """Validate the selected default provider using local config only."""
     agent = config.agents.defaults
-    provider_name = config.get_provider_name(agent.model, agent=agent) or agent.provider
+    provider_name = config.get_provider_name(agent.model) or agent.provider
     results: list[DoctorCheckResult] = []
 
     spec = find_by_name(provider_name) if provider_name else None
@@ -98,7 +98,7 @@ async def _probe_provider_async(config: Config, provider_name: str) -> tuple[boo
     if spec is None:
         return False, f"Provider live probe could not resolve provider '{provider_name}'."
 
-    api_key = config.get_api_key(agent=config.agents.defaults)
+    api_key = config.get_api_key(config.agents.defaults.model)
     api_base = config.get_api_base(agent=config.agents.defaults)
     provider_cfg = getattr(config.providers, spec.name, None)
     extra_headers = provider_cfg.extra_headers if isinstance(provider_cfg, ProviderConfig) else None

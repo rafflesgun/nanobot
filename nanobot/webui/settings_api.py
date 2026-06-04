@@ -675,7 +675,7 @@ def settings_payload(
 
     exec_config = config.tools.exec
     sandbox_status = workspace_sandbox_status(
-        restrict_to_workspace=config.tools.restrict_to_workspace,
+        restrict_to_workspace=getattr(config.tools.restrict_to_workspace, 'enabled', config.tools.restrict_to_workspace),
         workspace=config.workspace_path,
     )
     payload = {
@@ -748,7 +748,7 @@ def settings_payload(
             "unified_session": defaults.unified_session,
         },
         "advanced": {
-            "restrict_to_workspace": config.tools.restrict_to_workspace,
+            "restrict_to_workspace": (config.tools.restrict_to_workspace.model_dump() if hasattr(config.tools.restrict_to_workspace, 'model_dump') else bool(config.tools.restrict_to_workspace)),
             "workspace_sandbox": sandbox_status.as_dict(),
             "webui_allow_local_service_access": config.tools.webui_allow_local_service_access,
             "allow_local_preview_access": config.tools.webui_allow_local_service_access,
