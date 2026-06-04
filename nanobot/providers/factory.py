@@ -129,7 +129,18 @@ def _resolve_fallback_presets(config: Config, primary: ModelPresetConfig) -> lis
     presets: list[ModelPresetConfig] = []
     for fallback in config.agents.defaults.fallback_models:
         if isinstance(fallback, str):
-            presets.append(config.model_presets[fallback])
+            if fallback in config.model_presets:
+                presets.append(config.model_presets[fallback])
+            else:
+                # Raw model ID — create a minimal preset inheriting provider from primary
+                presets.append(ModelPresetConfig(
+                    model=fallback,
+                    provider=primary.provider,
+                    max_tokens=primary.max_tokens,
+                    context_window_tokens=primary.context_window_tokens,
+                    temperature=primary.temperature,
+                    reasoning_effort=primary.reasoning_effort,
+                ))
         else:
             presets.append(_inline_fallback_preset(primary, fallback))
     return presets
