@@ -443,7 +443,14 @@ class Config(BaseSettings):
             raise ValueError(f"model_preset {name!r} not found in model_presets")
         # Merge root-level unknown keys into agents so dynamic sub-agent profiles
         # defined at config root ALSO work as agents.* profile overrides.
+        # Both flat keys (e.g. "recall": {model:...}) and container keys
+        # (e.g. "subagents": {"recall": {model:...}}) are supported.
+        # A value is treated as a sub-agent profile if it has "model" or "provider".
         extra = object.__getattribute__(self, "__pydantic_extra__") or {}
+        try:
+            agents_extra = object.__getattribute__(self.agents, "__pydantic_extra__")
+        except AttributeError:
+            agents_extra = {}
         for key in list(extra):
             if key in {"agents", "channels", "providers", "api", "gateway", "tools", "model_presets"}:
                 continue
@@ -452,8 +459,18 @@ class Config(BaseSettings):
             if hasattr(self.agents, key):
                 continue
             value = extra.pop(key)
-            if isinstance(value, dict):
-                object.__getattribute__(self.agents, "__pydantic_extra__")[key] = value
+            if not isinstance(value, dict):
+                continue
+            # Container of sub-agent profiles — flatten its children
+            if all(isinstance(v, dict) for v in value.values()):
+                for child_key, child_val in value.items():
+                    if child_key not in agents_extra and isinstance(child_val, dict) and (
+                        "model" in child_val or "provider" in child_val
+                    ):
+                        agents_extra[child_key] = child_val
+            # Direct sub-agent profile
+            elif "model" in value or "provider" in value:
+                agents_extra[key] = value
         return self
 
     def resolve_default_preset(self) -> ModelPresetConfig:
