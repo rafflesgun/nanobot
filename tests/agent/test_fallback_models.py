@@ -128,3 +128,55 @@ async def test_process_direct_falls_back_on_temporarily_unavailable_error(tmp_pa
     assert response is not None
     assert response.content == "reply via fallback-model"
     assert seen_models == ["primary-model", "fallback-model"]
+
+
+def test_raw_model_id_fallback_in_factory() -> None:
+    """Raw model IDs (not in model_presets) work as fallback entries."""
+    from nanobot.config.schema import Config
+    from nanobot.providers.factory import _resolve_fallback_presets
+
+    config = Config.model_validate({
+        "agents": {
+            "defaults": {
+                "model": "nvd-qwen-3.5-122b",
+                "fallbackModels": ["nvd-kimi-k26", "op-gemma-4"],
+                "provider": "custom",
+            },
+        },
+        "modelPresets": {},
+    })
+    primary = config.resolve_preset()
+    presets = _resolve_fallback_presets(config, primary)
+
+    assert len(presets) == 2
+    assert presets[0].model == "nvd-kimi-k26"
+    assert presets[0].provider == "custom"
+    assert presets[1].model == "op-gemma-4"
+    assert presets[1].provider == "custom"
+
+
+def test_mixed_preset_refs_and_raw_ids_in_fallback() -> None:
+    """Fallback list can mix preset refs and raw model IDs."""
+    from nanobot.config.schema import Config
+    from nanobot.providers.factory import _resolve_fallback_presets
+
+    config = Config.model_validate({
+        "agents": {
+            "defaults": {
+                "model": "main",
+                "fallbackModels": ["helper", "raw-gpt-5"],
+                "provider": "openai",
+            },
+        },
+        "modelPresets": {
+            "helper": {"model": "gpt-4o-mini", "provider": "openai", "temperature": 0.5},
+        },
+    })
+    primary = config.resolve_preset()
+    presets = _resolve_fallback_presets(config, primary)
+
+    assert len(presets) == 2
+    assert presets[0].model == "gpt-4o-mini"
+    assert presets[0].temperature == 0.5
+    assert presets[1].model == "raw-gpt-5"
+    assert presets[1].provider == "openai"

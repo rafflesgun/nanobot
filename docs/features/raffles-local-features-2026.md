@@ -172,6 +172,7 @@ pytest tests/agent/test_configured_subagents.py tests/agent/test_task_cancel.py 
 **Files**
 - nanobot/config/schema.py → AgentDefaults.fallback_models (list[str])
 - nanobot/agent/loop.py → ordered fallback chain helper + loop-level failover execution
+- nanobot/providers/factory.py → `_resolve_fallback_presets` accepts raw model IDs as fallback strings
 - nanobot/cli/commands.py → wiring of fallback_models to AgentLoop
 - nanobot/agent/subagent.py → SubagentManager keeps the same fallback config surface
 
@@ -196,6 +197,7 @@ Keep the list-based fallback config:
 - Skip duplicates and skip the already-selected primary model
 - The effective primary model is `model_override` when present, otherwise the configured default model
 - Keep the debug logs that show the ordered fallback chain and the next fallback model selected after an eligible failure
+- **Raw model IDs are supported** in `fallbackModels`: string entries not found in `model_presets` are treated as raw model identifiers and auto-wrapped into a minimal `ModelPresetConfig` inheriting provider/context_window/temperature from the primary preset. This is handled in `nanobot/providers/factory.py:_resolve_fallback_presets()`.
 
 **Config example**
 ```json
@@ -207,10 +209,21 @@ Keep the list-based fallback config:
   }
 }
 ```
+Also valid with raw model IDs:
+```json
+{
+  "agents": {
+    "defaults": {
+      "fallbackModels": ["nvd-kimi-k26", "op-gemma-4"]
+    }
+  }
+}
+```
 
 **Quick validation**
 ```bash
 pytest tests/agent/test_fallback_models.py tests/config/test_config_migration.py tests/cli/test_commands.py -q
+# Also covers: test_raw_model_id_fallback_in_factory
 ```
 
 ### 6. Provider retry plumbing and OpenAI compat request shape
