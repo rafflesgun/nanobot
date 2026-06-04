@@ -121,10 +121,14 @@ Overrides persist across restarts.
 - The spawn tool description advertises configured profiles so the main agent can discover them in-context
 - The parent session `model_override` now propagates into spawned subagents unless the caller leaves it unset
 - This phase is intentionally limited to background subagents; it does not implement full peer-agent routing or handoff
-- **Dynamic root-level fields**: The root `Config` model has `extra="allow"` and merges unknown root-level keys into `agents` automatically. This allows sub-agent profiles defined directly at config root (e.g. `"recall": { "model": "..." }`) to work alongside the structured `agents.*` path, for backward compatibility with dynamically-created sub-agents.
+- **Dynamic root-level fields**: The root `Config` model has `extra="allow"` and merges unknown root-level keys into `agents` automatically. This supports two patterns for dynamic sub-agent profiles:
+  1. **Flat keys** — e.g. `"recall": { "model": "...", "temperature": 0.1 }` directly at config root
+  2. **Container keys** — e.g. `"subagents": { "recall": { "model": "..." }, ... }` where every value is a dict; the container's children are flattened into `agents.*`
+  Only values with `"model"` or `"provider"` fields are treated as sub-agent profiles. Keys without those fields (e.g. scheduler configs) remain as Config-level extras without being merged into agents.
 
 **Files**
-- `nanobot/config/schema.py` → `AgentsConfig` now preserves named agent profiles and resolves them against `defaults`. Root `Config` has `extra="allow"`. The `_validate_model_preset` validator merges root-level unknown keys into `agents` so both `agents.foo` and root-level `"foo"` work for sub-agent profiles.
+- `nanobot/config/schema.py` → `AgentsConfig` now preserves named agent profiles and resolves them against `defaults`. Root `Config` has `extra="allow"`. The `_validate_model_preset` validator merges root-level unknown keys into `agents` (flattening container dicts), so `agents.foo`, root-level `"foo"`, and `"subagents": {"foo": ...}` all work.
+- `tests/agent/test_configured_subagents.py` → `test_dynamic_root_subagent_flat_keys`, `test_dynamic_root_subagent_container`, `test_non_agent_root_keys_are_not_merged`
 - `nanobot/cli/commands.py` → provider factory wiring for per-profile subagent providers
 - `nanobot/agent/loop.py` → passes named agent config + provider factory into `SubagentManager`
 - `nanobot/agent/subagent.py` → resolves selected profile, builds the matching provider, and runs the subagent with that model/settings
@@ -135,11 +139,16 @@ Keep named agent profiles as overlays on `agents.defaults`, not fully separate s
 Keep the scope limited to `spawn(subagent_id=...)`. Do not conflate this with the larger multi-agent work from PR #2064.  
 Preserve the existing default subagent path when no `subagent_id` is provided.
 Preserve propagation of the parent session model override into spawned subagents.
-**Preserve the root Config `extra="allow"` and the `_validate_model_preset` validator's root→agents merge logic** so dynamically-created sub-agent profiles at config root continue to function after the merge.
+**Preserve the root Config `extra="allow"` and the `_validate_model_preset` validator's root→agents merge logic** so dynamically-created sub-agent profiles at config root continue to function after the merge. The merge must:
+- Accept flat keys (`"name": {model:...}`) directly
+- Accept container keys (`"subagents": {"name": {model:...}}`) and flatten them
+- Only merge values with `"model"` or `"provider"` fields
+- Skip keys that already exist on `AgentsConfig`
 
 **Quick validation**
 ```bash
 pytest tests/agent/test_configured_subagents.py tests/agent/test_task_cancel.py tests/config/test_config_migration.py tests/cli/test_commands.py -q
+# Also covers: test_dynamic_root_subagent_flat_keys, test_dynamic_root_subagent_container, test_non_agent_root_keys_are_not_merged
 ```
 
 ### 5. Ordered fallback models on provider errors

@@ -260,3 +260,48 @@ def test_agent_loop_passes_loaded_agents_config_to_subagent_manager(tmp_path, mo
 
     assert loop.model == "infini-kimi-k25"
     assert captured["agents_config"] is config.agents
+
+
+def test_dynamic_root_subagent_flat_keys() -> None:
+    """Root-level unknown keys with model/provider are merged into agents."""
+    config = Config.model_validate({
+        "agents": {
+            "defaults": {"model": "main", "provider": "custom"},
+        },
+        "recall": {"model": "nvd-kimi-k26", "temperature": 0.1},
+        "code-reviewer": {"model": "nvd-qwen", "temperature": 0.2},
+    })
+    assert config.agents.resolve("recall").model == "nvd-kimi-k26"
+    assert config.agents.resolve("recall").temperature == 0.1
+    assert config.agents.resolve("code-reviewer").model == "nvd-qwen"
+
+
+def test_dynamic_root_subagent_container() -> None:
+    """Root-level container key with dict-of-dicts is flattened into agents."""
+    config = Config.model_validate({
+        "agents": {
+            "defaults": {"model": "main", "provider": "custom"},
+        },
+        "subagents": {
+            "recall": {"model": "nvd-kimi-k26", "temperature": 0.1},
+            "curator": {"model": "nvd-qwen", "temperature": 0.2},
+            "code-reviewer": {"model": "nvd-deep", "temperature": 0.0},
+        },
+    })
+    assert config.agents.resolve("recall").model == "nvd-kimi-k26"
+    assert config.agents.resolve("curator").model == "nvd-qwen"
+    assert config.agents.resolve("code-reviewer").model == "nvd-deep"
+    # The container key itself should NOT appear as an agent
+    assert "subagents" not in config.agents.agent_ids()
+
+
+def test_non_agent_root_keys_are_not_merged() -> None:
+    """Root-level keys without model/provider are NOT merged into agents."""
+    config = Config.model_validate({
+        "agents": {
+            "defaults": {"model": "main", "provider": "custom"},
+        },
+        "curator": {"enabled": True, "intervalHours": 168},
+    })
+    # curator has no model/provider → not merged
+    assert "curator" not in config.agents.agent_ids()
