@@ -121,9 +121,10 @@ Overrides persist across restarts.
 - The spawn tool description advertises configured profiles so the main agent can discover them in-context
 - The parent session `model_override` now propagates into spawned subagents unless the caller leaves it unset
 - This phase is intentionally limited to background subagents; it does not implement full peer-agent routing or handoff
+- **Dynamic root-level fields**: The root `Config` model has `extra="allow"` and merges unknown root-level keys into `agents` automatically. This allows sub-agent profiles defined directly at config root (e.g. `"recall": { "model": "..." }`) to work alongside the structured `agents.*` path, for backward compatibility with dynamically-created sub-agents.
 
 **Files**
-- `nanobot/config/schema.py` → `AgentsConfig` now preserves named agent profiles and resolves them against `defaults`
+- `nanobot/config/schema.py` → `AgentsConfig` now preserves named agent profiles and resolves them against `defaults`. Root `Config` has `extra="allow"`. The `_validate_model_preset` validator merges root-level unknown keys into `agents` so both `agents.foo` and root-level `"foo"` work for sub-agent profiles.
 - `nanobot/cli/commands.py` → provider factory wiring for per-profile subagent providers
 - `nanobot/agent/loop.py` → passes named agent config + provider factory into `SubagentManager`
 - `nanobot/agent/subagent.py` → resolves selected profile, builds the matching provider, and runs the subagent with that model/settings
@@ -134,6 +135,7 @@ Keep named agent profiles as overlays on `agents.defaults`, not fully separate s
 Keep the scope limited to `spawn(subagent_id=...)`. Do not conflate this with the larger multi-agent work from PR #2064.  
 Preserve the existing default subagent path when no `subagent_id` is provided.
 Preserve propagation of the parent session model override into spawned subagents.
+**Preserve the root Config `extra="allow"` and the `_validate_model_preset` validator's root→agents merge logic** so dynamically-created sub-agent profiles at config root continue to function after the merge.
 
 **Quick validation**
 ```bash

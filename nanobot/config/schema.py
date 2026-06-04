@@ -441,6 +441,19 @@ class Config(BaseSettings):
         name = self.agents.defaults.model_preset
         if name and name != "default" and name not in self.model_presets:
             raise ValueError(f"model_preset {name!r} not found in model_presets")
+        # Merge root-level unknown keys into agents so dynamic sub-agent profiles
+        # defined at config root ALSO work as agents.* profile overrides.
+        extra = object.__getattribute__(self, "__pydantic_extra__") or {}
+        for key in list(extra):
+            if key in {"agents", "channels", "providers", "api", "gateway", "tools", "model_presets"}:
+                continue
+            if key.startswith("_"):
+                continue
+            if hasattr(self.agents, key):
+                continue
+            value = extra.pop(key)
+            if isinstance(value, dict):
+                object.__getattribute__(self.agents, "__pydantic_extra__")[key] = value
         return self
 
     def resolve_default_preset(self) -> ModelPresetConfig:
@@ -582,7 +595,7 @@ class Config(BaseSettings):
                 return spec.default_api_base
         return None
 
-    model_config = ConfigDict(env_prefix="NANOBOT_", env_nested_delimiter="__")
+    model_config = ConfigDict(env_prefix="NANOBOT_", env_nested_delimiter="__", extra="allow")
 
 
 def _resolve_tool_config_refs() -> None:
