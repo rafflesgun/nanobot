@@ -28,6 +28,7 @@ Use these when you want deeper customization, integration, or extension details.
 
 | Topic | Repo docs | What it covers |
 |---|---|---|
+| Development | [`development.md`](./development.md) | Contributor notes for adding providers and transcription adapters |
 | Memory | [`memory.md`](./memory.md) | How nanobot stores, consolidates, and restores memory |
 | Skills | [`skills.md`](./skills.md) | Workspace skills, proposal review flow, and safe mutation |
 | Python SDK | [`python-sdk.md`](./python-sdk.md) | Use nanobot programmatically from Python |

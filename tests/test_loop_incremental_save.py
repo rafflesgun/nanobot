@@ -1,6 +1,15 @@
-"""Tests for incremental session saving in agent loops."""
+"""Tests for incremental/checkpoint-based session saving in agent loops.
 
-import asyncio
+The ``on_turn_saved`` callback was removed upstream in favor of the
+checkpoint-based persistence mechanism in ``AgentLoop``.  The runner now
+emits checkpoints via ``_set_runtime_checkpoint`` after tool calls.
+
+These tests verify:
+- Sessions are persisted for non-ephemeral runs
+- Ephemeral runs skip session persistence
+- The checkpoint/restore cycle recovers mid-turn state
+"""
+
 from pathlib import Path
 
 import pytest
@@ -8,7 +17,7 @@ import pytest
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider, LLMResponse
-from nanobot.session.manager import SessionManager
+from nanobot.session.manager import Session, SessionManager
 
 
 class ScriptedProvider(LLMProvider):
@@ -24,11 +33,9 @@ class ScriptedProvider(LLMProvider):
         response = self._responses.pop(0)
         if isinstance(response, BaseException):
             raise response
-        # Convert dict response to LLMResponse if needed
         if isinstance(response, dict):
-            # Remove unsupported fields for LLMResponse
             response_dict = response.copy()
-            response_dict.pop('role', None)  # Remove 'role' as it's not a valid field
+            response_dict.pop("role", None)
             return LLMResponse(**response_dict)
         return response
 
@@ -37,10 +44,62 @@ class ScriptedProvider(LLMProvider):
 
 
 @pytest.mark.asyncio
-async def test_incremental_save_called_per_iteration(tmp_path: Path):
-    """Verify that the on_turn_saved callback is called after each iteration."""
+async def test_process_direct_persists_session(tmp_path: Path):
+    """Non-ephemeral process_direct persists the session to disk."""
     bus = MessageBus()
-    # Simple test - just make sure the callback is called without crashing
+    provider = ScriptedProvider(responses=[
+        {"content": "Response", "finish_reason": "stop"},
+    ])
+
+    loop = AgentLoop(
+        bus=bus,
+        provider=provider,
+        workspace=tmp_path,
+        session_manager=SessionManager(tmp_path),
+    )
+
+    result = await loop.process_direct(
+        content="Test message",
+        session_key="test-session",
+    )
+
+    assert result is not None
+    assert "Response" in (result.content or "")
+    session_path = loop.sessions._get_session_path("test-session")
+    assert session_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_ephemeral_process_direct_skips_persistence(tmp_path: Path):
+    """Ephemeral process_direct does NOT persist session data."""
+    bus = MessageBus()
+    provider = ScriptedProvider(responses=[
+        {"content": "Response", "finish_reason": "stop"},
+    ])
+
+    loop = AgentLoop(
+        bus=bus,
+        provider=provider,
+        workspace=tmp_path,
+        session_manager=SessionManager(tmp_path),
+    )
+
+    result = await loop.process_direct(
+        content="Test message",
+        session_key="ephemeral-test",
+        ephemeral=True,
+    )
+
+    assert result is not None
+    assert "Response" in (result.content or "")
+    session_path = loop.sessions._get_session_path("ephemeral-test")
+    assert not session_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_save_load_roundtrip(tmp_path: Path):
+    """_set_runtime_checkpoint persists to disk; _restore_runtime_checkpoint recovers it."""
+    bus = MessageBus()
     provider = ScriptedProvider(responses=[
         {"content": "Hello", "finish_reason": "stop"},
     ])
@@ -51,26 +110,71 @@ async def test_incremental_save_called_per_iteration(tmp_path: Path):
         workspace=tmp_path,
         session_manager=SessionManager(tmp_path),
     )
+    session = loop.sessions.get_or_create("restore-test")
 
-    save_count = 0
+    checkpoint_payload = {
+        "assistant_message": {
+            "role": "assistant",
+            "content": "Let me check that.",
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": '{"path": "test.txt"}'},
+                }
+            ],
+        },
+        "completed_tool_results": [],
+        "pending_tool_calls": [
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "read_file", "arguments": '{"path": "test.txt"}'},
+            }
+        ],
+    }
 
-    async def on_turn_saved(messages):
-        nonlocal save_count
-        save_count += 1
+    loop._set_runtime_checkpoint(session, checkpoint_payload)
+    assert "runtime_checkpoint" in session.metadata
 
-    initial_messages = [{"role": "user", "content": "Test message"}]
-    await loop._run_agent_loop(initial_messages, on_turn_saved=on_turn_saved)
+    # Reload from disk — checkpoint metadata must survive
+    session2 = loop.sessions._load("restore-test")
+    assert session2 is not None
+    assert "runtime_checkpoint" in session2.metadata
 
-    # Should have been called at least once (even if with empty messages)
-    assert save_count >= 0
+    # Restore rehydrates messages and clears checkpoint
+    restored = loop._restore_runtime_checkpoint(session2)
+    assert restored is True
+    assert len(session2.messages) > 0
+    assert "runtime_checkpoint" not in session2.metadata
 
 
 @pytest.mark.asyncio
-async def test_direct_response_does_not_trigger_callback(tmp_path: Path):
-    """Testing that direct responses don't trigger the callback."""
+async def test_ephemeral_checkpoint_is_not_persisted(tmp_path: Path):
+    """_set_runtime_checkpoint silently no-ops for ephemeral sessions."""
+    session = Session(key="ephemeral-test")
+    session.metadata["_ephemeral"] = True
+
+    bus = MessageBus()
+    provider = ScriptedProvider(responses=[])
+    loop = AgentLoop(
+        bus=bus,
+        provider=provider,
+        workspace=tmp_path,
+        session_manager=SessionManager(tmp_path),
+    )
+
+    loop._set_runtime_checkpoint(session, {"key": "should-not-persist"})
+    assert "runtime_checkpoint" not in session.metadata
+
+
+@pytest.mark.asyncio
+async def test_results_survive_across_multiple_turns(tmp_path: Path):
+    """Turns on the same session accumulate; earlier results are not lost."""
     bus = MessageBus()
     provider = ScriptedProvider(responses=[
-        {"content": "Direct response without tools", "finish_reason": "stop"},
+        {"content": "First response", "finish_reason": "stop"},
+        {"content": "Second response", "finish_reason": "stop"},
     ])
 
     loop = AgentLoop(
@@ -80,76 +184,13 @@ async def test_direct_response_does_not_trigger_callback(tmp_path: Path):
         session_manager=SessionManager(tmp_path),
     )
 
-    save_count = 0
+    await loop.process_direct(content="Message 1", session_key="multi-turn")
+    await loop.process_direct(content="Message 2", session_key="multi-turn")
 
-    async def on_turn_saved(messages):
-        nonlocal save_count
-        save_count += 1
-
-    initial_messages = [{"role": "user", "content": "Simple question"}]
-    await loop._run_agent_loop(initial_messages, on_turn_saved=on_turn_saved)
-
-    # With direct response, callback should still be called once
-    # (the loop itself is still processed, even if no tool calls)
-    assert save_count >= 0
-
-
-@pytest.mark.asyncio
-async def test_process_direct_saves_incrementally(tmp_path: Path):
-    """Testing that process_direct saves incrementally."""
-    bus = MessageBus()
-    provider = ScriptedProvider(responses=[
-        {"content": "Response", "finish_reason": "stop"},
-    ])
-
-    loop = AgentLoop(
-        bus=bus,
-        provider=provider,
-        workspace=tmp_path,
-        session_manager=SessionManager(tmp_path),
-    )
-
-    save_count = 0
-
-    async def on_turn_saved(messages):
-        nonlocal save_count
-        save_count += 1
-
-    result = await loop.process_direct(
-        content="Test message",
-        on_progress=on_turn_saved  # Using on_progress as the callback
-    )
-
-    # Should have been called at least once
-    assert save_count >= 0
-    assert "Response" in result or result == ""  # Either way, it should complete
-
-
-@pytest.mark.asyncio
-async def test_crash_resilience_preserves_earlier_iterations(tmp_path: Path):
-    """Testing that the basic structure works without getting too complex."""
-    bus = MessageBus()
-    provider = ScriptedProvider(responses=[
-        {"content": "Response", "finish_reason": "stop"},
-    ])
-
-    loop = AgentLoop(
-        bus=bus,
-        provider=provider,
-        workspace=tmp_path,
-        session_manager=SessionManager(tmp_path),
-    )
-
-    save_count = 0
-
-    async def on_turn_saved(messages):
-        nonlocal save_count
-        save_count += 1
-
-    initial_messages = [{"role": "user", "content": "Test"}]
-
-    # Just verify that the function doesn't crash
-    await loop._run_agent_loop(initial_messages, on_turn_saved=on_turn_saved)
-
-    # Should have been called at least once
-    assert save_count >= 0
+    session = loop.sessions._load("multi-turn")
+    assert session is not None
+    # Both turns should be in the history
+    user_msgs = [m for m in session.messages if m["role"] == "user"]
+    asst_msgs = [m for m in session.messages if m["role"] == "assistant"]
+    assert len(user_msgs) >= 2
+    assert len(asst_msgs) >= 2

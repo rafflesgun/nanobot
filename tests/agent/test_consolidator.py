@@ -9,7 +9,9 @@ from nanobot.agent.memory import (
     Consolidator,
     MemoryStore,
 )
+from nanobot.providers.base import LLMResponse
 from nanobot.session.manager import Session
+from nanobot.utils.prompt_templates import render_template
 
 
 @pytest.fixture
@@ -74,6 +76,17 @@ class TestConsolidatorSummarize:
     async def test_summarize_skips_empty_messages(self, consolidator):
         result = await consolidator.archive([])
         assert result is None
+
+
+class TestConsolidatorPromptContract:
+    def test_archive_prompt_outputs_attribute_tags_without_missing_context_claims(self):
+        prompt = render_template("agent/consolidator_archive.md", strip=True)
+
+        assert "SNIP" in prompt
+        for mark in ("[permanent]", "[durable]", "[ephemeral]", "[correction]", "[skip]"):
+            assert mark in prompt
+        assert "check context below" not in prompt.lower()
+        assert "Do not mark something [skip] merely because it might already exist" in prompt
 
 
 class TestConsolidatorArchiveErrorHandling:
@@ -485,11 +498,12 @@ class TestCompactIdleSession:
 
         # Use a slow LLM response to ensure the lock is held while we check
         started = asyncio.Event()
+        release_chat = asyncio.Event()
 
         async def slow_chat(**kwargs):
             started.set()
-            await asyncio.sleep(0.1)
-            return MagicMock(content="Summary.", finish_reason="stop")
+            await release_chat.wait()
+            return LLMResponse(content="Summary.", finish_reason="stop")
 
         mock_provider.chat_with_retry = slow_chat
 
@@ -508,6 +522,7 @@ class TestCompactIdleSession:
         )
         await started.wait()
         assert lock.locked()
+        release_chat.set()
         await task
         assert not lock.locked()
 

@@ -19,7 +19,7 @@ from nanobot.agent import model_presets as preset_helpers
 from nanobot.agent.autocompact import AutoCompact
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.hook import AgentHook, CompositeHook
-from nanobot.agent.memory import Consolidator, Dream
+from nanobot.agent.memory import Consolidator
 from nanobot.agent.progress_hook import AgentProgressHook
 from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
 from nanobot.agent.subagent import SubagentManager
@@ -129,6 +129,10 @@ class TurnContext:
 
     pending_queue: asyncio.Queue | None = None
     pending_summary: str | None = None
+
+    ephemeral: bool = False
+    tools: ToolRegistry | None = None
+
     turn_wall_started_at: float = field(default_factory=time.time)
     visible_run_started_at: float | None = None
     turn_latency_ms: int | None = None
@@ -331,11 +335,6 @@ class AgentLoop:
             consolidator=self.consolidator,
             session_ttl_minutes=session_ttl_minutes,
         )
-        self.dream = Dream(
-            store=self.context.memory,
-            provider=provider,
-            model=self.model,
-        )
         self.model_presets: dict[str, ModelPresetConfig] = model_presets or {}
         self._active_preset: str | None = None
         if model_preset:
@@ -461,7 +460,6 @@ class AgentLoop:
         self.runner.provider = provider
         self.subagents.set_provider(provider, model)
         self.consolidator.set_provider(provider, model, context_window_tokens)
-        self.dream.set_provider(provider, model)
         self._provider_signature = snapshot.signature
         if publish_update and self._runtime_model_publisher is not None:
             self._runtime_model_publisher(
@@ -657,6 +655,7 @@ class AgentLoop:
         session: Session,
         history: list[dict[str, Any]],
         pending_summary: str | None,
+        include_memory_recent_history: bool = True,
     ) -> list[dict[str, Any]]:
         """Build the initial message list for the LLM turn."""
         scope = self.workspace_scopes.for_message(msg, session.metadata)
@@ -672,6 +671,7 @@ class AgentLoop:
             workspace=scope.project_path,
             runtime_state=self,
             inbound_message=msg,
+            include_memory_recent_history=include_memory_recent_history,
         )
 
     async def _dispatch_command_inline(
@@ -872,7 +872,8 @@ class AgentLoop:
         pending_queue: asyncio.Queue | None = None,
         model_override: str | None = None,
         temperature_override: float | None = None,
-        **kwargs: Any,
+        ephemeral: bool = False,
+        tools: ToolRegistry | None = None,
     ) -> tuple[str | None, list[str], list[dict], str, bool]:
         """Run the agent iteration loop.
 
@@ -898,9 +899,9 @@ class AgentLoop:
             set_tool_context=self._set_tool_context,
             on_iteration=lambda iteration: setattr(self, "_current_iteration", iteration),
         )
-        hook: AgentHook = (
-            CompositeHook([loop_hook] + self._extra_hooks) if self._extra_hooks else loop_hook
-        )
+        hook: AgentHook = loop_hook
+        if not ephemeral and self._extra_hooks:
+            hook = CompositeHook([loop_hook] + self._extra_hooks)
 
         async def _checkpoint(payload: dict[str, Any]) -> None:
             if session is None:
@@ -992,7 +993,7 @@ class AgentLoop:
                 try:
                     result = await self.runner.run(AgentRunSpec(
                         initial_messages=initial_messages,
-                        tools=self.tools,
+                        tools=tools or self.tools,
                         model=model_name,
                         max_iterations=self.max_iterations,
                         max_tool_result_chars=self.max_tool_result_chars,
@@ -1443,6 +1444,8 @@ class AgentLoop:
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
         pending_queue: asyncio.Queue | None = None,
+        ephemeral: bool = False,
+        tools: ToolRegistry | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         self._refresh_provider_snapshot()
@@ -1473,6 +1476,8 @@ class AgentLoop:
             on_stream=on_stream,
             on_stream_end=on_stream_end,
             pending_queue=pending_queue,
+            ephemeral=ephemeral,
+            tools=tools,
         )
 
         while ctx.state is not TurnState.DONE:
@@ -1587,7 +1592,7 @@ class AgentLoop:
         # Session is already fetched by the caller (_process_message) but
         # ensure it exists in case this handler is invoked independently.
         if ctx.session is None:
-            if ctx.msg.metadata.get("_ephemeral_session"):
+            if ctx.ephemeral:
                 ctx.session = Session(key=ctx.session_key)
                 ctx.session.metadata["_ephemeral"] = True
             else:
@@ -1643,7 +1648,7 @@ class AgentLoop:
         return "dispatch"
 
     async def _state_build(self, ctx: TurnContext) -> str:
-        if not ctx.msg.metadata.get("_ephemeral_session"):
+        if not ctx.ephemeral:
             await self.consolidator.maybe_consolidate_by_tokens(
                 ctx.session,
                 replay_max_messages=self._max_messages,
@@ -1678,6 +1683,7 @@ class AgentLoop:
             ctx.session,
             ctx.history,
             ctx.pending_summary,
+            include_memory_recent_history=not ctx.ephemeral,
         )
         ctx.user_persisted_early = self._persist_user_message_early(
             ctx.msg, ctx.session
@@ -1714,6 +1720,8 @@ class AgentLoop:
             pending_queue=ctx.pending_queue,
             model_override=self._model_overrides.get(ctx.session_key),
             temperature_override=self._temperature_overrides.get(ctx.session_key),
+            ephemeral=ctx.ephemeral,
+            tools=ctx.tools,
         )
         final_content, tools_used, all_msgs, stop_reason, had_injections = result
         ctx.final_content = final_content
@@ -1748,17 +1756,18 @@ class AgentLoop:
             ctx.session_key,
             ctx.turn_latency_ms,
         )
-        ctx.session.enforce_file_cap(on_archive=self.context.memory.raw_archive)
-        self._clear_pending_user_turn(ctx.session)
-        self._clear_runtime_checkpoint(ctx.session)
-        if not ctx.msg.metadata.get("_ephemeral_session"):
-            self.sessions.save(ctx.session)
+        if not ctx.ephemeral:
+            ctx.session.enforce_file_cap(on_archive=self.context.memory.raw_archive)
             self._schedule_background(
                 self.consolidator.maybe_consolidate_by_tokens(
                     ctx.session,
                     replay_max_messages=self._max_messages,
                 )
             )
+        self._clear_pending_user_turn(ctx.session)
+        self._clear_runtime_checkpoint(ctx.session)
+        if not ctx.ephemeral:
+            self.sessions.save(ctx.session)
         return "ok"
 
     async def _state_respond(self, ctx: TurnContext) -> str:
@@ -1774,6 +1783,8 @@ class AgentLoop:
             ctx.on_stream,
             turn_latency_ms=ctx.turn_latency_ms,
         )
+        if ctx.ephemeral and ctx.outbound is not None:
+            ctx.outbound.metadata["_stop_reason"] = ctx.stop_reason
         return "ok"
 
     def _sanitize_persisted_blocks(
@@ -2000,11 +2011,12 @@ class AgentLoop:
         on_progress: Callable[..., Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
-        ephemeral_session: bool = False,
+        ephemeral: bool = False,
+        tools: ToolRegistry | None = None,
     ) -> OutboundMessage | None:
         """Process a message directly and return the outbound payload.
-        
-        When ``ephemeral_session`` is True, no session state is persisted to disk
+
+        When ``ephemeral`` is True, no session state is persisted to disk
         and existing history is ignored.
         """
         await self._connect_mcp()
@@ -2012,17 +2024,23 @@ class AgentLoop:
             channel=channel, sender_id="user", chat_id=chat_id,
             content=content, media=media or [],
         )
-        msg.metadata["_ephemeral_session"] = ephemeral_session
+        msg.metadata["_ephemeral_session"] = ephemeral
         # Share the dispatch lock so direct calls serialize with bus turns.
         lock = self._session_locks.setdefault(session_key, asyncio.Lock())
         try:
             async with lock:
+                kwargs: dict[str, Any] = {
+                    "session_key": session_key,
+                    "on_progress": on_progress,
+                    "on_stream": on_stream,
+                    "on_stream_end": on_stream_end,
+                    "ephemeral": ephemeral,
+                }
+                if tools is not None:
+                    kwargs["tools"] = tools
                 return await self._process_message(
                     msg,
-                    session_key=session_key,
-                    on_progress=on_progress,
-                    on_stream=on_stream,
-                    on_stream_end=on_stream_end,
+                    **kwargs,
                 )
         finally:
             await self._runtime_events().run_status_changed(msg, session_key, "idle")
