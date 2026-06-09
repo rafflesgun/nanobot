@@ -259,7 +259,7 @@ async def test_ephemeral_direct_run_does_not_persist_session_or_consolidate(tmp_
     loop = _make_loop(tmp_path, estimated_tokens=1000, context_window_tokens=200)
     loop.memory_consolidator.maybe_consolidate_by_tokens = AsyncMock()  # type: ignore[method-assign]
 
-    await loop.process_direct("heartbeat run", session_key="heartbeat", ephemeral_session=True)
+    await loop.process_direct("heartbeat run", session_key="heartbeat", ephemeral=True)
 
     assert not loop.sessions._get_session_path("heartbeat").exists()
     session = loop.sessions.get_or_create("heartbeat")
@@ -279,7 +279,7 @@ async def test_ephemeral_direct_run_ignores_existing_session_history(tmp_path) -
     ]
     loop.sessions.save(session)
 
-    await loop.process_direct("new heartbeat tick", session_key="heartbeat", ephemeral_session=True)
+    await loop.process_direct("new heartbeat tick", session_key="heartbeat", ephemeral=True)
 
     sent_messages = loop.provider.chat_with_retry.await_args.kwargs["messages"]
     assert sentinel not in json.dumps(sent_messages, ensure_ascii=False)
