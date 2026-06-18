@@ -220,8 +220,11 @@ async def test_preflight_consolidation_before_llm_call(tmp_path, monkeypatch) ->
 
     loop = _make_loop(tmp_path, estimated_tokens=0, context_window_tokens=200)
 
-    async def track_consolidate(messages):
+    archived_session_keys: list[str | None] = []
+
+    async def track_consolidate(messages, *, session_key=None):
         order.append("consolidate")
+        archived_session_keys.append(session_key)
         return True
     loop.consolidator.archive = track_consolidate  # type: ignore[method-assign]
 
@@ -252,19 +255,20 @@ async def test_preflight_consolidation_before_llm_call(tmp_path, monkeypatch) ->
     assert "consolidate" in order
     assert "llm" in order
     assert order.index("consolidate") < order.index("llm")
+    assert archived_session_keys == ["cli:test"]
 
 
 @pytest.mark.asyncio
 async def test_ephemeral_direct_run_does_not_persist_session_or_consolidate(tmp_path) -> None:
     loop = _make_loop(tmp_path, estimated_tokens=1000, context_window_tokens=200)
-    loop.memory_consolidator.maybe_consolidate_by_tokens = AsyncMock()  # type: ignore[method-assign]
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock()  # type: ignore[method-assign]
 
     await loop.process_direct("heartbeat run", session_key="heartbeat", ephemeral=True)
 
     assert not loop.sessions._get_session_path("heartbeat").exists()
     session = loop.sessions.get_or_create("heartbeat")
     assert session.messages == []
-    loop.memory_consolidator.maybe_consolidate_by_tokens.assert_not_awaited()
+    loop.consolidator.maybe_consolidate_by_tokens.assert_not_awaited()
 
 
 @pytest.mark.asyncio

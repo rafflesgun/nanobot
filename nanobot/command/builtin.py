@@ -224,11 +224,7 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     loop.sessions.save(session)
     loop.sessions.invalidate(session.key)
     if snapshot:
-        consolidator = getattr(loop, "consolidator", None) or getattr(loop, "memory_consolidator", None)
-        if hasattr(consolidator, "archive"):
-            loop._schedule_background(consolidator.archive(snapshot))
-        elif hasattr(consolidator, "archive_messages"):
-            loop._schedule_background(consolidator.archive_messages(snapshot))
+        loop._schedule_background(loop.consolidator.archive(snapshot, session_key=ctx.key))
     return OutboundMessage(
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
         content="New session started.",

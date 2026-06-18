@@ -509,6 +509,7 @@
   },
   "chat": {
     "fallbackTitle": "Obrolan {{id}}",
+    "forkTitle": "Cabang: {{title}}",
     "loading": "Memuat…",
     "noSessions": "Belum ada sesi.",
     "showMore": "Tampilkan {{count}} lagi",
@@ -550,7 +551,22 @@
     "title": "Hapus obrolan ini?",
     "description": "Tindakan ini tidak dapat dibatalkan.",
     "cancel": "Batal",
-    "confirm": "Hapus"
+    "confirm": "Hapus",
+    "automationsDescription": "Obrolan ini memiliki automasi terjadwal. Menghapusnya juga akan menghapus automasi tersebut.",
+    "moreAutomations": "+ {{count}} lagi",
+    "confirmWithAutomations": "Hapus obrolan dan automasi",
+    "schedule": {
+      "at": "{{time}}",
+      "every": "Setiap {{duration}}",
+      "cron": "Cron {{expr}}",
+      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "unknown": "Jadwal khusus"
+    },
+    "next": {
+      "label": "Berikutnya: {{time}}",
+      "disabled": "Dijeda",
+      "none": "Tidak ada jadwal berikutnya"
+    }
   },
   "connection": {
     "idle": "Idle",
@@ -647,6 +663,7 @@
       },
       "next": {
         "label": "Berikutnya {{time}}",
+        "pending": "Segera berjalan",
         "disabled": "Dijeda",
         "none": "Tidak ada jadwal berikutnya"
       }
@@ -810,6 +827,7 @@
     },
     "scrollToBottom": "Gulir ke bawah",
     "loadEarlier": "Muat pesan sebelumnya",
+    "forkedFromHistory": "Fork dari riwayat",
     "promptNavigator": {
       "open": "Buka navigator prompt",
       "title": "Prompt",
@@ -835,8 +853,9 @@
     "agentActivityLiveSummary": "Berjalan… · {{reasoning}} langkah · {{tools}} panggilan alat",
     "agentActivityLiveToolsOnly": "Berjalan… · {{tools}} panggilan alat",
     "imageAttachment": "Lampiran gambar",
-    "copyReply": "Salin balasan",
-    "copiedReply": "Balasan disalin",
+    "forkFromHere": "Fork",
+    "copyReply": "Salin",
+    "copiedReply": "Disalin",
     "turnLatencyTitle": "Waktu respons (ujung ke ujung)",
     "activityThinkingFor": "Berpikir selama {{duration}}",
     "activityThought": "Selesai berpikir",

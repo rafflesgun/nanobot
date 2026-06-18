@@ -509,6 +509,7 @@
   },
   "chat": {
     "fallbackTitle": "Chat {{id}}",
+    "forkTitle": "Fork: {{title}}",
     "loading": "Loading…",
     "noSessions": "No sessions yet.",
     "showMore": "Show {{count}} more",
@@ -550,7 +551,22 @@
     "title": "Delete this chat?",
     "description": "This action cannot be undone.",
     "cancel": "Cancel",
-    "confirm": "Delete"
+    "confirm": "Delete",
+    "automationsDescription": "This chat has scheduled automations. Deleting it will also delete them.",
+    "moreAutomations": "+ {{count}} more",
+    "confirmWithAutomations": "Delete chat and automations",
+    "schedule": {
+      "at": "{{time}}",
+      "every": "Every {{duration}}",
+      "cron": "Cron {{expr}}",
+      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "unknown": "Custom schedule"
+    },
+    "next": {
+      "label": "Next: {{time}}",
+      "disabled": "Paused",
+      "none": "No next run"
+    }
   },
   "connection": {
     "idle": "Idle",
@@ -647,6 +663,7 @@
       },
       "next": {
         "label": "{{time}}",
+        "pending": "Runs shortly",
         "disabled": "Paused",
         "none": "No next run"
       }
@@ -810,6 +827,7 @@
     },
     "scrollToBottom": "Scroll to bottom",
     "loadEarlier": "Load earlier messages",
+    "forkedFromHistory": "Forked from history",
     "promptNavigator": {
       "open": "Open prompt navigator",
       "title": "Prompts",
@@ -849,8 +867,9 @@
     "imageAttachment": "Image attachment",
     "automationSourceFallback": "Automation",
     "automationTriggered": "Triggered automatically",
-    "copyReply": "Copy reply",
-    "copiedReply": "Copied reply",
+    "forkFromHere": "Fork",
+    "copyReply": "Copy",
+    "copiedReply": "Copied",
     "turnLatencyTitle": "Response time (end-to-end)"
   },
   "lightbox": {

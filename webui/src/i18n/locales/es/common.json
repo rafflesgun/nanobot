@@ -509,6 +509,7 @@
   },
   "chat": {
     "fallbackTitle": "Chat {{id}}",
+    "forkTitle": "Bifurcación: {{title}}",
     "loading": "Cargando…",
     "noSessions": "Todavía no hay sesiones.",
     "showMore": "Mostrar {{count}} más",
@@ -550,7 +551,22 @@
     "title": "¿Eliminar este chat?",
     "description": "Esta acción no se puede deshacer.",
     "cancel": "Cancelar",
-    "confirm": "Eliminar"
+    "confirm": "Eliminar",
+    "automationsDescription": "Este chat tiene automatizaciones programadas. Al eliminarlo también se eliminarán.",
+    "moreAutomations": "+ {{count}} más",
+    "confirmWithAutomations": "Eliminar chat y automatizaciones",
+    "schedule": {
+      "at": "{{time}}",
+      "every": "Cada {{duration}}",
+      "cron": "Cron {{expr}}",
+      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "unknown": "Programación personalizada"
+    },
+    "next": {
+      "label": "Siguiente: {{time}}",
+      "disabled": "Pausada",
+      "none": "Sin próxima ejecución"
+    }
   },
   "connection": {
     "idle": "Inactivo",
@@ -647,6 +663,7 @@
       },
       "next": {
         "label": "Siguiente {{time}}",
+        "pending": "Se ejecutará pronto",
         "disabled": "En pausa",
         "none": "Sin próxima ejecución"
       }
@@ -810,6 +827,7 @@
     },
     "scrollToBottom": "Desplazarse al final",
     "loadEarlier": "Cargar mensajes anteriores",
+    "forkedFromHistory": "Bifurcado desde el historial",
     "promptNavigator": {
       "open": "Abrir navegador de prompts",
       "title": "Prompts",
@@ -835,8 +853,9 @@
     "agentActivityLiveSummary": "En curso… · {{reasoning}} pasos · {{tools}} llamadas a herramientas",
     "agentActivityLiveToolsOnly": "En curso… · {{tools}} llamadas a herramientas",
     "imageAttachment": "Imagen adjunta",
-    "copyReply": "Copiar respuesta",
-    "copiedReply": "Respuesta copiada",
+    "forkFromHere": "Bifurcar",
+    "copyReply": "Copiar",
+    "copiedReply": "Copiado",
     "turnLatencyTitle": "Tiempo de respuesta (extremo a extremo)",
     "activityThinkingFor": "Pensando durante {{duration}}",
     "activityThought": "Pensamiento completado",

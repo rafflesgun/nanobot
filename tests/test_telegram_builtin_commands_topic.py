@@ -22,7 +22,9 @@ class MockLoop:
         self._active_tasks = {}
         self.sessions = MagicMock()
         self.memory_consolidator = MagicMock()
+        self.consolidator = self.memory_consolidator
         self.subagents = MagicMock()
+        self._schedule_background = MagicMock()
         # Create a mock session with proper slicing support
         class MockSession:
             def __init__(self, key):

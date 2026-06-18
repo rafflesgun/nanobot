@@ -509,6 +509,7 @@
   },
   "chat": {
     "fallbackTitle": "Trò chuyện {{id}}",
+    "forkTitle": "Nhánh: {{title}}",
     "loading": "Đang tải…",
     "noSessions": "Chưa có phiên nào.",
     "showMore": "Hiển thị thêm {{count}}",
@@ -550,7 +551,22 @@
     "title": "Xóa cuộc trò chuyện này?",
     "description": "Không thể hoàn tác thao tác này.",
     "cancel": "Hủy",
-    "confirm": "Xóa"
+    "confirm": "Xóa",
+    "automationsDescription": "Cuộc trò chuyện này có các tự động hóa đã lên lịch. Xóa cuộc trò chuyện cũng sẽ xóa chúng.",
+    "moreAutomations": "+ {{count}} mục nữa",
+    "confirmWithAutomations": "Xóa trò chuyện và tự động hóa",
+    "schedule": {
+      "at": "{{time}}",
+      "every": "Mỗi {{duration}}",
+      "cron": "Cron {{expr}}",
+      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "unknown": "Lịch tùy chỉnh"
+    },
+    "next": {
+      "label": "Tiếp theo: {{time}}",
+      "disabled": "Đã tạm dừng",
+      "none": "Không có lần chạy tiếp theo"
+    }
   },
   "connection": {
     "idle": "Rảnh",
@@ -647,6 +663,7 @@
       },
       "next": {
         "label": "Tiếp theo {{time}}",
+        "pending": "Sắp chạy",
         "disabled": "Đã tạm dừng",
         "none": "Không có lần chạy tiếp theo"
       }
@@ -810,6 +827,7 @@
     },
     "scrollToBottom": "Cuộn xuống cuối",
     "loadEarlier": "Tải tin nhắn trước đó",
+    "forkedFromHistory": "Tách nhánh từ lịch sử",
     "promptNavigator": {
       "open": "Mở trình điều hướng prompt",
       "title": "Prompt",
@@ -835,8 +853,9 @@
     "agentActivityLiveSummary": "Đang chạy… · {{reasoning}} bước · {{tools}} lần gọi công cụ",
     "agentActivityLiveToolsOnly": "Đang chạy… · {{tools}} lần gọi công cụ",
     "imageAttachment": "Tệp hình ảnh đính kèm",
-    "copyReply": "Sao chép trả lời",
-    "copiedReply": "Đã sao chép trả lời",
+    "forkFromHere": "Tách nhánh",
+    "copyReply": "Sao chép",
+    "copiedReply": "Đã sao chép",
     "turnLatencyTitle": "Thời gian phản hồi (end-to-end)",
     "activityThinkingFor": "Đang suy nghĩ trong {{duration}}",
     "activityThought": "Đã suy nghĩ",

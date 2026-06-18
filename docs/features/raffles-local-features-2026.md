@@ -5,7 +5,8 @@ that survived the merge with `origin/main` on 13 March 2026
 the merge with upstream/main on 2 April 2026,
 and the merge with `origin/main` on 27 April 2026,
 the merge with `upstream/main` on 1 May 2026,
-and the merge with `origin/main` on 3 June 2026 (493 commits, wholesale upstream take + local feature re-addition).
+and the merge with `origin/main` on 3 June 2026 (493 commits, wholesale upstream take + local feature re-addition),
+and the merge with `origin/main` on 13 June 2026 (99 commits, most local features now upstream; minimal re-additions needed).
 
 Goal: help future merge conflict resolution (human or agent)  
 understand intended behavior quickly.

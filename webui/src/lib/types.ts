@@ -113,10 +113,17 @@ export interface SessionAutomationJob {
   state: {
     next_run_at_ms?: number | null;
     last_status?: "ok" | "error" | "skipped" | string | null;
+    pending?: boolean;
   };
 }
 
 export interface SessionAutomationsPayload { jobs: SessionAutomationJob[]; }
+
+export interface SessionDeleteResult {
+  deleted: boolean;
+  blocked_by_automations?: boolean;
+  automations?: SessionAutomationJob[];
+}
 
 export interface SkillSummary {
   name: string;
@@ -480,10 +487,14 @@ export interface SettingsPayload {
     mcp_server_count: number;
     exec_enabled: boolean;
     exec_sandbox?: string | null;
+    exec_path_prepend_set: boolean;
     exec_path_append_set: boolean;
   };
   requires_restart: boolean;
   restart_required_sections?: Array<"runtime" | "browser" | "image">;
+  version?: {
+    current: string;
+  };
 }
 
 export interface AppPackageRef {
@@ -857,11 +868,22 @@ export interface OutboundMcpPresetMention {
 }
 
 /** Response shape for ``GET .../webui-thread`` (server-built transcript replay). */
+export interface WebuiThreadPagePayload {
+  before_cursor?: string | null;
+  has_more_before?: boolean;
+  loaded_message_count?: number;
+  total_known_message_count?: number;
+  user_message_offset?: number;
+}
+
 export interface WebuiThreadPersistedPayload {
   schemaVersion: number;
   sessionKey?: string;
   savedAt?: string;
   messages: UIMessage[];
+  fork_boundary_message_count?: number;
+  has_pending_tool_calls?: boolean;
+  page?: WebuiThreadPagePayload;
   workspace_scope?: WorkspaceScopePayload;
 }
 
@@ -877,6 +899,7 @@ export interface FilePreviewPayload {
 
 export type Outbound =
   | { type: "new_chat"; workspace_scope?: WorkspaceScopePayload }
+  | { type: "fork_chat"; source_chat_id: string; before_user_index: number; title?: string }
   | { type: "attach"; chat_id: string }
   | { type: "set_workspace_scope"; chat_id: string; workspace_scope: WorkspaceScopePayload }
   | { type: "transcribe_audio"; request_id: string; data_url: string; duration_ms?: number }

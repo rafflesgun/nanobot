@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.context import RequestContext
 from nanobot.agent.tools.cron import CronTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -47,6 +48,8 @@ def _make_job(
             deliver=True,
             channel=channel,
             to=to,
+            origin_channel=channel,
+            origin_chat_id=to,
             thread_id=thread_id,
         ),
         state=CronJobState(),
@@ -122,20 +125,33 @@ class TestCronToolContext:
     def test_set_context_stores_thread_id(self, tmp_path: Path) -> None:
         svc = CronService(tmp_path / "cron" / "jobs.json")
         tool = CronTool(svc)
-        tool.set_context("telegram", "-1001234567890", thread_id=42)
+        ctx = RequestContext(
+            channel="telegram", chat_id="-1001234567890",
+            thread_id=42, metadata={"message_thread_id": 42},
+        )
+        tool.set_context(ctx)
         assert tool._thread_id == 42
 
     def test_set_context_no_thread_id_defaults_none(self, tmp_path: Path) -> None:
         svc = CronService(tmp_path / "cron" / "jobs.json")
         tool = CronTool(svc)
-        tool.set_context("telegram", "123456789")
+        ctx = RequestContext(
+            channel="telegram", chat_id="123456789",
+            thread_id=None, metadata={},
+        )
+        tool.set_context(ctx)
         assert tool._thread_id is None
 
     @pytest.mark.asyncio
     async def test_add_action_propagates_thread_id(self, tmp_path: Path) -> None:
         svc = CronService(tmp_path / "cron" / "jobs.json")
         tool = CronTool(svc)
-        tool.set_context("telegram", "-1001234567890", thread_id=99)
+        ctx = RequestContext(
+            channel="telegram", chat_id="-1001234567890",
+            thread_id=99, metadata={"message_thread_id": 99},
+            session_key="telegram:-1001234567890:topic:99",
+        )
+        tool.set_context(ctx)
 
         result = await tool.execute(
             action="add",
@@ -147,14 +163,19 @@ class TestCronToolContext:
         jobs = svc.list_jobs()
         assert len(jobs) == 1
         assert jobs[0].payload.thread_id == 99
-        assert jobs[0].payload.to == "-1001234567890"
-        assert jobs[0].payload.channel == "telegram"
+        assert jobs[0].payload.origin_channel == "telegram"
+        assert jobs[0].payload.origin_chat_id == "-1001234567890"
 
     @pytest.mark.asyncio
     async def test_add_action_no_thread_id_stores_none(self, tmp_path: Path) -> None:
         svc = CronService(tmp_path / "cron" / "jobs.json")
         tool = CronTool(svc)
-        tool.set_context("telegram", "123456789")  # DM – no thread_id
+        ctx = RequestContext(
+            channel="telegram", chat_id="123456789",
+            thread_id=None, metadata={},
+            session_key="telegram:123456789",
+        )
+        tool.set_context(ctx)
 
         await tool.execute(action="add", message="DM reminder", every_seconds=300)
 
@@ -249,8 +270,8 @@ class TestCronDeliveryRouting:
             delivery_meta["message_thread_id"] = job.payload.thread_id
 
         out = OutboundMessage(
-            channel=job.payload.channel or "cli",
-            chat_id=job.payload.to,
+            channel=job.payload.origin_channel or "cli",
+            chat_id=job.payload.origin_chat_id,
             content="Reminder result",
             metadata=delivery_meta,
         )
@@ -276,8 +297,8 @@ class TestCronDeliveryRouting:
             delivery_meta["message_thread_id"] = job.payload.thread_id
 
         out = OutboundMessage(
-            channel=job.payload.channel or "cli",
-            chat_id=job.payload.to,
+            channel=job.payload.origin_channel or "cli",
+            chat_id=job.payload.origin_chat_id,
             content="Group result",
             metadata=delivery_meta,
         )
@@ -302,8 +323,8 @@ class TestCronDeliveryRouting:
             delivery_meta["message_thread_id"] = job.payload.thread_id
 
         out = OutboundMessage(
-            channel=job.payload.channel or "cli",
-            chat_id=job.payload.to,
+            channel=job.payload.origin_channel or "cli",
+            chat_id=job.payload.origin_chat_id,
             content="DM result",
             metadata=delivery_meta,
         )
