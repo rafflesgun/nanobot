@@ -34,7 +34,7 @@ from nanobot.agent.tools.schema import (
     tool_parameters_schema,
 )
 from nanobot.config.paths import get_media_dir
-from nanobot.config.schema import Base
+from nanobot.config_base import Base
 from nanobot.security.workspace_access import current_scope_allows_loopback, current_tool_workspace
 from nanobot.security.workspace_policy import is_path_within
 
@@ -400,6 +400,7 @@ class ExecTool(Tool):
             command,
             cwd,
             restrict_to_workspace=access.restrict_to_workspace,
+            workspace_root=workspace_root,
         )
         if guard_error:
             return guard_error
@@ -594,6 +595,7 @@ class ExecTool(Tool):
         cwd: str,
         *,
         restrict_to_workspace: bool | None = None,
+        workspace_root: str | None = None,
     ) -> str | None:
         """Best-effort safety guard for potentially destructive commands."""
         cmd = command.strip()
@@ -633,6 +635,11 @@ class ExecTool(Tool):
 
             cwd_path = Path(cwd).resolve()
             allowed_roots = self.allowed_dirs or [cwd_path]
+            resolved_workspace = (
+                Path(workspace_root).expanduser().resolve()
+                if workspace_root
+                else None
+            )
             if self.allowed_dirs and not any(is_path_within(cwd_path, root) for root in allowed_roots):
                 return "Error: Command blocked by safety guard (working dir outside allowed dirs)"
 
@@ -655,6 +662,7 @@ class ExecTool(Tool):
                 if p.is_absolute() and not (
                     any(is_path_within(p, root) for root in allowed_roots)
                     or is_path_within(p, media_path)
+                    or (resolved_workspace is not None and is_path_within(p, resolved_workspace))
                 ):
                     return (
                         "Error: Command blocked by safety guard (path outside working dir)"

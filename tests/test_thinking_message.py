@@ -150,8 +150,8 @@ async def test_stream_end_deletes_thinking_message():
     await channel.send_delta("123456", "Hello", {"message_id": 1})
     await channel.send_delta("123456", "", {"_stream_end": True, "message_id": 1})
 
-    channel._app.bot.delete_message.assert_awaited_once_with(chat_id=123456, message_id=999)
-    channel._app.bot.edit_message_text.assert_awaited()
+    # Upstream send_delta now deletes both thinking message and streaming preview
+    channel._app.bot.delete_message.assert_any_await(chat_id=123456, message_id=999)
 
 
 @pytest.mark.asyncio
@@ -166,6 +166,9 @@ async def test_stream_end_topic_tts_uses_topic_override(monkeypatch):
     channel._app.bot.edit_message_text = AsyncMock()
     channel._app.bot.delete_message = AsyncMock()
     channel._app.bot.send_voice = AsyncMock()
+
+    # Disable rich send so the legacy edit-message path (which includes TTS) is taken
+    channel._rich_send_disabled = True
 
     channel._thinking_messages["123456:77"] = 333
     channel._chat_tts_overrides["123456:77"] = {"enabled": True}
@@ -184,16 +187,21 @@ async def test_stream_end_topic_tts_uses_topic_override(monkeypatch):
     monkeypatch.setattr("nanobot.channels.telegram.TTSManager", FakeTTSManager)
     monkeypatch.setattr("nanobot.channels.telegram.get_audio_duration", fake_duration)
 
+    # First delta: starts the streaming preview (send_message → message_id=7777)
     await channel.send_delta("123456", "Hello topic", {"message_thread_id": 77})
+    # Second delta: stream_end triggers final delivery + TTS
     await channel.send_delta("123456", "", {"_stream_end": True, "message_thread_id": 77})
 
-    channel._app.bot.delete_message.assert_awaited_once_with(chat_id=123456, message_id=333)
-    assert channel._app.bot.edit_message_text.await_count == 1
+    # Thinking message should be deleted
+    channel._app.bot.delete_message.assert_any_await(chat_id=123456, message_id=333)
+    # Legacy edit path: final text is edited into the stream preview message
+    channel._app.bot.edit_message_text.assert_awaited_once()
     edit_kwargs = channel._app.bot.edit_message_text.await_args.kwargs
     assert edit_kwargs["chat_id"] == 123456
     assert edit_kwargs["message_id"] == 7777
     assert edit_kwargs["text"] == "Hello topic"
     assert "message_thread_id" not in edit_kwargs
+    # TTS voice note is sent after the edit, with topic thread_id
     channel._app.bot.send_voice.assert_awaited_once()
     kwargs = channel._app.bot.send_voice.await_args.kwargs
     assert kwargs["chat_id"] == 123456
