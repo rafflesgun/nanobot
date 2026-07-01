@@ -7,7 +7,8 @@ and the merge with `origin/main` on 27 April 2026,
 the merge with `upstream/main` on 1 May 2026,
 and the merge with `origin/main` on 3 June 2026 (493 commits, wholesale upstream take + local feature re-addition),
 and the merge with `origin/main` on 13 June 2026 (99 commits, most local features now upstream; minimal re-additions needed),
-and the merge with `origin/main` on 23 June 2026 (205 commits; upstream refactored streaming with rich-send, added cron turn coordinator, added gateway service module).
+and the merge with `origin/main` on 23 June 2026 (205 commits; upstream refactored streaming with rich-send, added cron turn coordinator, added gateway service module),
+and the merge with `origin/main` on 1 July 2026 (332 commits; upstream refactored session manager, tool results, web search, model catalog, image generation; local features mostly held in loop.py/schema.py/subagent.py/telegram.py head versions).
 
 Goal: help future merge conflict resolution (human or agent)  
 understand intended behavior quickly.

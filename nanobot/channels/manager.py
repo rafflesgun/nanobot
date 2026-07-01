@@ -402,7 +402,7 @@ class ChannelManager:
     def _coalesce_stream_deltas(
         self, first_msg: OutboundMessage
     ) -> tuple[OutboundMessage, list[OutboundMessage]]:
-        """Merge consecutive _stream_delta messages for the same (channel, chat_id).
+        """Merge consecutive _stream_delta messages for the same (channel, chat_id, _stream_id).
 
         This reduces the number of API calls when the queue has accumulated multiple
         deltas, which happens when LLM generates faster than the channel can process.
@@ -410,7 +410,8 @@ class ChannelManager:
         Returns:
             tuple of (merged_message, list_of_non_matching_messages)
         """
-        target_key = (first_msg.channel, first_msg.chat_id)
+        first_metadata = first_msg.metadata or {}
+        target_key = (first_msg.channel, first_msg.chat_id, first_metadata.get("_stream_id"))
         combined_content = first_msg.content
         final_metadata = dict(first_msg.metadata or {})
         non_matching: list[OutboundMessage] = []
@@ -424,9 +425,14 @@ class ChannelManager:
                 break
 
             # Check if this message belongs to the same stream
-            same_target = (next_msg.channel, next_msg.chat_id) == target_key
-            is_delta = next_msg.metadata and next_msg.metadata.get("_stream_delta")
-            is_end = next_msg.metadata and next_msg.metadata.get("_stream_end")
+            next_metadata = next_msg.metadata or {}
+            same_target = (
+                next_msg.channel,
+                next_msg.chat_id,
+                next_metadata.get("_stream_id"),
+            ) == target_key
+            is_delta = next_metadata.get("_stream_delta")
+            is_end = next_metadata.get("_stream_end")
 
             if same_target and is_delta and not final_metadata.get("_stream_end"):
                 # Accumulate content

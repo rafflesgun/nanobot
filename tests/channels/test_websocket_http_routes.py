@@ -12,9 +12,8 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import quote, urlencode
 
-import pytest
-
 import httpx
+import pytest
 
 from nanobot.channels.websocket import WebSocketChannel, WebSocketConfig
 from nanobot.cron.service import CronService
@@ -110,7 +109,7 @@ async def _http_get(
     url: str, headers: dict[str, str] | None = None
 ) -> httpx.Response:
     return await asyncio.to_thread(
-        functools.partial(httpx.get, url, headers=headers or {}, timeout=5.0)
+        functools.partial(httpx.get, url, headers=headers or {}, timeout=5.0, trust_env=False)
     )
 
 
@@ -152,34 +151,6 @@ async def test_bootstrap_returns_token_for_localhost(
     finally:
         await channel.stop()
         await server_task
-
-
-def test_bootstrap_allows_remote_when_bound_to_all_interfaces(bus: MagicMock) -> None:
-    channel = _ch(bus, host="0.0.0.0", token="my-token")
-
-    class _Connection:
-        remote_address = ("8.8.8.8", 54321)
-
-    class _FakeReq:
-        headers = {"Authorization": "Bearer my-token"}
-        path = "/webui/bootstrap"
-
-    resp = channel._http_router._handle_bootstrap(_Connection(), _FakeReq())
-    assert resp.status_code == 200
-
-
-def test_bootstrap_rejects_remote_when_bound_to_loopback(bus: MagicMock) -> None:
-    channel = _ch(bus, host="127.0.0.1")
-
-    class _Connection:
-        remote_address = ("8.8.8.8", 54321)
-
-    class _FakeReq:
-        headers = {}
-        path = "/webui/bootstrap"
-
-    resp = channel._http_router._handle_bootstrap(_Connection(), _FakeReq())
-    assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
@@ -535,12 +506,11 @@ async def test_cli_apps_catalog_does_not_block_other_webui_http_routes(
         token = boot.json()["token"]
         auth = {"Authorization": f"Bearer {token}"}
 
-        started = time.perf_counter()
         catalog_task = asyncio.create_task(
             _http_get("http://127.0.0.1:29935/api/settings/cli-apps", headers=auth)
         )
         assert await asyncio.wait_for(entered.wait(), 2.0)
-        assert time.perf_counter() - started < 1.0
+        assert not catalog_task.done()
 
         workspaces_started = time.perf_counter()
         workspaces = await _http_get("http://127.0.0.1:29935/api/workspaces", headers=auth)

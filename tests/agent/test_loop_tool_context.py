@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from nanobot.agent.loop import AgentLoop
-from nanobot.agent.tools.image_generation import GenerateImageTool
+from nanobot.agent.tools.image_generation import ImageGenerationTool
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ProviderConfig, ToolsConfig
 from nanobot.providers.base import LLMResponse, ToolCallRequest

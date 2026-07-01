@@ -136,7 +136,7 @@ def isolate_webui_workspace_state(tmp_path, monkeypatch) -> None:
 async def _http_get(url: str, headers: dict[str, str] | None = None) -> httpx.Response:
     """Run GET in a thread to avoid blocking the asyncio loop shared with websockets."""
     return await asyncio.to_thread(
-        functools.partial(httpx.get, url, headers=headers or {}, timeout=5.0)
+        functools.partial(httpx.get, url, headers=headers or {}, timeout=5.0, trust_env=False)
     )
 
 
@@ -2123,7 +2123,7 @@ def test_settings_payload_exposes_api_type_only_for_openai(monkeypatch, tmp_path
 def test_settings_payload_reports_workspace_sandbox(monkeypatch, tmp_path) -> None:
     config_path = tmp_path / "config.json"
     config = Config()
-    config.tools.restrict_to_workspace.enabled = True
+    config.tools.restrict_to_workspace = True
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     monkeypatch.setenv("NANOBOT_SANDBOX_ENFORCED", "macos_app_sandbox")
