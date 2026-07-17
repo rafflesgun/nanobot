@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import Field
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.command.builtin import build_help_text
@@ -217,6 +218,16 @@ if DISCORD_AVAILABLE:
                 command_text = f"/model {preset}" if preset else "/model"
                 await self._forward_slash_command(interaction, command_text)
 
+            @self.tree.command(name="trigger", description="Create a named local trigger for this chat")
+            @app_commands.describe(name="Trigger name")
+            async def trigger_command(
+                interaction: discord.Interaction,
+                name: str,
+            ) -> None:
+                name = name.strip()
+                command_text = f"/trigger {name}" if name else "/trigger"
+                await self._forward_slash_command(interaction, command_text)
+
             @self.tree.command(name="help", description="Show available commands")
             async def help_command(interaction: discord.Interaction) -> None:
                 sender_id = str(interaction.user.id)
@@ -253,7 +264,7 @@ if DISCORD_AVAILABLE:
                     channel = await self.fetch_channel(channel_id)
                 except Exception as e:
                     self._channel.logger.warning("channel {} unavailable: {}", msg.chat_id, e)
-                    return
+                    raise
 
             reference, mention_settings = self._build_reply_context(channel, msg.reply_to)
             sent_media = False
@@ -394,7 +405,7 @@ class DiscordChannel(BaseChannel):
     async def start(self) -> None:
         """Start the Discord client."""
         if not DISCORD_AVAILABLE:
-            self.logger.error("discord.py not installed. Run: pip install nanobot-ai[discord]")
+            self.logger.error("discord.py not installed. Run: nanobot plugins enable discord")
             return
 
         if not self.config.token:
@@ -455,10 +466,9 @@ class DiscordChannel(BaseChannel):
         """Send a message through Discord using discord.py."""
         client = self._client
         if client is None or not client.is_ready():
-            self.logger.warning("client not ready; dropping outbound message")
-            return
+            raise RuntimeError("Discord client is not ready")
 
-        is_progress = bool((msg.metadata or {}).get("_progress"))
+        is_progress = isinstance(msg.event, ProgressEvent)
 
         try:
             await client.send_outbound(msg)
@@ -471,7 +481,14 @@ class DiscordChannel(BaseChannel):
                 await self._clear_reactions(msg.chat_id)
 
     async def send_delta(
-        self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None
+        self,
+        chat_id: str,
+        delta: str,
+        metadata: dict[str, Any] | None = None,
+        *,
+        stream_id: str | None = None,
+        stream_end: bool = False,
+        resuming: bool = False,
     ) -> None:
         """Progressive Discord delivery: send once, then edit until the stream ends."""
         client = self._client
@@ -479,10 +496,7 @@ class DiscordChannel(BaseChannel):
             self.logger.warning("client not ready; dropping stream delta")
             return
 
-        meta = metadata or {}
-        stream_id = meta.get("_stream_id")
-
-        if meta.get("_stream_end"):
+        if stream_end:
             buf = self._stream_bufs.get(chat_id)
             if not buf or buf.message is None or not buf.text:
                 return
@@ -649,7 +663,9 @@ class DiscordChannel(BaseChannel):
         content: str,
     ) -> bool:
         """Check if inbound Discord message should be processed."""
-        if not self.is_allowed(sender_id):
+        # Reject unauthorized guild messages before any side effects, but let DMs
+        # reach BaseChannel._handle_message so it can issue a pairing code.
+        if message.guild is not None and not self.is_allowed(sender_id):
             return False
         # Channel-based filtering: only respond in allowed channels
         allow_channels = self.config.allow_channels

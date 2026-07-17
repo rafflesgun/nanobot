@@ -9,12 +9,30 @@ import sys
 import time
 from contextlib import suppress
 from dataclasses import dataclass
+from types import SimpleNamespace
+from typing import Literal
 
 from nanobot import __version__
+from nanobot.agent.goal_permission import goal_mutation_permission
 from nanobot.bus.events import OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.utils.helpers import build_status_content
 from nanobot.utils.restart import set_restart_notice_to_env
+from nanobot.utils.workspace_prompts import initialize_workspace_prompt
+
+# WebUI protocol contract for how a slash command participates in turn state:
+# - side_channel: returns control text without starting or ending an agent turn.
+# - finalize_active_turn: side-channel command that also closes the active UI turn.
+# - stop_active_turn: cancels the active turn; WebUI may intercept exact submits.
+# - agent_turn: always enters the normal agent path.
+# - agent_turn_with_args: no args is side-channel usage; args enter the agent path.
+CommandLifecycle = Literal[
+    "side_channel",
+    "finalize_active_turn",
+    "stop_active_turn",
+    "agent_turn",
+    "agent_turn_with_args",
+]
 
 
 @dataclass(frozen=True)
@@ -24,14 +42,18 @@ class BuiltinCommandSpec:
     description: str
     icon: str
     arg_hint: str = ""
+    lifecycle: CommandLifecycle = "side_channel"
+    accepts_args: bool = False
 
-    def as_dict(self) -> dict[str, str]:
+    def as_dict(self) -> dict[str, str | bool]:
         return {
             "command": self.command,
             "title": self.title,
             "description": self.description,
             "icon": self.icon,
             "arg_hint": self.arg_hint,
+            "lifecycle": self.lifecycle,
+            "accepts_args": self.accepts_args,
         }
 
 
@@ -39,14 +61,16 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
     BuiltinCommandSpec(
         "/new",
         "New chat",
-        "Stop the current task and start a fresh conversation.",
+        "Reset this chat and start a fresh conversation.",
         "square-pen",
+        lifecycle="finalize_active_turn",
     ),
     BuiltinCommandSpec(
         "/stop",
         "Stop current task",
         "Cancel the active agent turn for this chat.",
         "square",
+        lifecycle="stop_active_turn",
     ),
     BuiltinCommandSpec(
         "/restart",
@@ -62,10 +86,11 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
     ),
     BuiltinCommandSpec(
         "/model",
-        "Switch model preset",
-        "Show or switch the active model preset.",
+        "Set session model",
+        "Show or set this chat's model and temperature overrides.",
         "brain",
-        "[preset]",
+        "[model-id|reset|temp]",
+        accepts_args=True,
     ),
     BuiltinCommandSpec(
         "/history",
@@ -73,6 +98,7 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "Print the last N persisted conversation messages.",
         "history",
         "[n]",
+        accepts_args=True,
     ),
     BuiltinCommandSpec(
         "/goal",
@@ -80,6 +106,16 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "Tell the agent to treat the request as a long-running goal.",
         "activity",
         "<goal>",
+        lifecycle="agent_turn_with_args",
+        accepts_args=True,
+    ),
+    BuiltinCommandSpec(
+        "/trigger",
+        "Create named local trigger",
+        "Create a named CLI trigger bound to this chat session.",
+        "zap",
+        "<name>",
+        accepts_args=True,
     ),
     BuiltinCommandSpec(
         "/dream",
@@ -92,12 +128,30 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "Show Dream log",
         "Show what the last Dream consolidation changed.",
         "book-open",
+        accepts_args=True,
     ),
     BuiltinCommandSpec(
         "/dream-restore",
         "Restore memory",
         "Revert memory to a previous Dream snapshot.",
         "undo-2",
+        accepts_args=True,
+    ),
+    BuiltinCommandSpec(
+        "/dream-prompt",
+        "Dream memory",
+        "Tell Dream how to organize this workspace's memory.",
+        "file-text",
+        "[init]",
+        accepts_args=True,
+    ),
+    BuiltinCommandSpec(
+        "/evaluator-prompt",
+        "Heartbeat evaluator",
+        "Customize the heartbeat notification gate prompt for this workspace.",
+        "file-text",
+        "[init]",
+        accepts_args=True,
     ),
     BuiltinCommandSpec(
         "/skill",
@@ -117,11 +171,12 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "List, approve, deny or revoke pairing requests.",
         "shield",
         "[list|approve <code>|deny <code>|revoke <user_id>]",
+        accepts_args=True,
     ),
 )
 
 
-def builtin_command_palette() -> list[dict[str, str]]:
+def builtin_command_palette() -> list[dict[str, str | bool]]:
     """Return structured command metadata for UI command palettes."""
     return [spec.as_dict() for spec in BUILTIN_COMMAND_SPECS]
 
@@ -137,6 +192,16 @@ async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
         total = sum(1 for t in tasks if not getattr(t, "done", lambda: False)())
         with suppress(Exception):
             total += await loop.subagents.cancel_by_session(ctx.key)
+    pending_queues = getattr(loop, "_pending_queues", None)
+    if pending_queues is not None:
+        pending = pending_queues.pop(ctx.key, None)
+        while pending is not None:
+            try:
+                pending.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            else:
+                total += 1
     content = f"Stopped {total} task(s)." if total else "No active task to stop."
     return OutboundMessage(
         channel=msg.channel, chat_id=msg.chat_id, content=content,
@@ -180,10 +245,13 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
     """Build an outbound status message for a session."""
     loop = ctx.loop
     session = ctx.session or loop.sessions.get_or_create(ctx.key)
+    runtime = _command_runtime(loop, ctx.runtime)
     ctx_est = 0
-    consolidator = getattr(loop, "consolidator", None) or getattr(loop, "memory_consolidator", None)
     with suppress(Exception):
-        ctx_est, _ = consolidator.estimate_session_prompt_tokens(session)
+        ctx_est, _ = loop.consolidator.estimate_session_prompt_tokens(
+            session,
+            runtime=runtime,
+        )
     if ctx_est <= 0:
         ctx_est = loop._last_usage.get("prompt_tokens", 0)
 
@@ -207,17 +275,15 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
         channel=ctx.msg.channel,
         chat_id=ctx.msg.chat_id,
         content=build_status_content(
-            version=__version__, model=loop.model,
+            version=__version__, model=runtime.model,
             start_time=loop._start_time, last_usage=loop._last_usage,
-            context_window_tokens=loop.context_window_tokens,
+            context_window_tokens=runtime.context_window_tokens,
             session_msg_count=len(session.get_history(max_messages=0)),
             context_tokens_estimate=ctx_est,
             search_usage_text=search_usage_text,
             model_override=loop._model_overrides.get(ctx.key),
             active_task_count=task_count,
-            max_completion_tokens=getattr(
-                getattr(getattr(loop, "provider", None), "generation", None), "max_tokens", 8192
-            ),
+            max_completion_tokens=runtime.generation.max_tokens,
         ),
         metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
     )
@@ -237,7 +303,14 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     loop.sessions.save(session)
     loop.sessions.invalidate(session.key)
     if snapshot:
-        loop._schedule_background(loop.consolidator.archive(snapshot, session_key=ctx.key))
+        runtime = _command_runtime(loop, ctx.runtime)
+        loop._schedule_background(
+            loop.consolidator.archive(
+                snapshot,
+                runtime=runtime,
+                session_key=ctx.key,
+            )
+        )
     return OutboundMessage(
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
         content="New session started.",
@@ -245,112 +318,28 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     )
 
 
-def _format_preset_names(names: list[str]) -> str:
-    return ", ".join(f"`{name}`" for name in names) if names else "(none configured)"
-
-
-def _model_preset_names(loop) -> list[str]:
-    presets = getattr(loop, "model_presets", None) or {}
-    names = set(presets)
-    names.add("default")
-    return ["default", *sorted(name for name in names if name != "default")]
-
-
-def _active_model_preset_name(loop) -> str:
-    return getattr(loop, "model_preset", None) or "default"
-
-
 def _command_error_message(exc: Exception) -> str:
     return str(exc.args[0]) if isinstance(exc, KeyError) and exc.args else str(exc)
 
 
-def _model_command_status(loop) -> str:
-    names = _model_preset_names(loop)
-    active = _active_model_preset_name(loop)
-    return "\n".join([
-        "## Model",
-        f"- Current model: `{loop.model}`",
-        f"- Current preset: `{active}`",
-        f"- Available presets: {_format_preset_names(names)}",
-    ])
+def _command_runtime(loop, runtime):
+    if runtime is not None:
+        return runtime
+    resolver = getattr(loop, "llm_runtime", None)
+    if callable(resolver):
+        return resolver()
+    provider_generation = getattr(getattr(loop, "provider", None), "generation", None)
+    return SimpleNamespace(
+        model=loop.model,
+        context_window_tokens=loop.context_window_tokens,
+        generation=provider_generation or SimpleNamespace(max_tokens=8192),
+    )
 
 
 async def cmd_model(ctx: CommandContext) -> OutboundMessage:
-    """Show or switch model presets."""
+    """Show or set a per-session model or temperature override."""
     loop = ctx.loop
-    args = ctx.args.strip()
-    metadata = {**dict(ctx.msg.metadata or {}), "render_as": "text"}
-
-    if not args:
-        return OutboundMessage(
-            channel=ctx.msg.channel,
-            chat_id=ctx.msg.chat_id,
-            content=_model_command_status(loop),
-            metadata=metadata,
-        )
-
-    parts = args.split()
-    if len(parts) != 1:
-        return OutboundMessage(
-            channel=ctx.msg.channel,
-            chat_id=ctx.msg.chat_id,
-            content="Usage: `/model [preset]`",
-            metadata=metadata,
-        )
-
-    name = parts[0]
-    preset_names = _model_preset_names(loop)
-    if name in preset_names:
-        try:
-            loop.set_model_preset(name)
-        except (KeyError, ValueError) as exc:
-            return OutboundMessage(
-                channel=ctx.msg.channel,
-                chat_id=ctx.msg.chat_id,
-                content=(
-                    f"Could not switch model preset: {_command_error_message(exc)}\n\n"
-                    f"Available presets: {_format_preset_names(preset_names)}"
-                ),
-                metadata=metadata,
-            )
-        max_tokens = getattr(getattr(loop.provider, "generation", None), "max_tokens", None)
-        lines = [
-            f"Switched model preset to `{loop.model_preset}`.",
-            f"- Model: `{loop.model}`",
-            f"- Context window: {loop.context_window_tokens}",
-        ]
-        if max_tokens is not None:
-            lines.append(f"- Max output tokens: {max_tokens}")
-        return OutboundMessage(
-            channel=ctx.msg.channel,
-            chat_id=ctx.msg.chat_id,
-            content="\n".join(lines),
-            metadata=metadata,
-        )
-
-    # Unknown preset name: if loop has model_presets configured, show error;
-    # otherwise delegate to legacy model override handler if available.
-    if getattr(loop, "model_presets", None):
-        return OutboundMessage(
-            channel=ctx.msg.channel,
-            chat_id=ctx.msg.chat_id,
-            content=(
-                f"Could not switch model preset: preset {name!r} not found.\n\n"
-                f"Available presets: {_format_preset_names(preset_names)}"
-            ),
-            metadata=metadata,
-        )
-    if hasattr(loop, "_handle_model_command"):
-        return loop._handle_model_command(ctx.msg, ctx.key, ctx.raw)
-    return OutboundMessage(
-        channel=ctx.msg.channel,
-        chat_id=ctx.msg.chat_id,
-        content=(
-            f"Could not switch model preset: preset {name!r} not found.\n\n"
-            f"Available presets: {_format_preset_names(preset_names)}"
-        ),
-        metadata=metadata,
-    )
+    return loop._handle_model_command(ctx.msg, ctx.key, ctx.raw)
 
 
 async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
@@ -373,6 +362,7 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
         store = loop.context.memory
         content = ""
         resp = None
+        diff_body = ""
         t0 = time.monotonic()
         try:
             result = store.build_dream_prompt()
@@ -393,9 +383,17 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
                 on_progress=_silent,
             )
             elapsed = time.monotonic() - t0
-            if MemoryStore.dream_run_completed(resp):
+            # Ground truth: the real file delta, not the LLM's self-report.
+            diff_body = store.dream_content_diff()
+            productive = bool(diff_body) or (
+                not store.git.is_initialized()
+                and MemoryStore.dream_run_completed(resp)
+            )
+            if productive:
                 store.set_last_dream_cursor(last_cursor)
                 content = f"Dream completed in {elapsed:.1f}s."
+            elif MemoryStore.dream_run_completed(resp):
+                content = f"Dream completed in {elapsed:.1f}s; no memory changes."
             else:
                 content = (
                     f"Dream did not complete after {elapsed:.1f}s; "
@@ -413,7 +411,7 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
                 timezone_name=getattr(loop.context, "timezone", None),
             )
             if store.git.is_initialized():
-                commit_msg = build_dream_commit_message("dream: manual run", resp)
+                commit_msg = build_dream_commit_message("dream: manual run", diff_body)
                 sha = store.git.auto_commit(commit_msg)
                 if sha:
                     content += f" (commit {sha})"
@@ -426,6 +424,99 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
     asyncio.create_task(_run_dream())
     return OutboundMessage(
         channel=msg.channel, chat_id=msg.chat_id, content="Dreaming...",
+    )
+
+
+async def cmd_dream_prompt(ctx: CommandContext) -> OutboundMessage:
+    """Show or set up the workspace Dream memory instructions."""
+    store = ctx.loop.context.memory
+    path = store.dream_prompt_file
+    display_path = path.relative_to(store.workspace).as_posix()
+    args = ctx.args.strip().lower()
+
+    if args == "init":
+        if not initialize_workspace_prompt(path, store.default_dream_prompt()):
+            content = (
+                f"Dream memory instructions already exist at `{display_path}`.\n\n"
+                "Edit that file, or delete/empty it to return to nanobot's default."
+            )
+        else:
+            content = (
+                f"Created Dream memory instructions at `{display_path}`.\n\n"
+                "Edit that file to teach Dream how to organize memory. "
+                "This fully replaces nanobot's default Dream guide for this workspace. "
+                "Delete or empty it to return to nanobot's default."
+            )
+    elif args:
+        content = "Usage: /dream-prompt [init]"
+    elif store.has_dream_prompt_override():
+        content = (
+            "Dream memory instructions: custom for this workspace\n\n"
+            f"- Path: `{display_path}`\n"
+            "- Delete or empty this file to return to nanobot's default."
+        )
+    else:
+        content = (
+            "Dream memory instructions: nanobot default\n\n"
+            f"- Editable file: `{display_path}`\n"
+            "- Run `/dream-prompt init` to create an editable copy."
+        )
+
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content=content,
+        metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
+    )
+
+
+async def cmd_evaluator_prompt(ctx: CommandContext) -> OutboundMessage:
+    """Show or set up the workspace heartbeat evaluator prompt."""
+    from nanobot.utils.evaluator import (
+        default_evaluator_prompt,
+        evaluator_prompt_file,
+        has_evaluator_prompt_override,
+    )
+
+    workspace = ctx.loop.context.memory.workspace
+    path = evaluator_prompt_file(workspace)
+    display_path = path.relative_to(workspace).as_posix()
+    args = ctx.args.strip().lower()
+
+    if args == "init":
+        if not initialize_workspace_prompt(path, default_evaluator_prompt()):
+            content = (
+                f"Heartbeat evaluator prompt already exists at `{display_path}`.\n\n"
+                "Edit that file, or delete/empty it to return to nanobot's default."
+            )
+        else:
+            content = (
+                f"Created heartbeat evaluator prompt at `{display_path}`.\n\n"
+                "Edit that file to control when the heartbeat notification gate speaks. "
+                "It must still instruct the model to call the `evaluate_notification` tool, "
+                "otherwise the gate fails closed and stays silent. "
+                "Delete or empty it to return to nanobot's default."
+            )
+    elif args:
+        content = "Usage: /evaluator-prompt [init]"
+    elif has_evaluator_prompt_override(workspace):
+        content = (
+            "Heartbeat evaluator prompt: custom for this workspace\n\n"
+            f"- Path: `{display_path}`\n"
+            "- Delete or empty this file to return to nanobot's default."
+        )
+    else:
+        content = (
+            "Heartbeat evaluator prompt: nanobot default\n\n"
+            f"- Editable file: `{display_path}`\n"
+            "- Run `/evaluator-prompt init` to create an editable copy."
+        )
+
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content=content,
+        metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
     )
 
 
@@ -443,6 +534,7 @@ def _format_dream_no_input_message() -> str:
         "- Enable `agents.defaults.idleCompactAfterMinutes` so completed chats become Dream input automatically.",
         "- Compact the current chat into memory once that manual action is available.",
         "- If you expected history to exist, check whether `memory/history.jsonl` has new entries after the Dream cursor.",
+        "- Use `/dream-prompt` to see or change how Dream organizes memory.",
     ])
 
 
@@ -471,6 +563,9 @@ def _format_changed_files(diff: str) -> str:
     if not files:
         return "No tracked memory files changed."
     return ", ".join(f"`{path}`" for path in files)
+
+
+_DREAM_COMMIT_PREFIX = "dream:"
 
 
 def _format_dream_log_content(commit, diff: str, *, requested_sha: str | None = None) -> str:
@@ -521,7 +616,7 @@ def _format_dream_restore_list(commits: list) -> str:
 async def cmd_dream_log(ctx: CommandContext) -> OutboundMessage:
     """Show what the last Dream changed.
 
-    Default: diff of the latest commit (HEAD~1 vs HEAD).
+    Default: diff of the latest Dream commit versus its parent.
     With /dream-log <sha>: diff of that specific commit.
     """
     store = ctx.loop.consolidator.store
@@ -529,7 +624,10 @@ async def cmd_dream_log(ctx: CommandContext) -> OutboundMessage:
 
     if not git.is_initialized():
         if store.get_last_dream_cursor() == 0:
-            msg = "Dream has not run yet. Run `/dream`, or wait for the next scheduled Dream cycle."
+            msg = (
+                "Dream has not run yet. Run `/dream`, or wait for the next scheduled Dream cycle.\n\n"
+                "Use `/dream-prompt` to see or change how Dream organizes memory."
+            )
         else:
             msg = "Dream history is not available because memory versioning is not initialized."
         return OutboundMessage(
@@ -553,14 +651,24 @@ async def cmd_dream_log(ctx: CommandContext) -> OutboundMessage:
             commit, diff = result
             content = _format_dream_log_content(commit, diff, requested_sha=sha)
     else:
-        # Default: show the latest commit's diff
-        commits = git.log(max_entries=1)
-        result = git.show_commit_diff(commits[0].sha) if commits else None
+        # Default: show the latest Dream commit's diff
+        commits = git.log(max_entries=1, message_prefix=_DREAM_COMMIT_PREFIX)
+        result = (
+            git.show_commit_diff(
+                commits[0].sha,
+                max_entries=1,
+                message_prefix=_DREAM_COMMIT_PREFIX,
+            )
+            if commits else None
+        )
         if result:
             commit, diff = result
             content = _format_dream_log_content(commit, diff)
         else:
-            content = "Dream memory has no saved versions yet."
+            content = (
+                "Dream memory has no saved versions yet.\n\n"
+                "Use `/dream-prompt` to see or change how Dream organizes memory."
+            )
 
     return OutboundMessage(
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
@@ -585,29 +693,36 @@ async def cmd_dream_restore(ctx: CommandContext) -> OutboundMessage:
 
     args = ctx.args.strip()
     if not args:
-        # Show recent commits for the user to pick
-        commits = git.log(max_entries=10)
+        # Show recent Dream commits for the user to pick
+        commits = git.log(max_entries=10, message_prefix=_DREAM_COMMIT_PREFIX)
         if not commits:
             content = "Dream memory has no saved versions to restore yet."
         else:
             content = _format_dream_restore_list(commits)
     else:
         sha = args.split()[0]
-        result = git.show_commit_diff(sha)
-        changed_files = _format_changed_files(result[1]) if result else "the tracked memory files"
-        new_sha = git.revert(sha)
-        if new_sha:
-            content = (
-                f"Restored Dream memory to the state before `{sha}`.\n\n"
-                f"- New safety commit: `{new_sha}`\n"
-                f"- Restored files: {changed_files}\n\n"
-                f"Use `/dream-log {new_sha}` to inspect the restore diff."
-            )
-        else:
+        result = git.show_commit_diff(sha, message_prefix=_DREAM_COMMIT_PREFIX)
+        if not result:
             content = (
                 f"Couldn't restore Dream change `{sha}`.\n\n"
-                "It may not exist, or it may be the first saved version with no earlier state to restore."
+                "Only Dream memory versions can be restored. "
+                "Use `/dream-restore` to list recent versions."
             )
+        else:
+            changed_files = _format_changed_files(result[1])
+            new_sha = git.revert(sha, message_prefix=_DREAM_COMMIT_PREFIX)
+            if new_sha:
+                content = (
+                    f"Restored Dream memory to the state before `{sha}`.\n\n"
+                    f"- New safety commit: `{new_sha}`\n"
+                    f"- Restored files: {changed_files}\n\n"
+                    f"Use `/dream-log {new_sha}` to inspect the restore diff."
+                )
+            else:
+                content = (
+                    f"Couldn't restore Dream change `{sha}`.\n\n"
+                    "It may be the first saved version with no earlier state to restore."
+                )
     return OutboundMessage(
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
         content=content, metadata={"render_as": "text"},
@@ -654,7 +769,7 @@ async def cmd_history(ctx: CommandContext) -> OutboundMessage:
             )
 
     session = ctx.session or ctx.loop.sessions.get_or_create(ctx.key)
-    history = session.get_history(max_messages=0)
+    history = session.get_history(max_messages=0, include_runtime_context=False)
     visible = [_format_history_message(m) for m in history]
     visible = [m for m in visible if m is not None]
     recent = visible[-count:]
@@ -674,17 +789,8 @@ async def cmd_history(ctx: CommandContext) -> OutboundMessage:
     )
 
 
-_GOAL_PROMPT_TEMPLATE = """The user declared a sustained objective for this thread.
-
-Inspect or clarify if needed, then call `long_task` with the refined objective (and optional short ui_summary). Work proceeds as normal assistant turns using your usual tools. When the objective is fully done and verified, call `complete_goal` with a brief recap. If the user later cancels or changes direction, still call `complete_goal` with an honest recap (then `long_task` again only after there is no active goal). Do not use `long_task` / `complete_goal` for trivial one-shot answers.
-
-Goal:
-{goal}
-"""
-
-
 async def cmd_goal(ctx: CommandContext) -> OutboundMessage | None:
-    """Rewrite /goal into a normal agent turn that nudges long_task use."""
+    """Mark this turn as an explicit sustained-goal request."""
     goal = ctx.args.strip()
     if not goal:
         return OutboundMessage(
@@ -703,14 +809,23 @@ async def cmd_goal(ctx: CommandContext) -> OutboundMessage | None:
             ),
             metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
         )
+    if not ctx.is_user_turn:
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content="Goal mode can only be started by a user `/goal <task>` command.",
+            metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
+        )
 
+    ctx.turn_scopes.append(goal_mutation_permission(True))
     ctx.msg.metadata = {
         **dict(ctx.msg.metadata or {}),
         "original_command": "/goal",
         "original_content": ctx.raw,
+        "goal_requested": True,
         "goal_started_at": time.time(),
     }
-    ctx.msg.content = _GOAL_PROMPT_TEMPLATE.format(goal=goal)
+    ctx.msg.content = ctx.raw
     return None
 
 
@@ -791,16 +906,15 @@ def _workflow_progress(ctx: CommandContext):
 
 
 def _workflow_response(ctx: CommandContext, content: str) -> OutboundMessage:
-    metadata = {
-        "render_as": "text",
-        "message_thread_id": ctx.msg.metadata.get("message_thread_id"),
-        "command_response": True,
-    }
     return OutboundMessage(
         channel=ctx.msg.channel,
         chat_id=ctx.msg.chat_id,
         content=content,
-        metadata=metadata,
+        metadata={
+            **dict(ctx.msg.metadata or {}),
+            "render_as": "text",
+            "command_response": True,
+        },
     )
 
 
@@ -814,16 +928,15 @@ def _format_workflow_list(ctx: CommandContext) -> str:
     listing = WorkflowStore(ctx.loop.workspace).list()
     lines = ["Workflows:"]
     if listing.workflows:
-        for workflow in listing.workflows:
-            lines.append(
-                f"- {workflow.name}: {workflow.description} ({workflow.step_count} steps)"
-            )
+        lines.extend(
+            f"- {workflow.name}: {workflow.description} ({workflow.step_count} steps)"
+            for workflow in listing.workflows
+        )
     else:
         lines.append("- No valid workflows found.")
     if listing.invalid:
         lines.extend(["", "Invalid workflows:"])
-        for invalid in listing.invalid:
-            lines.append(f"- {invalid.name}: {invalid.error}")
+        lines.extend(f"- {invalid.name}: {invalid.error}" for invalid in listing.invalid)
     if listing.hint:
         lines.extend(["", listing.hint])
     return "\n".join(lines)
@@ -836,9 +949,8 @@ async def cmd_workflow(ctx: CommandContext) -> OutboundMessage:
     args = ctx.args.strip()
     if not args:
         return _workflow_response(ctx, _workflow_usage())
-    parts = args.split(maxsplit=1)
-    subcommand = parts[0].lower()
-    name = parts[1].strip() if len(parts) > 1 else ""
+    subcommand, *rest = args.split(maxsplit=1)
+    name = rest[0].strip() if rest else ""
     store = WorkflowStore(ctx.loop.workspace)
     if subcommand == "list":
         return _workflow_response(ctx, _format_workflow_list(ctx))
@@ -846,23 +958,72 @@ async def cmd_workflow(ctx: CommandContext) -> OutboundMessage:
         if not name:
             return _workflow_response(ctx, _workflow_usage())
         workflow, error = store.read(name)
-        content = (
-            error if error is not None or workflow is None else store.render_full(workflow)
+        return _workflow_response(
+            ctx,
+            error if error is not None or workflow is None else store.render_full(workflow),
         )
-        return _workflow_response(ctx, content or "Unable to read workflow")
-    if subcommand == "step":
-        if not name:
-            return _workflow_response(ctx, _workflow_usage())
-        result = _workflow_progress(ctx).start(ctx.key, name)
-        return _workflow_response(ctx, result.output)
+    if subcommand == "step" and name:
+        return _workflow_response(ctx, _workflow_progress(ctx).start(ctx.key, name).output)
     if subcommand == "next":
-        result = _workflow_progress(ctx).next(ctx.key)
-        return _workflow_response(ctx, result.output)
+        return _workflow_response(ctx, _workflow_progress(ctx).next(ctx.key).output)
     if subcommand == "abort":
-        result = _workflow_progress(ctx).abort(ctx.key)
-        return _workflow_response(ctx, result.output)
+        return _workflow_response(ctx, _workflow_progress(ctx).abort(ctx.key).output)
     return _workflow_response(ctx, _workflow_usage())
 
+
+async def cmd_trigger(ctx: CommandContext) -> OutboundMessage:
+    """Create a local trigger bound to the current session."""
+    name = ctx.args.strip()
+    if not name:
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content=(
+                "Usage: /trigger <name>\n\n"
+                "Create a named local trigger bound to this chat session."
+            ),
+            metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
+        )
+
+    from nanobot.triggers.local_store import LocalTriggerStore
+
+    loop = ctx.loop
+    workspace = getattr(loop, "workspace", None)
+    if workspace is None:
+        workspace = getattr(getattr(loop, "context", None), "workspace", None)
+    if workspace is None:
+        raise RuntimeError("workspace unavailable for trigger creation")
+
+    store = getattr(loop, "local_trigger_store", None)
+    if store is None:
+        store = LocalTriggerStore(workspace)
+
+    from nanobot.session.keys import UNIFIED_SESSION_KEY
+
+    session_key = (
+        ctx.msg.session_key
+        if ctx.key == UNIFIED_SESSION_KEY
+        else ctx.key
+    )
+    trigger = store.create(
+        name=name,
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        session_key=session_key,
+        sender_id="trigger",
+        origin_metadata=dict(ctx.msg.metadata or {}),
+    )
+    command = f'nanobot trigger {trigger.id} "message"'
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content=(
+            f"Trigger created: {trigger.name}\n"
+            f"ID: {trigger.id}\n\n"
+            f"Command:\n{command}"
+        ),
+        metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
+    )
 
 async def cmd_help(ctx: CommandContext) -> OutboundMessage:
     """Return available slash commands."""
@@ -898,11 +1059,17 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.prefix("/history ", cmd_history)
     router.exact("/goal", cmd_goal)
     router.prefix("/goal ", cmd_goal)
+    router.exact("/trigger", cmd_trigger)
+    router.prefix("/trigger ", cmd_trigger)
     router.exact("/dream", cmd_dream)
     router.exact("/dream-log", cmd_dream_log)
     router.prefix("/dream-log ", cmd_dream_log)
     router.exact("/dream-restore", cmd_dream_restore)
     router.prefix("/dream-restore ", cmd_dream_restore)
+    router.exact("/dream-prompt", cmd_dream_prompt)
+    router.prefix("/dream-prompt ", cmd_dream_prompt)
+    router.exact("/evaluator-prompt", cmd_evaluator_prompt)
+    router.prefix("/evaluator-prompt ", cmd_evaluator_prompt)
     router.exact("/skill", cmd_skill)
     router.exact("/help", cmd_help)
     router.exact("/pairing", cmd_pairing)

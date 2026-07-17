@@ -10,9 +10,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from nanobot.config.schema import AgentDefaults
+from nanobot.providers.base import GenerationSettings
 from nanobot.session.keys import UNIFIED_SESSION_KEY
+from nanobot.utils.llm_runtime import LLMRuntime
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
+
+
+def _runtime(provider: MagicMock | None = None) -> LLMRuntime:
+    provider = provider or MagicMock()
+    provider.generation = GenerationSettings()
+    return LLMRuntime.capture(provider, "test-model", context_window_tokens=128_000)
 
 
 def _make_loop(*, tools_config=None):
@@ -127,6 +135,7 @@ class TestDispatch:
     @pytest.mark.asyncio
     async def test_dispatch_streaming_preserves_message_metadata(self):
         from nanobot.bus.events import InboundMessage
+        from nanobot.bus.outbound_events import StreamDeltaEvent, StreamEndEvent
 
         loop, bus = _make_loop()
         msg = InboundMessage(
@@ -156,10 +165,10 @@ class TestDispatch:
 
         assert first.metadata["thread_root_event_id"] == "$root1"
         assert first.metadata["thread_reply_to_event_id"] == "$reply1"
-        assert first.metadata["_stream_delta"] is True
+        assert isinstance(first.event, StreamDeltaEvent)
         assert second.metadata["thread_root_event_id"] == "$root1"
         assert second.metadata["thread_reply_to_event_id"] == "$reply1"
-        assert second.metadata["_stream_end"] is True
+        assert isinstance(second.event, StreamEndEvent)
 
     @pytest.mark.asyncio
     async def test_processing_lock_serializes(self):
@@ -231,10 +240,7 @@ class TestSubagentCancellation:
         from nanobot.bus.queue import MessageBus
 
         bus = MessageBus()
-        provider = MagicMock()
-        provider.get_default_model.return_value = "test-model"
         mgr = SubagentManager(
-            provider=provider,
             workspace=MagicMock(),
             bus=bus,
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
@@ -264,10 +270,7 @@ class TestSubagentCancellation:
         from nanobot.bus.queue import MessageBus
 
         bus = MessageBus()
-        provider = MagicMock()
-        provider.get_default_model.return_value = "test-model"
         mgr = SubagentManager(
-            provider=provider,
             workspace=MagicMock(),
             bus=bus,
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
@@ -304,7 +307,6 @@ class TestSubagentCancellation:
 
         provider.chat_with_retry = scripted_chat_with_retry
         mgr = SubagentManager(
-            provider=provider,
             workspace=tmp_path,
             bus=bus,
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
@@ -316,12 +318,14 @@ class TestSubagentCancellation:
         monkeypatch.setattr("nanobot.agent.tools.filesystem.ListDirTool.execute", fake_execute)
 
         from nanobot.agent.subagent import SubagentStatus
-
-        status = SubagentStatus(
-            task_id="sub-1", label="label", task_description="do task", started_at=time.monotonic()
-        )
+        status = SubagentStatus(task_id="sub-1", label="label", task_description="do task", started_at=time.monotonic())
         await mgr._run_subagent(
-            "sub-1", "do task", "label", {"channel": "test", "chat_id": "c1"}, status
+            "sub-1",
+            "do task",
+            "label",
+            {"channel": "test", "chat_id": "c1"},
+            _runtime(provider),
+            status,
         )
 
         assistant_messages = [
@@ -346,7 +350,6 @@ class TestSubagentCancellation:
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
         mgr = SubagentManager(
-            provider=provider,
             workspace=tmp_path,
             bus=bus,
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
@@ -366,12 +369,14 @@ class TestSubagentCancellation:
         mgr.runner.run = AsyncMock(side_effect=fake_run)
 
         from nanobot.agent.subagent import SubagentStatus
-
-        status = SubagentStatus(
-            task_id="sub-1", label="label", task_description="do task", started_at=time.monotonic()
-        )
+        status = SubagentStatus(task_id="sub-1", label="label", task_description="do task", started_at=time.monotonic())
         await mgr._run_subagent(
-            "sub-1", "do task", "label", {"channel": "test", "chat_id": "c1"}, status
+            "sub-1",
+            "do task",
+            "label",
+            {"channel": "test", "chat_id": "c1"},
+            _runtime(provider),
+            status,
         )
 
         mgr.runner.run.assert_awaited_once()
@@ -393,7 +398,6 @@ class TestSubagentCancellation:
             )
         )
         mgr = SubagentManager(
-            provider=provider,
             workspace=tmp_path,
             bus=bus,
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
@@ -411,12 +415,14 @@ class TestSubagentCancellation:
         monkeypatch.setattr("nanobot.agent.tools.filesystem.ListDirTool.execute", fake_execute)
 
         from nanobot.agent.subagent import SubagentStatus
-
-        status = SubagentStatus(
-            task_id="sub-1", label="label", task_description="do task", started_at=time.monotonic()
-        )
+        status = SubagentStatus(task_id="sub-1", label="label", task_description="do task", started_at=time.monotonic())
         await mgr._run_subagent(
-            "sub-1", "do task", "label", {"channel": "test", "chat_id": "c1"}, status
+            "sub-1",
+            "do task",
+            "label",
+            {"channel": "test", "chat_id": "c1"},
+            _runtime(provider),
+            status,
         )
 
         mgr._announce_result.assert_awaited_once()
@@ -443,7 +449,6 @@ class TestSubagentCancellation:
             )
         )
         mgr = SubagentManager(
-            provider=provider,
             workspace=tmp_path,
             bus=bus,
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
@@ -469,6 +474,7 @@ class TestSubagentCancellation:
                 "do task",
                 "label",
                 {"channel": "test", "chat_id": "c1"},
+                _runtime(provider),
                 SubagentStatus(
                     task_id="sub-1",
                     label="label",
@@ -499,10 +505,7 @@ class TestSubagentAnnounceSessionKey:
         from nanobot.bus.queue import MessageBus
 
         bus = MessageBus()
-        provider = MagicMock()
-        provider.get_default_model.return_value = "test-model"
         mgr = SubagentManager(
-            provider=provider,
             workspace=MagicMock(),
             bus=bus,
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
@@ -572,6 +575,7 @@ class TestSubagentAnnounceSessionKey:
             "sub-4", "task", "label",
             {"channel": "telegram", "chat_id": "444", "session_key": UNIFIED_SESSION_KEY},
             status,
+            _runtime(),
         )
 
         msg = await bus.consume_inbound()

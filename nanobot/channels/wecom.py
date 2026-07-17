@@ -13,6 +13,7 @@ from typing import Any
 from pydantic import Field
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
@@ -102,7 +103,7 @@ class WecomChannel(BaseChannel):
     async def start(self) -> None:
         """Start the WeCom bot with WebSocket long connection."""
         if not WECOM_AVAILABLE:
-            self.logger.error("SDK not installed. Run: pip install nanobot-ai[wecom]")
+            self.logger.error("SDK not installed. Run: nanobot plugins enable wecom")
             return
 
         if not self.config.bot_id or not self.config.secret:
@@ -492,12 +493,11 @@ class WecomChannel(BaseChannel):
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through WeCom."""
         if not self._client:
-            self.logger.warning("client not initialized")
-            return
+            raise RuntimeError("WeCom client not initialized")
 
         try:
             content = (msg.content or "").strip()
-            is_progress = bool(msg.metadata.get("_progress"))
+            is_progress = isinstance(msg.event, ProgressEvent)
 
             # Get the stored frame for this chat
             frame = self._chat_frames.get(msg.chat_id)
@@ -552,3 +552,4 @@ class WecomChannel(BaseChannel):
 
         except Exception:
             self.logger.exception("Error sending message to chat_id={}", msg.chat_id)
+            raise

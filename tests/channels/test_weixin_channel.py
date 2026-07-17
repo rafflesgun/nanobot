@@ -10,6 +10,7 @@ import httpx
 import pytest
 
 import nanobot.channels.weixin as weixin_mod
+from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.weixin import (
     ITEM_IMAGE,
@@ -34,6 +35,23 @@ def _make_channel() -> tuple[WeixinChannel, MessageBus]:
         bus,
     )
     return channel, bus
+
+
+@pytest.fixture
+def no_qr_poll_delay(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep QR state-machine tests event-driven without one-second polling sleeps."""
+    real_sleep = asyncio.sleep
+
+    async def yield_to_loop(_delay: float) -> None:
+        await real_sleep(0)
+
+    class AsyncioProxy:
+        sleep = staticmethod(yield_to_loop)
+
+        def __getattr__(self, name: str):
+            return getattr(asyncio, name)
+
+    monkeypatch.setattr(weixin_mod, "asyncio", AsyncioProxy())
 
 
 def test_make_headers_includes_route_tag_when_configured() -> None:
@@ -445,7 +463,9 @@ async def test_poll_once_pauses_session_on_expired_errcode() -> None:
 
 
 @pytest.mark.asyncio
-async def test_qr_login_refreshes_expired_qr_and_then_succeeds() -> None:
+async def test_qr_login_refreshes_expired_qr_and_then_succeeds(
+    no_qr_poll_delay,
+) -> None:
     channel, _bus = _make_channel()
     channel._running = True
     channel._save_state = lambda: None
@@ -477,7 +497,9 @@ async def test_qr_login_refreshes_expired_qr_and_then_succeeds() -> None:
 
 
 @pytest.mark.asyncio
-async def test_qr_login_returns_false_after_too_many_expired_qr_codes() -> None:
+async def test_qr_login_returns_false_after_too_many_expired_qr_codes(
+    no_qr_poll_delay,
+) -> None:
     channel, _bus = _make_channel()
     channel._running = True
     channel._print_qr_code = lambda url: None
@@ -504,7 +526,9 @@ async def test_qr_login_returns_false_after_too_many_expired_qr_codes() -> None:
 
 
 @pytest.mark.asyncio
-async def test_qr_login_switches_polling_base_url_on_redirect_status() -> None:
+async def test_qr_login_switches_polling_base_url_on_redirect_status(
+    no_qr_poll_delay,
+) -> None:
     channel, _bus = _make_channel()
     channel._running = True
     channel._save_state = lambda: None
@@ -536,7 +560,9 @@ async def test_qr_login_switches_polling_base_url_on_redirect_status() -> None:
 
 
 @pytest.mark.asyncio
-async def test_qr_login_redirect_without_host_keeps_current_polling_base_url() -> None:
+async def test_qr_login_redirect_without_host_keeps_current_polling_base_url(
+    no_qr_poll_delay,
+) -> None:
     channel, _bus = _make_channel()
     channel._running = True
     channel._save_state = lambda: None
@@ -568,7 +594,9 @@ async def test_qr_login_redirect_without_host_keeps_current_polling_base_url() -
 
 
 @pytest.mark.asyncio
-async def test_qr_login_resets_redirect_base_url_after_qr_refresh() -> None:
+async def test_qr_login_resets_redirect_base_url_after_qr_refresh(
+    no_qr_poll_delay,
+) -> None:
     channel, _bus = _make_channel()
     channel._running = True
     channel._save_state = lambda: None
@@ -686,7 +714,8 @@ async def test_send_progress_message_keeps_typing_indicator() -> None:
                 "chat_id": "wx-user",
                 "content": "thinking",
                 "media": [],
-                "metadata": {"_progress": True},
+                "event": ProgressEvent(content="thinking"),
+                "metadata": {},
             },
         )()
     )
@@ -857,7 +886,9 @@ async def test_get_typing_ticket_failure_uses_backoff_and_cached_ticket(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_qr_login_treats_temporary_connect_error_as_wait_and_recovers() -> None:
+async def test_qr_login_treats_temporary_connect_error_as_wait_and_recovers(
+    no_qr_poll_delay,
+) -> None:
     channel, _bus = _make_channel()
     channel._running = True
     channel._save_state = lambda: None
@@ -885,7 +916,9 @@ async def test_qr_login_treats_temporary_connect_error_as_wait_and_recovers() ->
 
 
 @pytest.mark.asyncio
-async def test_qr_login_treats_5xx_gateway_response_error_as_wait_and_recovers() -> None:
+async def test_qr_login_treats_5xx_gateway_response_error_as_wait_and_recovers(
+    no_qr_poll_delay,
+) -> None:
     channel, _bus = _make_channel()
     channel._running = True
     channel._save_state = lambda: None
@@ -1409,7 +1442,8 @@ async def test_buffer_single_tool_hint_not_sent_immediately() -> None:
                 "chat_id": "wx-user",
                 "content": "Using tool",
                 "media": [],
-                "metadata": {"_progress": True, "_tool_hint": True},
+                "event": ProgressEvent(content="Using tool", tool_hint=True),
+                "metadata": {},
             },
         )()
     )
@@ -1437,7 +1471,8 @@ async def test_buffer_multiple_tool_hints_flushed_on_final_answer() -> None:
                     "chat_id": "wx-user",
                     "content": hint,
                     "media": [],
-                    "metadata": {"_progress": True, "_tool_hint": True},
+                    "event": ProgressEvent(content=hint, tool_hint=True),
+                    "metadata": {},
                 },
             )()
         )
@@ -1482,7 +1517,8 @@ async def test_thought_progress_flushes_tool_hints() -> None:
                 "chat_id": "wx-user",
                 "content": "search 'foo'",
                 "media": [],
-                "metadata": {"_progress": True, "_tool_hint": True},
+                "event": ProgressEvent(content="search 'foo'", tool_hint=True),
+                "metadata": {},
             },
         )()
     )
@@ -1497,7 +1533,8 @@ async def test_thought_progress_flushes_tool_hints() -> None:
                 "chat_id": "wx-user",
                 "content": "Let me think...",
                 "media": [],
-                "metadata": {"_progress": True},
+                "event": ProgressEvent(content="Let me think..."),
+                "metadata": {},
             },
         )()
     )
@@ -1547,7 +1584,8 @@ async def test_reasoning_delta_does_not_flush_tool_hints() -> None:
                 "chat_id": "wx-user",
                 "content": "search 'foo'",
                 "media": [],
-                "metadata": {"_progress": True, "_tool_hint": True},
+                "event": ProgressEvent(content="search 'foo'", tool_hint=True),
+                "metadata": {},
             },
         )()
     )
@@ -1561,7 +1599,8 @@ async def test_reasoning_delta_does_not_flush_tool_hints() -> None:
                 "chat_id": "wx-user",
                 "content": "Thinking step 1...",
                 "media": [],
-                "metadata": {"_progress": True, "_reasoning_delta": True},
+                "event": ProgressEvent(content="Thinking step 1...", reasoning_delta=True),
+                "metadata": {},
             },
         )()
     )
@@ -1610,7 +1649,8 @@ async def test_empty_progress_message_does_not_flush_tool_hints() -> None:
                 "chat_id": "wx-user",
                 "content": "search 'foo'",
                 "media": [],
-                "metadata": {"_progress": True, "_tool_hint": True},
+                "event": ProgressEvent(content="search 'foo'", tool_hint=True),
+                "metadata": {},
             },
         )()
     )
@@ -1624,7 +1664,8 @@ async def test_empty_progress_message_does_not_flush_tool_hints() -> None:
                 "chat_id": "wx-user",
                 "content": "",
                 "media": [],
-                "metadata": {"_progress": True, "_tool_events": [{"phase": "end"}]},
+                "event": ProgressEvent(tool_events=[{"phase": "end"}]),
+                "metadata": {},
             },
         )()
     )
@@ -1671,7 +1712,8 @@ async def test_buffer_flush_refreshes_context_token() -> None:
                 "chat_id": "wx-user",
                 "content": "hint",
                 "media": [],
-                "metadata": {"_progress": True, "_tool_hint": True},
+                "event": ProgressEvent(content="hint", tool_hint=True),
+                "metadata": {},
             },
         )()
     )
@@ -1712,7 +1754,8 @@ async def test_buffer_flush_failure_does_not_block_final_answer() -> None:
                 "chat_id": "wx-user",
                 "content": "hint",
                 "media": [],
-                "metadata": {"_progress": True, "_tool_hint": True},
+                "event": ProgressEvent(content="hint", tool_hint=True),
+                "metadata": {},
             },
         )()
     )
@@ -1753,12 +1796,13 @@ async def test_buffer_flushed_on_stream_end() -> None:
                 "chat_id": "wx-user",
                 "content": "hint",
                 "media": [],
-                "metadata": {"_progress": True, "_tool_hint": True},
+                "event": ProgressEvent(content="hint", tool_hint=True),
+                "metadata": {},
             },
         )()
     )
 
-    await channel.send_delta("wx-user", "", {"_stream_end": True})
+    await channel.send_delta("wx-user", "", stream_end=True)
 
     channel._send_text.assert_awaited_once_with("wx-user", "hint", "ctx-1")
     assert "wx-user" not in channel._pending_tool_hints
@@ -1826,7 +1870,8 @@ async def test_send_tool_hints_false_drops_tool_hints() -> None:
                 "chat_id": "wx-user",
                 "content": "hint",
                 "media": [],
-                "metadata": {"_progress": True, "_tool_hint": True},
+                "event": ProgressEvent(content="hint", tool_hint=True),
+                "metadata": {},
             },
         )()
     )

@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
-from nanobot.agent.tools.context import ContextAware, RequestContext
+from nanobot.agent.tools.context import current_request_context
 from nanobot.agent.tools.schema import (
     IntegerSchema,
     StringSchema,
@@ -51,33 +51,27 @@ _CRON_PARAMETERS = tool_parameters_schema(
 
 
 @tool_parameters(_CRON_PARAMETERS)
-class CronTool(Tool, ContextAware):
+class CronTool(Tool):
     """Tool to schedule reminders and recurring tasks."""
 
     def __init__(self, cron_service: CronService, default_timezone: str = "UTC"):
         self._cron = cron_service
         self._default_timezone = default_timezone
-        self._session_key: ContextVar[str] = ContextVar("cron_session_key", default="")
-        self._origin_channel: ContextVar[str] = ContextVar("cron_origin_channel", default="")
-        self._origin_chat_id: ContextVar[str] = ContextVar("cron_origin_chat_id", default="")
-        self._origin_metadata: ContextVar[dict[str, Any] | None] = ContextVar(
-            "cron_origin_metadata",
-            default=None,
-        )
-        self._thread_id_var: ContextVar[int | None] = ContextVar("cron_thread_id", default=None)
         self._in_cron_context: ContextVar[bool] = ContextVar("cron_in_context", default=False)
+        self._compat_context = None
+        self._last_context = None
 
     @property
     def _channel(self) -> str:
-        return self._origin_channel.get()
+        return self._last_context.channel if self._last_context is not None else ""
 
     @property
     def _chat_id(self) -> str:
-        return self._origin_chat_id.get()
+        return self._last_context.chat_id if self._last_context is not None else ""
 
     @property
     def _thread_id(self) -> int | None:
-        return self._thread_id_var.get()
+        return self._last_context.thread_id if self._last_context is not None else None
 
     @classmethod
     def enabled(cls, ctx: Any) -> bool:
@@ -87,17 +81,29 @@ class CronTool(Tool, ContextAware):
     def create(cls, ctx: Any) -> Tool:
         return cls(cron_service=ctx.cron_service, default_timezone=ctx.timezone)
 
-    def set_context(self, ctx: RequestContext, *, thread_id: int | None = None) -> None:
-        """Set the current session context for scheduled cron job ownership."""
+    def set_context(self, ctx) -> None:
+        """Provide routing for legacy direct tool callers.
+
+        Normal turns use ``current_request_context`` and never consult this
+        compatibility snapshot.
+        """
+        self._compat_context = ctx
+        self._last_context = ctx
+
+    def _request_route(self) -> tuple[str, str, str, dict[str, Any], int | None]:
+        """Return routing from the authoritative request snapshot."""
+        ctx = current_request_context() or self._compat_context
+        if ctx is None:
+            return "", "", "", {}, None
+        self._last_context = ctx
         raw_key = f"{ctx.channel}:{ctx.chat_id}" if ctx.channel and ctx.chat_id else ""
-        self._session_key.set(
+        session_key = (
             raw_key if ctx.session_key == UNIFIED_SESSION_KEY else (ctx.session_key or "")
         )
-        self._origin_channel.set(ctx.channel or "")
-        self._origin_chat_id.set(ctx.chat_id or "")
-        self._origin_metadata.set(dict(ctx.metadata or {}))
-        _tid = thread_id or (ctx.thread_id or ctx.metadata.get("message_thread_id"))
-        self._thread_id_var.set(_tid)
+        thread_id = ctx.thread_id
+        if thread_id is None:
+            thread_id = ctx.metadata.get("message_thread_id")
+        return session_key, ctx.channel or "", ctx.chat_id or "", dict(ctx.metadata or {}), thread_id
 
     def set_cron_context(self, active: bool):
         """Mark whether the tool is executing inside a cron job callback."""
@@ -186,11 +192,9 @@ class CronTool(Tool, ContextAware):
                 "describing what to do when the job triggers "
                 "(e.g. the reminder text). Retry including message=\"...\"."
             )
-        session_key = self._session_key.get()
+        session_key, origin_channel, origin_chat_id, origin_metadata, thread_id = self._request_route()
         if not session_key:
             return ToolResult.error("Error: scheduled cron jobs must be created from a chat session")
-        origin_channel = self._origin_channel.get()
-        origin_chat_id = self._origin_chat_id.get()
         if not origin_channel or not origin_chat_id:
             return ToolResult.error("Error: scheduled cron jobs must be created from a chat session")
         if tz and not cron_expr:
@@ -233,8 +237,8 @@ class CronTool(Tool, ContextAware):
             session_key=session_key,
             origin_channel=origin_channel,
             origin_chat_id=origin_chat_id,
-            origin_metadata=dict(self._origin_metadata.get() or {}),
-            thread_id=self._thread_id,
+            origin_metadata=origin_metadata,
+            thread_id=thread_id,
         )
         return f"Created job '{job.name}' (id: {job.id})"
 

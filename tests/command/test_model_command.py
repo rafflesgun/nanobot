@@ -3,6 +3,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import nanobot.agent.loop as agent_loop
+from nanobot.agent.goal_permission import goal_mutation_allowed
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
@@ -28,6 +30,14 @@ def _provider(default_model: str, max_tokens: int = 123) -> MagicMock:
     return provider
 
 
+@pytest.fixture(autouse=True)
+def isolate_model_override_store(monkeypatch) -> None:
+    monkeypatch.setattr(agent_loop, "load_model_overrides", lambda: {})
+    monkeypatch.setattr(agent_loop, "save_model_overrides", lambda _overrides: None)
+    monkeypatch.setattr(agent_loop, "load_temperature_overrides", lambda: {})
+    monkeypatch.setattr(agent_loop, "save_temperature_overrides", lambda _overrides: None)
+
+
 def _make_loop(tmp_path) -> AgentLoop:
     return AgentLoop(
         bus=MessageBus(),
@@ -50,79 +60,90 @@ def _make_loop(tmp_path) -> AgentLoop:
     )
 
 
-def _ctx(loop: AgentLoop, raw: str, args: str = "") -> CommandContext:
-    msg = InboundMessage(channel="cli", sender_id="user", chat_id="direct", content=raw)
-    return CommandContext(msg=msg, session=None, key=msg.session_key, raw=raw, args=args, loop=loop)
+def _ctx(
+    loop: AgentLoop,
+    raw: str,
+    args: str = "",
+    *,
+    key: str | None = None,
+    metadata: dict | None = None,
+) -> CommandContext:
+    msg = InboundMessage(
+        channel="cli",
+        sender_id="user",
+        chat_id="direct",
+        content=raw,
+        metadata=metadata or {},
+    )
+    return CommandContext(msg=msg, session=None, key=key or msg.session_key, raw=raw, args=args, loop=loop)
 
 
 def _ctx_session(loop: AgentLoop, raw: str, args: str = "") -> CommandContext:
     msg = InboundMessage(channel="cli", sender_id="user", chat_id="direct", content=raw)
     return CommandContext(
         msg=msg, session=MagicMock(), key=msg.session_key, raw=raw, args=args, loop=loop,
+        is_user_turn=True,
     )
 
 
 @pytest.mark.asyncio
-async def test_model_command_lists_current_and_available_presets(tmp_path) -> None:
+async def test_model_command_shows_session_override_status(tmp_path) -> None:
     loop = _make_loop(tmp_path)
+    loop._model_overrides["cli:direct"] = "session-model"
 
     out = await cmd_model(_ctx(loop, "/model"))
 
-    assert "Current model: `base-model`" in out.content
-    assert "Current preset: `default`" in out.content
-    assert "Available presets: `default`, `fast`" in out.content
-    assert "`fast`" in out.content
-    assert out.metadata == {"render_as": "text"}
+    assert "Current model: `session-model`" in out.content
+    assert "session override" in out.content
+    assert out.metadata == {"command_response": True}
 
 
 @pytest.mark.asyncio
-async def test_model_command_switches_preset(tmp_path) -> None:
+async def test_model_command_sets_session_override_when_name_matches_preset(tmp_path) -> None:
     loop = _make_loop(tmp_path)
 
     out = await cmd_model(_ctx(loop, "/model fast", args="fast"))
 
-    assert "Switched model preset to `fast`." in out.content
-    assert "Model: `openai/gpt-4.1`" in out.content
-    assert loop.model_preset == "fast"
-    assert loop.model == "openai/gpt-4.1"
-    assert loop.subagents.model == "openai/gpt-4.1"
-    assert loop.consolidator.model == "openai/gpt-4.1"
-
-
-@pytest.mark.asyncio
-async def test_model_command_switches_back_to_default(tmp_path) -> None:
-    loop = _make_loop(tmp_path)
-    loop.set_model_preset("fast")
-
-    out = await cmd_model(_ctx(loop, "/model default", args="default"))
-
-    assert "Switched model preset to `default`." in out.content
-    assert loop.model_preset == "default"
-    assert loop.model == "base-model"
-    assert loop.context_window_tokens == 1000
-
-
-@pytest.mark.asyncio
-async def test_model_command_unknown_preset_keeps_old_state(tmp_path) -> None:
-    loop = _make_loop(tmp_path)
-
-    out = await cmd_model(_ctx(loop, "/model missing", args="missing"))
-
-    assert "Could not switch model preset" in out.content
-    assert "\"model_preset" not in out.content
-    assert "Available presets: `default`, `fast`" in out.content
+    assert "Model switched to `fast` for this session" in out.content
+    assert loop._model_overrides == {"cli:direct": "fast"}
     assert loop.model_preset is None
     assert loop.model == "base-model"
 
 
 @pytest.mark.asyncio
-async def test_model_command_does_not_depend_on_my_allow_set(tmp_path) -> None:
+async def test_model_command_reset_removes_session_override(tmp_path) -> None:
     loop = _make_loop(tmp_path)
-    assert loop.tools_config.my.allow_set is False
+    loop._model_overrides["cli:direct"] = "session-model"
 
-    await cmd_model(_ctx(loop, "/model fast", args="fast"))
+    out = await cmd_model(_ctx(loop, "/model reset", args="reset"))
 
-    assert loop.model_preset == "fast"
+    assert "Model reset to default: `base-model`" in out.content
+    assert loop._model_overrides == {}
+    assert loop.model_preset is None
+    assert loop.model == "base-model"
+
+
+@pytest.mark.asyncio
+async def test_model_command_accepts_unconfigured_model_name(tmp_path) -> None:
+    loop = _make_loop(tmp_path)
+
+    out = await cmd_model(_ctx(loop, "/model missing", args="missing"))
+
+    assert "Model switched to `missing` for this session" in out.content
+    assert loop._model_overrides == {"cli:direct": "missing"}
+    assert loop.model_preset is None
+    assert loop.model == "base-model"
+
+
+@pytest.mark.asyncio
+async def test_model_command_sets_temperature_without_changing_model_override(tmp_path) -> None:
+    loop = _make_loop(tmp_path)
+
+    out = await cmd_model(_ctx(loop, "/model temp 0.7", args="temp 0.7"))
+
+    assert "Temperature set to `0.7` for this session" in out.content
+    assert loop._temperature_overrides == {"cli:direct": 0.7}
+    assert loop._model_overrides == {}
 
 
 @pytest.mark.asyncio
@@ -131,26 +152,42 @@ async def test_model_command_registered_as_exact_and_prefix(tmp_path) -> None:
     register_builtin_commands(router)
     loop = _make_loop(tmp_path)
 
-    out = await router.dispatch(_ctx(loop, "/model fast"))
+    out = await router.dispatch(_ctx(loop, "/model raw-model"))
 
     assert out is not None
     assert out.channel == "cli"
     assert out.chat_id == "direct"
-    assert out.metadata == {"render_as": "text"}
-    assert out.content == "\n".join([
-        "Switched model preset to `fast`.",
-        "- Model: `openai/gpt-4.1`",
-        "- Context window: 32768",
-        "- Max output tokens: 4096",
-    ])
-    assert loop.model_preset == "fast"
+    assert out.metadata == {"command_response": True}
+    assert "Model switched to `raw-model` for this session" in out.content
+    assert loop._model_overrides == {"cli:direct": "raw-model"}
+
+
+@pytest.mark.asyncio
+async def test_model_command_preserves_topic_metadata(tmp_path) -> None:
+    loop = _make_loop(tmp_path)
+
+    out = await cmd_model(
+        _ctx(
+            loop,
+            "/model topic-model",
+            args="topic-model",
+            key="cli:direct:topic:42",
+            metadata={"message_thread_id": 42},
+        )
+    )
+
+    assert out.metadata == {"message_thread_id": 42, "command_response": True}
+    assert loop._model_overrides == {"cli:direct:topic:42": "topic-model"}
 
 
 def test_model_command_in_help_and_palette() -> None:
     palette = builtin_command_palette()
 
-    assert any(item["command"] == "/model" and item["arg_hint"] == "[preset]" for item in palette)
-    assert "/model [preset]" in build_help_text()
+    model = next(item for item in palette if item["command"] == "/model")
+    assert model["arg_hint"] == "[model-id|reset|temp]"
+    assert model["lifecycle"] == "side_channel"
+    assert model["accepts_args"] is True
+    assert "/model [model-id|reset|temp]" in build_help_text()
 
 
 @pytest.mark.asyncio
@@ -179,16 +216,20 @@ async def test_goal_command_rejects_mid_turn_without_session(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_goal_command_rewrites_to_agent_prompt(tmp_path) -> None:
+async def test_goal_command_marks_turn_and_preserves_explicit_request(tmp_path) -> None:
     loop = _make_loop(tmp_path)
     ctx = _ctx_session(loop, "/goal audit the repo", args="audit the repo")
     out = await cmd_goal(ctx)
     assert out is None
-    assert "audit the repo" in ctx.msg.content
-    assert "long_task" in ctx.msg.content
+    assert ctx.msg.content == "/goal audit the repo"
     assert ctx.msg.metadata.get("original_command") == "/goal"
     assert ctx.msg.metadata.get("original_content") == "/goal audit the repo"
+    assert ctx.msg.metadata.get("goal_requested") is True
     assert isinstance(ctx.msg.metadata.get("goal_started_at"), int | float)
+    assert len(ctx.turn_scopes) == 1
+    with ctx.turn_scopes[0]:
+        assert goal_mutation_allowed() is True
+    assert goal_mutation_allowed() is False
 
 
 @pytest.mark.asyncio
@@ -200,9 +241,41 @@ async def test_goal_command_registered_on_router(tmp_path) -> None:
     out = await router.dispatch(ctx)
     assert out is None
     assert "ship it" in ctx.msg.content
+    assert len(ctx.turn_scopes) == 1
+    with ctx.turn_scopes[0]:
+        assert goal_mutation_allowed() is True
+    assert goal_mutation_allowed() is False
+
+
+@pytest.mark.asyncio
+async def test_goal_command_does_not_allow_internal_turn(tmp_path) -> None:
+    loop = _make_loop(tmp_path)
+    ctx = CommandContext(
+        msg=InboundMessage(
+            channel="cli",
+            sender_id="system",
+            chat_id="direct",
+            content="/goal internal work",
+        ),
+        session=MagicMock(),
+        key="cli:direct",
+        raw="/goal internal work",
+        args="internal work",
+        loop=loop,
+        is_user_turn=False,
+    )
+
+    out = await cmd_goal(ctx)
+
+    assert out is not None
+    assert "only be started by a user" in out.content
+    assert ctx.turn_scopes == []
 
 
 def test_goal_command_in_help_and_palette() -> None:
     palette = builtin_command_palette()
-    assert any(item["command"] == "/goal" and item["arg_hint"] == "<goal>" for item in palette)
+    goal = next(item for item in palette if item["command"] == "/goal")
+    assert goal["arg_hint"] == "<goal>"
+    assert goal["lifecycle"] == "agent_turn_with_args"
+    assert goal["accepts_args"] is True
     assert "/goal <goal>" in build_help_text()
