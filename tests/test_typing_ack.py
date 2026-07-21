@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import AsyncMock, patch
 import asyncio
 
-from nanobot.channels.telegram import TelegramChannel
+from nanobot.channels.telegram.runtime import TelegramChannel
 
 
 @pytest.mark.asyncio

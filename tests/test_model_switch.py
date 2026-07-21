@@ -288,6 +288,7 @@ async def test_model_override_in_system_message():
     msg.chat_id = "telegram:123"  # system messages encode origin in chat_id
     msg.content = "[Subagent 'test' completed successfully]\nTask: test\nResult: done"
     msg.metadata = {}
+    msg.session_key_override = None  # fall back to chat_id-derived session key
 
     # Process the system message
     with (

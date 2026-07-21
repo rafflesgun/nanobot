@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 from pathlib import Path
 
 from nanobot.bus.queue import MessageBus
-from nanobot.channels.telegram import TelegramChannel
+from nanobot.channels.telegram.runtime import TelegramChannel
 from nanobot.config.schema import TelegramConfig
 from nanobot.utils.stats import StatsManager
 

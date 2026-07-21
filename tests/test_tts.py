@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch, MagicMock, AsyncMock
 from nanobot.providers.tts import TTSConfig, EdgeTTSProvider, OpenAITTSProvider
 from nanobot.tts.manager import TTSManager
 from nanobot.bus.queue import MessageBus
-from nanobot.channels.telegram import TelegramChannel
+from nanobot.channels.telegram.runtime import TelegramChannel
 from nanobot.config.schema import TelegramConfig
 from nanobot.utils.audio import convert_to_ogg_opus, get_audio_duration
 
@@ -223,7 +223,7 @@ if __name__ == "__main__":
 
 def test_telegram_tts_overrides_reload_on_startup() -> None:
     with patch(
-        "nanobot.channels.telegram.load_tts_overrides",
+        "nanobot.channels.telegram.runtime.load_tts_overrides",
         return_value={"123:42": {"enabled": True, "voice": "Aria"}},
     ):
         channel = TelegramChannel(TelegramConfig(), MessageBus())

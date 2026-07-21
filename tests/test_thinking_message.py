@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from nanobot.channels.telegram import TelegramChannel
+from nanobot.channels.telegram.runtime import TelegramChannel
 from nanobot.bus.events import OutboundMessage
 from nanobot.config.schema import TelegramConfig
 
@@ -184,8 +184,8 @@ async def test_stream_end_topic_tts_uses_topic_override(monkeypatch):
     async def fake_duration(_data, _fmt):
         return 1.0
 
-    monkeypatch.setattr("nanobot.channels.telegram.TTSManager", FakeTTSManager)
-    monkeypatch.setattr("nanobot.channels.telegram.get_audio_duration", fake_duration)
+    monkeypatch.setattr("nanobot.channels.telegram.runtime.TTSManager", FakeTTSManager)
+    monkeypatch.setattr("nanobot.channels.telegram.runtime.get_audio_duration", fake_duration)
 
     # First delta: starts the streaming preview (send_message → message_id=7777)
     await channel.send_delta("123456", "Hello topic", {"message_thread_id": 77})

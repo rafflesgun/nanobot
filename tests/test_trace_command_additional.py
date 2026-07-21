@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
-from nanobot.channels.telegram import TelegramChannel
+from nanobot.channels.telegram.runtime import TelegramChannel
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import TelegramConfig
 from nanobot.bus.events import OutboundMessage
