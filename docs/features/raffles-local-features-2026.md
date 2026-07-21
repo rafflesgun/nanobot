@@ -10,9 +10,17 @@ and the merge with `origin/main` on 13 June 2026 (99 commits, most local feature
 and the merge with `origin/main` on 23 June 2026 (205 commits; upstream refactored streaming with rich-send, added cron turn coordinator, added gateway service module),
 and the merge with `origin/main` on 1 July 2026 (332 commits; upstream refactored session manager, tool results, web search, model catalog, image generation; local features mostly held in loop.py/schema.py/subagent.py/telegram.py head versions).
 and the merge with `origin/main` on 17 July 2026 (241 commits; upstream runtime resolver, request-scoped tool context, automation coordinators, WebUI, and Telegram streaming changes integrated while retaining local topic routing, session overrides, fallback models, and configured subagents).
+and the merge with `origin/main` on 21 July 2026 (61 commits; upstream refactored channels into self-contained packages — `channels/telegram.py` → `channels/telegram/runtime.py` — and replaced `_process_system_message` with a unified turn state machine; local thread_id propagation re-added in `_turn_route` and `CronPayload.from_store_dict`).
 
 Goal: help future merge conflict resolution (human or agent)  
 understand intended behavior quickly.
+
+> **Structural notes (post 21 July 2026 merge):**
+> - `nanobot/channels/telegram.py` is now the package `nanobot/channels/telegram/`; the channel class lives in `runtime.py`, tests in `nanobot/channels/telegram/tests/`. All `channels/telegram.py` references below mean `channels/telegram/runtime.py`.
+> - `AgentLoop._process_system_message` was removed upstream; system (subagent) messages run through the unified `_process_message` state machine (`_state_restore/compact/command/build/run/save/respond`). System-message outbound metadata (incl. `message_thread_id`) is assembled in `_turn_route`.
+> - Cron jobs load via `CronJob.from_store_dict` / `CronPayload.from_store_dict` in `nanobot/cron/types.py`; the local `thread_id` field must stay in `CronPayload.from_store_dict` (upstream's loader omits it).
+> - `tests/agent/test_runner.py` was split upstream into `tests/agent/test_runner_*.py`.
+> - The forwarded-message "debounce" is implemented as `_inbound_buffers` + `_QueuedTelegramUpdate` + `_flush_media_group` in `channels/telegram/runtime.py`; the word "debounce" does not appear in code.
 
 ## Feature Summary Table
 
@@ -34,7 +42,7 @@ understand intended behavior quickly.
 | OpenAI compat uses `max_completion_tokens` only | ✅  | providers/openai_compat_provider.py                    | tests/providers/test_litellm_kwargs.py | no duplicate `max_tokens` field               |
 | SDK retries disabled + surfaced to progress | ✅     | providers/base.py, providers/*, agent/loop.py         | tests/providers/test_provider_retry.py, tests/agent/test_task_cancel.py | provider SDK retries forced to `0`; retry logs include request id/model/inflight and agent gate occupancy |
 | Fine-grained workspace allowlist for tools   | ✅     | config/schema.py, config/loader.py, cli/commands.py, agent/loop.py, agent/subagent.py, agent/tools/shell.py | tests/config/test_config_migration.py, tests/tools/test_exec_security.py | `restrictToWorkspace = { enabled, extraRead, extraWrite }` |
-| Telegram forwarded message debounce         | ✅     | channels/telegram.py                                   | tests/channels/test_telegram_channel.py | 80ms lane = `chat_id:thread_id`              |
+| Telegram forwarded message debounce         | ✅     | channels/telegram/runtime.py                           | nanobot/channels/telegram/tests/test_telegram_channel.py | 80ms lane = `chat_id:thread_id`              |
 | **TTS voice notes (Edge + OpenAI + Riva)**  | ✅     | providers/tts.py, tts/manager.py, channels/telegram.py, utils/audio.py | tests/test_tts.py                      | schema/config restored; Telegram-local /tts command handler needs re-adding |
 | **/trace command - AI thinking visibility** | ⚠️     | channels/telegram.py                                   | tests/test_trace_command_additional.py | handler and trace dispatch need re-adding after upstream streaming refactor |
 | **/stats command - token usage visibility** | ⚠️     | channels/telegram.py, utils/stats.py                   | tests/test_telegram_stats_command.py   | handler needs re-adding after upstream refactor |
@@ -48,7 +56,7 @@ understand intended behavior quickly.
 | **Commands enhanced for topic support**     | ✅     | channels/telegram.py, agent/loop.py                    | manual                                 | `/new`, `/stop`, `/model`, `/stats`, `/tts`, `/trace` |
 | **Tool definitions caching (#2205)**        | ✅     | agent/tools/registry.py                                | tests/test_tool_registry_caching.py    | `_definitions_cache` invalidated on reg/unreg |
 | **Incremental session saving (#2219)**      | ✅     | agent/loop.py, agent/subagent.py                       | tests/test_loop_incremental_save.py    | save offset tracks persisted content          |
-| **Repeated tool call protection**           | ✅     | agent/runner.py, utils/runtime.py, config/schema.py    | tests/agent/test_runner.py             | `maxRepeatLookups: 2` blocks infinite loops   |
+| **Repeated tool call protection**           | ✅     | agent/runner.py, utils/runtime.py, config/schema.py    | tests/agent/test_runner_*.py           | `maxRepeatLookups: 2` blocks infinite loops   |
 | **Learning loop upgrades (recall + reviewable skills)** | ✅ | session/search.py, agent/tools/session_search.py, agent/skills_manager.py, agent/tools/skill_manage.py, agent/skill_proposals.py, agent/memory.py, command/builtin.py | tests/agent/test_session_search.py, tests/tools/test_session_search_tool.py, tests/command/test_builtin_recall.py, tests/agent/test_skills_manager.py, tests/tools/test_skill_manage_tool.py, tests/agent/test_skill_proposals.py, tests/agent/test_dream.py | `/recall` excludes current session by default; Dream writes proposals to `memory/skill-proposals/`; `skill_manage` mutates workspace skills only |
 | **Skill Scan v1 for workspace skill mutations** | ✅ | skills/scan.py, agent/skills_manager.py, agent/tools/skill_manage.py | tests/skills/test_scan.py, tests/agent/test_skills_manager.py, tests/tools/test_skill_manage_tool.py, tests/agent/test_skill_proposals.py, tests/agent/test_dream.py | `safe` allows writes; `warn` allows writes with findings; `block` rejects create/replace/patch/apply_proposal |
 | **`nanobot doctor` deployment diagnostics** | ✅ | doctor/types.py, doctor/service.py, doctor/checks/*.py, cli/commands.py | tests/doctor/*.py, tests/cli/test_commands.py | `nanobot doctor` local checks by default; `--live` adds bounded provider/MCP probes; `--json` for scripting; exit 1 on failures |
@@ -338,7 +346,7 @@ pytest tests/agent/test_evaluator.py tests/cli/test_commands.py -q
 
 **Files to protect during conflicts**
 - `nanobot/channels/telegram.py`
-- `tests/channels/test_telegram_channel.py`
+- `nanobot/channels/telegram/tests/test_telegram_channel.py`
 
 **Resolution priority**
 Preserve topic-aware lane isolation and command bypass.  
@@ -346,7 +354,7 @@ Do not regress local Telegram features such as topic routing, mention-only mode,
 
 **Quick validation**
 ```bash
-pytest tests/channels/test_telegram_channel.py -q
+pytest nanobot/channels/telegram/tests/test_telegram_channel.py -q
 ```
 
 ### 11. Configurable ACK reaction emoji
@@ -651,7 +659,7 @@ pytest tests/test_loop_incremental_save.py -v
 **Quick validation**
 ```bash
 # Check that repeated read_file calls are blocked after threshold
-pytest tests/agent/test_runner.py -v
+pytest tests/agent/test_runner_core.py tests/agent/test_runner_safety.py -v
 ```
 
 ### 22. Subagent responses preserve topic thread_id
