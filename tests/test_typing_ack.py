@@ -1,8 +1,9 @@
 """Tests for typing indicator and ACK reaction."""
 
-import pytest
-from unittest.mock import AsyncMock, patch
 import asyncio
+from unittest.mock import AsyncMock
+
+import pytest
 
 from nanobot.channels.telegram.runtime import TelegramChannel
 

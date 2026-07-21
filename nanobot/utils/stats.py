@@ -1,10 +1,9 @@
 """Token usage statistics manager."""
 
 import json
-import os
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any, Dict
 
 from loguru import logger
 

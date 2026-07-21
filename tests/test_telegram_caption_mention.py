@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from nanobot.channels.telegram.runtime import TelegramChannel
 from nanobot.bus.queue import MessageBus
+from nanobot.channels.telegram.runtime import TelegramChannel
 from nanobot.config.schema import TelegramConfig
 
 

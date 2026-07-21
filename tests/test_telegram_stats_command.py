@@ -1,15 +1,14 @@
 """Tests for Telegram /stats command functionality."""
 
-import pytest
-from types import SimpleNamespace
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
-from pathlib import Path
+
+import pytest
 
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.telegram.runtime import TelegramChannel
 from nanobot.config.schema import TelegramConfig
-from nanobot.utils.stats import StatsManager
 
 
 class _FakeApp:

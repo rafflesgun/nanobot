@@ -4,14 +4,17 @@
 import os
 import sys
 
+
 def test_riva_tts():
     """Test Riva TTS with minimal setup."""
 
     # Import Riva client
     try:
         import riva.client
-        from riva.client.proto.riva_tts_pb2 import SynthesizeSpeechRequest
         from riva.client.proto.riva_audio_pb2 import AudioEncoding
+        from riva.client.proto.riva_tts_pb2 import (
+            SynthesizeSpeechRequest as SynthesizeSpeechRequest,
+        )
         print("✓ Riva client imports successful")
     except ImportError as e:
         print(f"✗ Failed to import Riva client: {e}")
@@ -26,7 +29,7 @@ def test_riva_tts():
     voice_name = "Magpie-Multilingual.EN-US.Mia.Happy"
     text = "Hello! This is a test of Riva text to speech with emotion."
 
-    print(f"\nConfiguration:")
+    print("\nConfiguration:")
     print(f"  Server: {riva_server_url}")
     print(f"  API Key: {'***' + api_key[-4:] if api_key else 'NOT SET'}")
     print(f"  Function ID: {function_id if function_id else 'NOT SET'}")
@@ -112,9 +115,9 @@ def test_riva_tts():
         traceback.print_exc()
         sys.exit(1)
 
-    print(f"\n4. Converting PCM to WAV and saving...")
-    import wave
+    print("\n4. Converting PCM to WAV and saving...")
     import io
+    import wave
 
     output_file = "/tmp/riva_test_emotion_output.wav"
     wav_buffer = io.BytesIO()

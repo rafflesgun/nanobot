@@ -7,7 +7,7 @@ import traceback
 # Add project root to path
 sys.path.insert(0, os.path.dirname(__file__))
 
-from nanobot.providers.tts import TTSConfig, RivaTTSProvider
+from nanobot.providers.tts import RivaTTSProvider, TTSConfig
 from nanobot.tts.manager import TTSManager
 
 
@@ -42,8 +42,8 @@ async def test_provider_directly():
             # Save to file for verification
             with open("/tmp/test_provider_output.wav", "wb") as f:
                 f.write(audio)
-            print(f"  ✓ Saved to /tmp/test_provider_output.wav")
-            print(f"  Play with: afplay /tmp/test_provider_output.wav")
+            print("  ✓ Saved to /tmp/test_provider_output.wav")
+            print("  Play with: afplay /tmp/test_provider_output.wav")
         else:
             print("  ✗ generate_audio() returned None")
     except Exception as e:
@@ -76,8 +76,8 @@ async def test_manager():
             print(f"  ✓ Got {len(ogg_bytes)} bytes of OGG audio")
             with open("/tmp/test_manager_output.ogg", "wb") as f:
                 f.write(ogg_bytes)
-            print(f"  ✓ Saved to /tmp/test_manager_output.ogg")
-            print(f"  Play with: afplay /tmp/test_manager_output.ogg")
+            print("  ✓ Saved to /tmp/test_manager_output.ogg")
+            print("  Play with: afplay /tmp/test_manager_output.ogg")
         else:
             print("  ✗ generate_voice_note() returned None")
     except Exception as e:

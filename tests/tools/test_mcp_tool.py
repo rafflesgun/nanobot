@@ -486,7 +486,6 @@ async def test_execute_handles_server_cancelled_error() -> None:
 
 @pytest.mark.asyncio
 async def test_execute_reconnects_on_session_terminated() -> None:
-    from mcp.shared.exceptions import McpError
 
     session = SimpleNamespace()
 

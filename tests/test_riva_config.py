@@ -4,6 +4,7 @@
 import os
 import sys
 
+
 def test_riva_config():
     """Test fetching Riva TTS configuration."""
 
@@ -21,7 +22,7 @@ def test_riva_config():
     api_key = os.getenv("NVIDIA_API_KEY")
     function_id = os.getenv("RIVA_FUNCTION_ID", "877104f7-e885-42b9-8de8-f6e4c6303969")
 
-    print(f"\nConfiguration:")
+    print("\nConfiguration:")
     print(f"  Server: {riva_server_url}")
     print(f"  API Key: {'***' + api_key[-4:] if api_key else 'NOT SET'}")
     print(f"  Function ID: {function_id if function_id else 'NOT SET'}")
@@ -72,12 +73,12 @@ def test_riva_config():
         print(f"✓ Got config response: {type(config_response)}")
 
         # Use protobuf's ListFields() to safely inspect the message
-        print(f"\nConfig response fields:")
+        print("\nConfig response fields:")
         for field_descriptor, value in config_response.ListFields():
             print(f"  {field_descriptor.name}: {value}")
 
         # Also try common field names
-        print(f"\nChecking common field names:")
+        print("\nChecking common field names:")
         for field_name in ['model_config', 'voices', 'language_codes', 'sample_rate_hz', 'models']:
             if hasattr(config_response, field_name):
                 try:
@@ -87,7 +88,7 @@ def test_riva_config():
                     print(f"  {field_name}: <error accessing: {e}>")
 
         # Print the full protobuf message as string
-        print(f"\nFull config response:")
+        print("\nFull config response:")
         print(config_response)
 
     except Exception as e:

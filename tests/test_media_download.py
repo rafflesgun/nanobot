@@ -1,8 +1,9 @@
 """Tests for media download saving to workspace/media/."""
 
-import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from nanobot.channels.telegram.runtime import TelegramChannel
 

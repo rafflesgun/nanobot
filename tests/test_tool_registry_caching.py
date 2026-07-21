@@ -1,6 +1,5 @@
 """Tests for tool registry caching functionality."""
 
-import pytest
 
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry

@@ -537,7 +537,7 @@ class CronService:
         try:
             if self.on_job:
                 result = await self.on_job(job)
-                
+
                 # Check for provider error and retry
                 from nanobot.utils.runtime import is_provider_error_message
                 retry_count = 0

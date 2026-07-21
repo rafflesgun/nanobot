@@ -1,13 +1,14 @@
 """Tests for TTS functionality."""
 
-import asyncio
+from unittest.mock import AsyncMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, MagicMock, AsyncMock
-from nanobot.providers.tts import TTSConfig, EdgeTTSProvider, OpenAITTSProvider
-from nanobot.tts.manager import TTSManager
+
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.telegram.runtime import TelegramChannel
 from nanobot.config.schema import TelegramConfig
+from nanobot.providers.tts import EdgeTTSProvider, OpenAITTSProvider, TTSConfig
+from nanobot.tts.manager import TTSManager
 from nanobot.utils.audio import convert_to_ogg_opus, get_audio_duration
 
 

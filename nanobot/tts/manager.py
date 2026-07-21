@@ -1,20 +1,26 @@
 """TTS Manager for handling text-to-speech generation."""
 
 from typing import Optional
+
 from loguru import logger
 
 from nanobot.config.schema import TTSConfig
-from nanobot.providers.tts import BaseTTSProvider, EdgeTTSProvider, OpenAITTSProvider, RivaTTSProvider, TTSConfig as ProviderTTSConfig
-
+from nanobot.providers.tts import (
+    BaseTTSProvider,
+    EdgeTTSProvider,
+    OpenAITTSProvider,
+    RivaTTSProvider,
+)
+from nanobot.providers.tts import TTSConfig as ProviderTTSConfig
 
 
 class TTSManager:
     """Manager for TTS operations with multiple providers."""
-    
+
     def __init__(self, config: TTSConfig):
         self.config = config
         self._provider: Optional[BaseTTSProvider] = None
-    
+
     def _get_provider(self) -> Optional[BaseTTSProvider]:
         """Get the configured TTS provider."""
         # Check if we need to recreate the provider due to configuration change
@@ -23,14 +29,14 @@ class TTSManager:
             current_provider_type = type(self._provider).__name__
             expected_provider_type = {
                 "edge": "EdgeTTSProvider",
-                "openai": "OpenAITTSProvider", 
+                "openai": "OpenAITTSProvider",
                 "riva": "RivaTTSProvider"
             }.get(self.config.provider, None)
-            
+
             if current_provider_type != expected_provider_type:
                 logger.debug(f"Configuration changed: {current_provider_type} -> {expected_provider_type}, recreating provider")
                 self._provider = None
-        
+
         if self._provider is None:
             # Convert schema TTSConfig to provider TTSConfig
             provider_config = ProviderTTSConfig(
@@ -50,7 +56,7 @@ class TTSManager:
                 riva_function_id=self.config.riva_function_id or "",
                 riva_api_key=self.config.riva_api_key,
             )
-            
+
             try:
                 if self.config.provider == "edge":
                     self._provider = EdgeTTSProvider(provider_config)
@@ -69,30 +75,30 @@ class TTSManager:
             except Exception as e:
                 logger.error(f"Error initializing TTS provider: {e}")
                 return None
-        
+
         return self._provider
-    
+
     async def generate_voice_note(self, text: str) -> Optional[bytes]:
         """
         Generate voice note audio in OGG/Opus format for Telegram.
-        
+
         Args:
             text: Text to convert to speech
-            
+
         Returns:
             OGG/Opus audio bytes or None if generation fails
         """
         logger.debug(f"TTS generate_voice_note called with config: enabled={self.config.enabled}, provider={self.config.provider}, voice={self.config.voice}")
-        
+
         if not self.config.enabled:
             logger.debug("TTS is not enabled in config")
             return None
-            
+
         provider = self._get_provider()
         if not provider:
             logger.error("Failed to get TTS provider")
             return None
-        
+
         try:
             # Lazy import audio utilities only when actually generating voice
             from nanobot.utils.audio import convert_to_ogg_opus, get_audio_duration
@@ -100,11 +106,11 @@ class TTSManager:
             # Generate audio using the provider
             logger.info(f"Generating TTS audio with {self.config.provider} provider, voice: {self.config.voice}")
             audio_bytes = await provider.generate_audio(text)
-            
+
             if not audio_bytes:
                 logger.warning("TTS provider returned no audio data")
                 return None
-            
+
             # Convert to OGG/Opus format for Telegram
             if self.config.provider == "edge":
                 # Edge TTS returns MP3
@@ -118,27 +124,28 @@ class TTSManager:
             else:
                 logger.error(f"Unknown provider format for {self.config.provider}")
                 return None
-            
+
             if not ogg_bytes:
                 logger.warning("Audio conversion to OGG/Opus failed")
                 return None
-            
+
             # Log duration for monitoring
             duration = await get_audio_duration(ogg_bytes, input_format="ogg")
             logger.info(f"TTS generated successfully: {duration:.1f}s")
-            
+
             return ogg_bytes
-            
+
         except Exception as e:
             logger.error(f"TTS generation failed: {e}", exc_info=True)
             return None
-    
+
     async def get_supported_voices(self, provider: str | None = None) -> dict:
         """Get supported voices from the current or specified provider."""
         if provider and provider != self.config.provider:
             # Build a temporary provider instance for the requested provider
             # Inherit all settings from current config, only change the provider
-            from nanobot.providers.tts import EdgeTTSProvider, RivaTTSProvider, OpenAITTSProvider, TTSConfig as ProviderTTSConfig
+            from nanobot.providers.tts import EdgeTTSProvider, OpenAITTSProvider, RivaTTSProvider
+            from nanobot.providers.tts import TTSConfig as ProviderTTSConfig
             tmp_config = ProviderTTSConfig(
                 provider=provider,
                 voice=self.config.voice,

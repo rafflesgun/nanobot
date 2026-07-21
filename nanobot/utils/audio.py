@@ -9,10 +9,11 @@ warnings.filterwarnings(
     module="pydub.utils",
 )
 
-from io import BytesIO
-from typing import Optional
-import asyncio
-from loguru import logger
+import asyncio  # noqa: E402
+from io import BytesIO  # noqa: E402
+from typing import Optional  # noqa: E402
+
+from loguru import logger  # noqa: E402
 
 try:
     from pydub import AudioSegment

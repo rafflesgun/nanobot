@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -88,7 +88,8 @@ class ProposalMetadataStore:
 
     def _write(self, data: dict[str, dict[str, Any]]) -> None:
         self._ensure_dir()
-        import tempfile, os
+        import os
+        import tempfile
         tmp = tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False, dir=self.path.parent)
         try:
             tmp.write(json.dumps(data, indent=2, sort_keys=True) + "\n")

@@ -1,9 +1,9 @@
 """Simple smoke tests for the key features - compatible with Python 3.9"""
 
-import pytest
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
-from typing import Dict, Any, Optional, List
+from typing import Dict, Optional
+
+import pytest
 
 
 def test_model_override_storage():

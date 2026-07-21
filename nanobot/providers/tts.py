@@ -1,10 +1,11 @@
 """TTS Provider abstraction layer for Nanobot."""
 
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any
-import asyncio
 from dataclasses import dataclass
+from typing import Any, Dict, Optional
+
 from loguru import logger
+
 
 @dataclass
 class TTSConfig:
@@ -30,15 +31,15 @@ class TTSConfig:
 
 class BaseTTSProvider(ABC):
     """Abstract base class for TTS providers."""
-    
+
     def __init__(self, config: TTSConfig):
         self.config = config
-    
+
     @abstractmethod
     async def generate_audio(self, text: str) -> Optional[bytes]:
         """Generate audio bytes from text."""
         pass
-    
+
     @abstractmethod
     async def get_supported_voices(self) -> Dict[str, Any]:
         """Get list of supported voices for this provider."""
@@ -47,11 +48,11 @@ class BaseTTSProvider(ABC):
 # Placeholder for actual implementations
 class EdgeTTSProvider(BaseTTSProvider):
     """Edge TTS provider using edge-tts library."""
-    
+
     def __init__(self, config: TTSConfig):
         super().__init__(config)
         self._edge_tts = None
-    
+
     async def generate_audio(self, text: str) -> Optional[bytes]:
         """Generate audio using Edge TTS."""
         if not text.strip():
@@ -77,28 +78,28 @@ class EdgeTTSProvider(BaseTTSProvider):
                 pitch=self.config.pitch,
                 volume=volume
             )
-            
+
             audio_chunks = []
             async for chunk in communicate.stream():
                 if chunk["type"] == "audio":
                     audio_chunks.append(chunk["data"])
-            
+
             if not audio_chunks:
                 return None
-                
+
             audio_data = b"".join(audio_chunks)
             return audio_data
         except Exception as e:
             logger.error(f"Error generating audio with Edge TTS: {e}", exc_info=True)
             return None
-    
+
     async def get_supported_voices(self) -> Dict[str, Any]:
         """Get list of supported voices for Edge TTS."""
         try:
             if self._edge_tts is None:
                 import edge_tts
                 self._edge_tts = edge_tts
-            
+
             # Actually fetch voices from the service
             voices = await self._edge_tts.list_voices()
             return {
@@ -119,23 +120,23 @@ class EdgeTTSProvider(BaseTTSProvider):
 
 class OpenAITTSProvider(BaseTTSProvider):
     """OpenAI TTS provider using OpenAI API."""
-    
+
     def __init__(self, config: TTSConfig):
         super().__init__(config)
         self._openai = None
-    
+
     async def generate_audio(self, text: str) -> Optional[bytes]:
         """Generate audio using OpenAI TTS API."""
         if not text.strip():
             return None
-        
+
         import os
         api_key = self.config.openai_api_key or os.getenv("OPENAI_API_KEY")
-        
+
         if not api_key:
             logger.error("OpenAI TTS: No API key provided in config or environment")
             return None
-        
+
         try:
             import openai
             client_kwargs = {"api_key": api_key}
@@ -144,25 +145,25 @@ class OpenAITTSProvider(BaseTTSProvider):
                 client_kwargs["base_url"] = base_url
                 logger.debug(f"OpenAI TTS using custom base URL: {base_url}")
             client = openai.AsyncOpenAI(**client_kwargs)
-            
+
             response = await client.audio.speech.create(
                 model=self.config.openai_model,
                 voice=self.config.voice,
                 input=text,
                 speed=self.config.openai_speed
             )
-            
+
             if hasattr(response, 'content'):
                 logger.debug("OpenAI TTS returned audio content")
                 return response.content
             else:
                 logger.error(f"OpenAI response missing .content → {type(response)}")
                 return None
-                
-        except Exception as e:
+
+        except Exception:
             logger.exception("OpenAI TTS generation failed")
             return None
-    
+
     async def get_supported_voices(self) -> Dict[str, Any]:
         """Get list of supported voices for OpenAI TTS."""
         try:
@@ -184,11 +185,11 @@ class OpenAITTSProvider(BaseTTSProvider):
 
 class RivaTTSProvider(BaseTTSProvider):
     """NVIDIA Riva TTS provider using Riva client library."""
-    
+
     def __init__(self, config: TTSConfig):
         super().__init__(config)
         self._riva_client = None
-    
+
     async def generate_audio(self, text: str) -> Optional[bytes]:
         """Generate audio using NVIDIA Riva TTS."""
         if not text.strip():
@@ -236,10 +237,10 @@ class RivaTTSProvider(BaseTTSProvider):
             # Generate speech using the high-level API
             # The synthesize() method takes parameters directly, not a request object
             # Riva has a 400 char limit per request, so chunk if needed
-            MAX_CHUNK = 390
-            if len(text) > MAX_CHUNK:
+            max_chunk = 390
+            if len(text) > max_chunk:
                 # Split text into chunks at sentence boundaries
-                chunks = self._split_text(text, MAX_CHUNK)
+                chunks = self._split_text(text, max_chunk)
                 logger.debug(f"Text too long ({len(text)} chars), split into {len(chunks)} chunks")
             else:
                 chunks = [text]
@@ -270,11 +271,11 @@ class RivaTTSProvider(BaseTTSProvider):
 
             audio_data = b''.join(all_audio)
             logger.debug(f"Received {len(audio_data)} bytes of audio data")
-            
+
             # Convert PCM to WAV format
-            import wave
             import io
-            
+            import wave
+
             # Create WAV file in memory
             wav_buffer = io.BytesIO()
             with wave.open(wav_buffer, 'wb') as wav_file:
@@ -282,13 +283,13 @@ class RivaTTSProvider(BaseTTSProvider):
                 wav_file.setsampwidth(2)  # 16-bit
                 wav_file.setframerate(22050)
                 wav_file.writeframes(audio_data)
-            
+
             return wav_buffer.getvalue()
-            
+
         except Exception as e:
             logger.error("Error generating audio with NVIDIA Riva TTS: " + str(e).replace("{", "{{").replace("}", "}}"), exc_info=True)
             return None
-    
+
     @staticmethod
     def _split_text(text: str, max_len: int) -> list[str]:
         """Split text into chunks at sentence boundaries."""
@@ -355,7 +356,7 @@ class RivaTTSProvider(BaseTTSProvider):
                 return f"{lang}-{region}"
 
         return "en-US"  # Default
-    
+
     async def get_supported_voices(self) -> Dict[str, Any]:
         """Get list of supported voices for NVIDIA Riva TTS."""
         try:

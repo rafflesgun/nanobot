@@ -99,6 +99,7 @@ from nanobot.utils.runtime import (
 if TYPE_CHECKING:
     from nanobot.agent.tools.mcp import MCPConnection
     from nanobot.config.schema import (
+        AgentsConfig,
         ChannelsConfig,
         ProviderConfig,
         ToolsConfig,

@@ -20,12 +20,6 @@ if TYPE_CHECKING:
     from nanobot.agent.tools.web import WebToolsConfig
 
 
-class Base(BaseModel):
-    """Base model that accepts both camelCase and snake_case keys."""
-
-    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
-
-
 class TTSConfig(Base):
     """TTS configuration for all channels."""
 

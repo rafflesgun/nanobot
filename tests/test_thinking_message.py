@@ -1,10 +1,10 @@
 """Tests for Thinking… placeholder message – only in private chats."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from nanobot.channels.telegram.runtime import TelegramChannel
-from nanobot.bus.events import OutboundMessage
 from nanobot.config.schema import TelegramConfig
 
 
@@ -18,12 +18,12 @@ async def test_thinking_message_private_chat():
     channel = TelegramChannel(config=config, bus=bus)
     channel._app = AsyncMock()
     channel._app.bot = AsyncMock()
-    
+
     # Mock the send_message method
     mock_message = AsyncMock()
     mock_message.message_id = 999
     channel._app.bot.send_message = AsyncMock(return_value=mock_message)
-    
+
     await channel._send_thinking_message(chat_id=123456, is_group=False, thread_id=None)
 
     channel._app.bot.send_message.assert_called_once()
@@ -45,7 +45,7 @@ async def test_no_thinking_message_in_group():
     channel = TelegramChannel(config=config, bus=bus)
     channel._app = AsyncMock()
     channel._app.bot = AsyncMock()
-    
+
     # Mock the send_message method
     channel._app.bot.send_message = AsyncMock(return_value=AsyncMock(message_id=999))
 
@@ -64,12 +64,12 @@ async def test_thinking_message_with_topic():
     channel = TelegramChannel(config=config, bus=bus)
     channel._app = AsyncMock()
     channel._app.bot = AsyncMock()
-    
+
     # Mock the send_message method
     mock_message = AsyncMock()
     mock_message.message_id = 1001
     channel._app.bot.send_message = AsyncMock(return_value=mock_message)
-    
+
     await channel._send_thinking_message(chat_id=123456, is_group=False, thread_id=42)
 
     channel._app.bot.send_message.assert_called_once()
@@ -91,22 +91,22 @@ async def test_thinking_message_composite_key():
     channel = TelegramChannel(config=config, bus=bus)
     channel._app = AsyncMock()
     channel._app.bot = AsyncMock()
-    
+
     # Mock the send_message method
     mock_message = AsyncMock()
     mock_message.message_id = 2002
     channel._app.bot.send_message = AsyncMock(return_value=mock_message)
-    
+
     # Test with different thread IDs to ensure separate keys
     await channel._send_thinking_message(chat_id=123456, is_group=False, thread_id=10)
     assert "123456:10" in channel._thinking_messages
     assert channel._thinking_messages["123456:10"] == 2002
-    
+
     # Different thread ID should create different key
     mock_message2 = AsyncMock()
     mock_message2.message_id = 2003
     channel._app.bot.send_message = AsyncMock(return_value=mock_message2)
-    
+
     await channel._send_thinking_message(chat_id=123456, is_group=False, thread_id=20)
     assert "123456:20" in channel._thinking_messages
     assert channel._thinking_messages["123456:20"] == 2003
@@ -122,13 +122,13 @@ async def test_thinking_message_error_handling():
     channel = TelegramChannel(config=config, bus=bus)
     channel._app = AsyncMock()
     channel._app.bot = AsyncMock()
-    
+
     # Mock send_message to raise an exception
     channel._app.bot.send_message = AsyncMock(side_effect=Exception("API Error"))
-    
+
     # Should not raise an exception even if API fails
     await channel._send_thinking_message(chat_id=123456, is_group=False, thread_id=None)
-    
+
     # Still should have been called once
     channel._app.bot.send_message.assert_called_once()
 
@@ -181,11 +181,7 @@ async def test_stream_end_topic_tts_uses_topic_override(monkeypatch):
             assert text == "Hello topic"
             return b"ogg"
 
-    async def fake_duration(_data, _fmt):
-        return 1.0
-
     monkeypatch.setattr("nanobot.channels.telegram.runtime.TTSManager", FakeTTSManager)
-    monkeypatch.setattr("nanobot.channels.telegram.runtime.get_audio_duration", fake_duration)
 
     # First delta: starts the streaming preview (send_message → message_id=7777)
     await channel.send_delta("123456", "Hello topic", {"message_thread_id": 77})

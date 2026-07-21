@@ -1,6 +1,5 @@
 """Tests for cron job delivery routing: Topic → Topic, Group → Group, DM → DM."""
 
-import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -13,7 +12,6 @@ from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.cron.service import CronService
 from nanobot.cron.types import CronJob, CronJobState, CronPayload, CronSchedule
-
 
 # ---------------------------------------------------------------------------
 # Helpers

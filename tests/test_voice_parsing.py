@@ -5,10 +5,11 @@ import asyncio
 import os
 import sys
 
+
 async def test_voice_parsing():
     """Test that get_supported_voices correctly parses the config."""
 
-    from nanobot.providers.tts import TTSConfig, RivaTTSProvider
+    from nanobot.providers.tts import RivaTTSProvider, TTSConfig
 
     # Create config
     config = TTSConfig(
@@ -49,7 +50,7 @@ async def test_voice_parsing():
             emotion = f" [{voice.get('emotion', 'Neutral')}]" if voice.get('emotion') else ""
             print(f"  {voice['gender']:6} - {voice['name']}{emotion}")
 
-    print(f"\n✅ Voice parsing test completed!")
+    print("\n✅ Voice parsing test completed!")
 
 if __name__ == "__main__":
     asyncio.run(test_voice_parsing())

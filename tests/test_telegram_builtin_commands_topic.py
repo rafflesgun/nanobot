@@ -1,13 +1,11 @@
 """Tests for Telegram builtin commands in topic contexts."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
-from types import SimpleNamespace
+
+import pytest
 
 from nanobot.bus.events import OutboundMessage
-from nanobot.command.builtin import (
-    cmd_status, cmd_stop, cmd_restart, cmd_new, cmd_help, cmd_model
-)
+from nanobot.command.builtin import cmd_help, cmd_model, cmd_new, cmd_restart, cmd_status, cmd_stop
 from nanobot.command.router import CommandContext
 
 
@@ -193,7 +191,7 @@ def test_all_commands_metadata_structure():
     ]
 
     for cmd_func, cmd_name in commands:
-        ctx = _make_context(cmd_name, has_topic=True)
+        _make_context(cmd_name, has_topic=True)
 
         # For async functions, we'd need to run them, but for this check
         # we just verify the function signature and behavior

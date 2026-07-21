@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import re
 import random
+import re
 import time
 import unicodedata
 from contextlib import suppress
@@ -23,7 +23,14 @@ from telegram import (
     Update,
 )
 from telegram.error import BadRequest, NetworkError, TimedOut
-from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 from telegram.request import HTTPXRequest
 
 from nanobot.bus.events import OutboundMessage
@@ -32,10 +39,9 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.command.builtin import build_help_text
 from nanobot.config.paths import get_media_dir, load_tts_overrides
-from nanobot.tts.manager import TTSManager
-from nanobot.utils.audio import get_audio_duration
 from nanobot.config.schema import Base
 from nanobot.security.network import validate_url_target
+from nanobot.tts.manager import TTSManager
 from nanobot.utils.helpers import split_message
 
 TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
@@ -1191,6 +1197,7 @@ class TelegramChannel(BaseChannel):
     async def _on_stats_command(self, update, context) -> None:
         """Handle /stats [all|topic]."""
         from pathlib import Path
+
         from nanobot.utils.stats import StatsManager
         if not update.message or not update.effective_user:
             return

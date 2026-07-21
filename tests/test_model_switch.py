@@ -1,8 +1,9 @@
 """Tests for /model command and per-session model/temperature override."""
 
-import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse

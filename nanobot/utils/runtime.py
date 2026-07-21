@@ -10,7 +10,6 @@ from loguru import logger
 
 from nanobot.utils.helpers import stringify_text_blocks
 
-
 # Third same-target workspace violation in a turn escalates to "stop retrying".
 _MAX_REPEAT_WORKSPACE_VIOLATIONS = 2
 
